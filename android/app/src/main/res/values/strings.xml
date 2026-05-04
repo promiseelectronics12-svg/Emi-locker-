@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">EMI Locker</string>
+
+    <string name="emi_summary">EMI Summary</string>
+    <string name="total_loan">Total Loan</string>
+    <string name="amount_paid">Amount Paid</string>
+    <string name="amount_remaining">Amount Remaining</string>
+    <string name="installments_paid">Installments Paid</string>
+    <string name="installments_remaining">Installments Remaining</string>
+
+    <string name="next_payment">Next Payment</string>
+    <string name="payment_due_date">Payment Due Date</string>
+
+    <string name="contact_dealer">Contact Dealer</string>
+    <string name="view_agreement">View Agreement</string>
+
+    <string name="payment_history">Payment History</string>
+    <string name="notifications">Notifications</string>
+
+    <string name="status_active">Active</string>
+    <string name="status_due_soon">Due Soon</string>
+    <string name="status_overdue">Overdue</string>
+    <string name="status_locked">Locked</string>
+
+    <string name="refresh_status">Refresh Status</string>
+
+    <string name="no_data">No data available</string>
+    <string name="loading">Loading...</string>
+    <string name="error_loading">Error loading data</string>
+    <string name="retry">Retry</string>
+
+    <string name="call_dealer">Call Dealer</string>
+    <string name="whatsapp_dealer">WhatsApp</string>
+
+    <string name="dealer_info">Dealer Information</string>
+    <string name="dealer_name">Dealer Name</string>
+    <string name="dealer_phone">Phone Number</string>
+    <string name="shop_name">Shop Name</string>
+    <string name="shop_address">Shop Address</string>
+
+    <string name="installment">Installment</string>
+    <string name="completed">Completed</string>
+    <string name="pending">Pending</string>
+    <string name="failed">Failed</string>
+
+    <string name="payment_reminder">Payment Reminder</string>
+    <string name="warning">Warning</string>
+    <string name="overdue_alert">Overdue Alert</string>
+    <string name="dealer_message">Dealer Message</string>
+    <string name="payment_confirmation">Payment Confirmation</string>
+
+    <string name="days_remaining">%d days remaining</string>
+    <string name="day_remaining">1 day remaining</string>
+    <string name="due_today">Due today</string>
+    <string name="days_overdue">%d days overdue</string>
+
+    <string name="open_agreement">Open Agreement PDF</string>
+    <string name="agreement_not_available">Agreement PDF not available</string>
+
+    <string name="no_payments">No payment history</string>
+    <string name="no_notifications">No notifications</string>
+
+    <string name="call_permission_required">Phone call permission is required</string>
+    <string name="whatsapp_not_installed">WhatsApp is not installed</string>
+
+    <string name="last_sync">Last updated: %s</string>
+
+    <string name="tap_to_call">Tap to call</string>
+    <string name="tap_for_whatsapp">Tap for WhatsApp</string>
+</resources>

@@ -1,0 +1,17 @@
+# Database artifacts - never commit
+*.sql.backup
+*.dump
+*.pg
+*.psql
+
+# PostgreSQL
+postgresql.conf
+pg_hba.conf
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

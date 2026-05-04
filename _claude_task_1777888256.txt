@@ -1,0 +1,492 @@
+You are a Code Reviewer for the EMI Locker Platform.
+Review the implementation of module: dealer-app-foundation
+
+This is a SECURITY-CRITICAL Android MDM app. Score strictly. 95+ = PRODUCTION READY.
+
+IMPORTANT: Base your review on the ACTUAL FILE CONTENTS below, not on the worker summary.
+
+=== ACTUAL FILE CONTENTS ON DISK ===
+// === dealer-app/lib/core/config/env_config.dart ===
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+class ConfigurationError extends StateError {
+  ConfigurationError(super.message);
+}
+
+class EnvConfig {
+  EnvConfig._();
+
+  static String get apiBaseUrl {
+    final url = dotenv.env['API_BASE_URL'];
+    if (url == null || url.isEmpty) {
+      throw ConfigurationError('API_BASE_URL environment variable is not set');
+    }
+    return url;
+  }
+
+  static String get qrProvisioningUrl {
+    final url = dotenv.env['QR_PROVISIONING_URL'];
+    if (url == null || url.isEmpty) {
+      throw ConfigurationError('QR_PROVISIONING_URL environment variable is not set');
+    }
+    return url;
+  }
+
+  static String get firebaseApiKey {
+    final key = dotenv.env['FIREBASE_API_KEY'];
+    if (key == null || key.isEmpty) {
+      throw ConfigurationError('FIREBASE_API_KEY environment variable is not set');
+    }
+    return key;
+  }
+
+  static String get firebaseAppId {
+    final id = dotenv.env['FIREBASE_APP_ID'];
+    if (id == null || id.isEmpty) {
+      throw ConfigurationError('FIREBASE_APP_ID environment variable is not set');
+    }
+    return id;
+  }
+
+  static String get firebaseProjectId {
+    final id = dotenv.env['FIREBASE_PROJECT_ID'];
+    if (id == null || id.isEmpty) {
+      throw ConfigurationError('FIREBASE_PROJECT_ID environment variable is not set');
+    }
+    return id;
+  }
+
+  static String get firebaseMessagingSenderId {
+    final id = dotenv.env['FIREBASE_MESSAGING_SENDER_ID'];
+    if (id == null || id.isEmpty) {
+      throw ConfigurationError('FIREBASE_MESSAGING_SENDER_ID environment variable is not set');
+    }
+    return id;
+  }
+
+  static String get firebaseDatabaseUrl {
+    final url = dotenv.env['FIREBASE_DATABASE_URL'];
+    if (url == null || url.isEmpty) {
+      throw ConfigurationError('FIREBASE_DATABASE_URL environment variable is not set');
+    }
+    return url;
+  }
+
+  static List<String> get pinnedSpkiHashes {
+    final hashes = dotenv.env['PINNED_SPKI_HASHES'];
+    if (hashes == null || hashes.isEmpty) retur
+
+// === dealer-app/lib/core/constants/app_constants.dart ===
+class AppConstants {
+  static const String appName = 'EMI Locker Dealer';
+  static const String appVersion = '1.0.0';
+  static const int maxLoginAttempts = 5;
+  static const Duration sessionTimeout = Duration(minutes: 30);
+  static const Duration tokenRefreshBuffer = Duration(minutes: 5);
+  static const bool requireBiometric = false;
+  static const bool require2FA = true;
+  static const int qrCodeValiditySeconds = 300;
+  static const int pinLength = 6;
+  static const List<String> supportedLanguages = ['en', 'es', 'fr'];
+}
+
+// === dealer-app/lib/core/constants/constants.dart ===
+import 'api_constants.dart';
+import 'app_constants.dart';
+
+class StorageKeys {
+  static const String accessToken = 'access_token';
+  static const String refreshToken = 'refresh_token';
+  static const String userRole = 'user_role';
+  static const String userId = 'user_id';
+  static const String dealerId = 'dealer_id';
+  static const String resellerId = 'reseller_id';
+  static const String deviceId = 'device_id';
+  static const String userData = 'user_data';
+  static const String biometricEnabled = 'biometric_enabled';
+  static const String twoFactorEnabled = 'two_factor_enabled';
+  static const String setupCompleted = 'setup_completed';
+  static const String hmacSecret = 'hmac_secret';
+  static const String nonce = 'command_nonce';
+  static const String lastTimestamp = 'command_timestamp';
+}
+
+
+// === dealer-app/lib/core/di/injection.dart ===
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:get_it/get_it.dart';
+import '../config/env_config.dart';
+import '../network/api_client.dart';
+import '../services/firebase_service.dart';
+import '../security/command_signer.dart';
+import '../security/hardware_binding.dart';
+
+final getIt = GetIt.instance;
+
+class Injection {
+  Injection._();
+
+  static late ApiClient apiClient;
+  static late FirebaseService firebaseService;
+  static late FlutterSecureStorage secureStorage;
+  static late CommandSigner commandSigner;
+  static late HardwareBinding hardwareBinding;
+
+  static Future<void> init() async {
+    secureStorage = const FlutterSecureStorage(
+      aOptions: AndroidOptions(encryptedSharedPreferences: true),
+      iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock_this_device),
+    );
+
+    apiClient = ApiClient(storage: secureStorage);
+    firebaseService = FirebaseService();
+    commandSigner = CommandSigner();
+    hardwareBinding = HardwareBinding();
+
+    await firebaseService.initialize();
+    EnvConfig.validateAll();
+
+    getIt.registerLazySingleton<ApiClient>(() => apiClient);
+    getIt.registerLazySingleton<FirebaseService>(() => firebaseService);
+    getIt.registerLazySingleton<FlutterSecureStorage>(() => secureStorage);
+    getIt.registerLazySingleton<CommandSigner>(() => commandSigner);
+    getIt.registerLazySingleton<HardwareBinding>(() => hardwareBinding);
+  }
+
+  static Future<void> dispose() async {
+    await firebaseService.dispose();
+    await getIt.reset();
+  }
+}
+
+
+// === dealer-app/lib/core/network/api_client.dart ===
+import 'dart:convert';
+import 'dart:io';
+import 'package:crypto/crypto.dart';
+import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../config/env_config.dart';
+import '../constants/constants.dart';
+import 'interceptors/auth_interceptor.dart';
+
+class ApiClient {
+  late final Dio dio;
+  final FlutterSecureStorage _storage;
+  final String _baseUrl;
+
+  ApiClient({String? baseUrl, FlutterSecureStorage? storage})
+      : _storage = storage ?? const FlutterSecureStorage(
+            aOptions: AndroidOptions(encryptedSharedPreferences: true),
+            iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock_this_device),
+          ),
+        _baseUrl = baseUrl ?? EnvConfig.apiBaseUrl {
+    dio = Dio(_baseOptions);
+    _configureInterceptors();
+    _configureCertificatePinning();
+  }
+
+  BaseOptions get _baseOptions => BaseOptions(
+        baseUrl: _baseUrl,
+        connectTimeout: EnvConfig.connectTimeout,
+        receiveTimeout: EnvConfig.receiveTimeout,
+        sendTimeout: EnvConfig.sendTimeout,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      );
+
+  void _configureInterceptors() {
+    dio.interceptors.addAll([
+      AuthInterceptor(dio: dio, storage: _storage),
+      if (kDebugMode && EnvConfig.isDevelopment)
+        _RedactingLogInterceptor(requestBody: true, responseBody: true),
+    ]);
+  }
+
+  void _configureCertificatePinning() {
+    final uri = Uri.parse(_baseUrl);
+    final isLocalHost = uri.host == 'localhost' || uri.host == '10.0.2.2' || uri.host == '127.0.0.1';
+    if ((isLocalHost || EnvConfig.isLocalApi) && kDebugMode) return;
+
+    dio.httpClientAdapter = IOHttpClientAdapter(
+      createHttpClient: () {
+        final client = HttpClient();
+        client.badCertificateCallback = (X509Certificate cert, String host, int port) {
+          final pinnedH
+
+// === dealer-app/lib/core/network/interceptors/auth_interceptor.dart ===
+import 'dart:async';
+import 'package:dio/dio.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../../config/env_config.dart';
+import '../../constants/constants.dart';
+
+class AuthInterceptor extends Interceptor {
+  final Dio dio;
+  final FlutterSecureStorage storage;
+  final Dio _refreshDio;
+
+  Completer<bool>? _refreshCompleter;
+  bool _isRefreshing = false;
+  final List<_QueuedRequest> _pendingRequests = [];
+
+  AuthInterceptor({required this.dio, required this.storage})
+      : _refreshDio = Dio(
+          BaseOptions(
+            baseUrl: EnvConfig.apiBaseUrl,
+            connectTimeout: EnvConfig.connectTimeout,
+            receiveTimeout: EnvConfig.receiveTimeout,
+          ),
+        );
+
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) async {
+    if (_isRefreshing) {
+      await _refreshCompleter?.future;
+    }
+
+    final token = await storage.read(key: StorageKeys.accessToken);
+    if (token != null) {
+      options.headers['Authorization'] = 'Bearer $token';
+    }
+    handler.next(options);
+  }
+
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) async {
+    if (err.response?.statusCode == 401) {
+      if (!_isRefreshing) {
+        _isRefreshing = true;
+        _refreshCompleter = Completer<<voidvoid>();
+
+        try {
+          final refreshed = await _refreshToken();
+
+          if (refreshed) {
+            final token = await storage.read(key: 'access_token');
+            err.requestOptions.headers['Authorization'] = 'Bearer $token';
+
+            await _flushPendingRequests(token!);
+            _refreshCompleter?.complete();
+
+            final retryResponse = await dio.fetch(err.requestOptions);
+            return handler.resolve(retryResponse);
+          } else {
+            await _clearAuth();
+            _refreshCompleter?.completeError('Refresh failed');
+            handler.next(err);
+          }
+        } catch (e) {
+          _refreshCompleter?.complete
+
+// === dealer-app/lib/core/network/interceptors/cert_pinning_interceptor.dart ===
+import 'dart:convert';
+import 'dart:io';
+import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:crypto/crypto.dart';
+import '../../config/env_config.dart';
+
+class CertificatePinningInterceptor extends Interceptor {
+  bool _initialized = false;
+  bool _initFailed = false;
+  SecurityContext? _securityContext;
+
+  @override
+  void onRequest(
+    RequestOptions options,
+    RequestInterceptorHandler handler,
+  ) async {
+    if (EnvConfig.isLocalApi || EnvConfig.shouldDisableCertificatePinning) {
+      handler.next(options);
+      return;
+    }
+
+    if (_initFailed && EnvConfig.isProduction) {
+      handler.reject(
+        DioException(
+          requestOptions: options,
+          error: 'Certificate pinning initialization failed. Cannot make secure requests.',
+          type: DioExceptionType.badResponse,
+        ),
+      );
+      return;
+    }
+
+    if (!_initialized) {
+      await _initSecurityContext();
+    }
+
+    if (_securityContext != null) {
+      options.extra['securityContext'] = _securityContext;
+    }
+
+    handler.next(options);
+  }
+
+  Future<void> _initSecurityContext() async {
+    try {
+      final context = SecurityContext(withTrustedRoots: true);
+      final certData = await rootBundle.load('assets/certs/server.crt');
+      context.setTrustedCertificatesBytes(certData.buffer.asUint8List());
+      _securityContext = context;
+    } catch (e) {
+      if (kDebugMode) {
+        print('CertificatePinningInterceptor: Failed to load certificate: $e');
+      }
+      _initFailed = true;
+      if (EnvConfig.isProduction) {
+        throw Exception('Certificate pinning is mandatory in production. Failed to initialize: $e');
+      }
+    }
+    _initialized = true;
+  }
+
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) async {
+    if (_isCertificateError(err)) {
+      debugPrint('Certificate pinning validation failed: ${err.message}');
+      i
+
+// === dealer-app/lib/core/security/command_signer.dart ===
+import 'dart:convert';
+import 'dart:io';
+import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
+import '../constants/constants.dart';
+
+class CommandSigner {
+  CommandSigner._();
+
+  static Future<String> signCommand({
+    required String action,
+    required String deviceImei,
+    String? serial,
+    String? nonce,
+    String? timestamp,
+  }) async {
+    final signingNonce = nonce ?? _generateNonce();
+    final signingTimestamp = timestamp ?? _generateTimestamp();
+
+    final payload = _buildCanonicalPayload(
+      action: action,
+      deviceImei: deviceImei,
+      serial: serial,
+      timestamp: signingTimestamp,
+      nonce: signingNonce,
+    );
+
+    final signature = await _computeHmac(payload);
+    return signature;
+  }
+
+  static String _buildCanonicalPayload({
+    required String action,
+    required String deviceImei,
+    String? serial,
+    required String timestamp,
+    required String nonce,
+  }) {
+    return '$action|$deviceImei|${serial ?? ''}|${timestamp}|${nonce}';
+  }
+
+  static Future<String> _computeHmac(String payload) async {
+    final secret = await _getHmacSecret();
+    if (secret == null || secret.isEmpty) {
+      throw StateError('HMAC secret not configured. Ensure hmac_signing_secret is set in SecureStorage.');
+    }
+
+    final key = utf8.encode(secret);
+    final bytes = utf8.encode(payload);
+    final hmacSha256 = Hmac(sha256, key);
+    final digest = hmacSha256.convert(bytes);
+    return digest.toString();
+  }
+
+  static Future<String?> _getHmacSecret() async {
+    return null;
+  }
+
+  static String _generateNonce() {
+    final now = DateTime.now();
+    return '${now.microsecondsSinceEpoch}';
+  }
+
+  static String _generateTimestamp() {
+    return DateTime.now().millisecondsSinceEpoch.toString();
+  }
+
+  static Future<bool> verifySignature({
+    required String signature,
+    required String action,
+    required String deviceImei,
+    String? serial,
+    required String timestamp,
+    required String nonce,
+  }) async {
+ 
+
+=== WORKER IMPLEMENTATION NOTES ===
+[0m
+> build · MiniMax-M2.7
+[0m
+[0m# [0mTodos
+[ ] Create dealer-app directory structure and pubspec.yaml
+[ ] Create main.dart with role detection
+[ ] Create shared layer (theme, API client, models, widgets)
+[ ] Create auth feature (login, 2FA, password change)
+[ ] Create dealer feature screens
+[ ] Create reseller feature screens
+[ ] Create .env.example and configuration files
+[0m
+[93m[1m! [0mpermission requested: external_directory (D:\dealer-app\lib\features\auth\*, D:\dealer-app\lib\features\dealer\*, D:\dealer-app\lib\features\reseller\*, D:\dealer-app\lib\shared\*, D:\dealer-app\assets\*); auto-rejecting
+[0m✗ [0mbash failed
+[91m[1mError: [0mThe user rejected permission to use this specific tool call.
+
+Score rubric (start at 100, deduct):
+  -20 per HIGH   (runtime crash, auth bypass, data loss, wrong API call)
+  -10 per MEDIUM (missing PRD feature, weak validation, wrong abstraction)
+   -3 per LOW    (code style, redundant logic)
+
+Award 95+ ONLY if ALL pass:
+  - Every endpoint in PRD spec present and correctly implemented
+  - No runtime crashes, undefined references, missing imports
+  - All auth/RBAC middleware applied — no unprotected endpoint
+  - No SQL injection, no hardcoded secrets, no auth bypass
+  - All state machine transitions match PRD exactly
+  - HMAC signing, JWT verification, 2FA checks present where required
+
+Status: 'approved' = score>=95 AND no HIGH issues. Otherwise 'needs_changes'.
+
+CRITICAL INSTRUCTION: Output RAW JSON ONLY. Do NOT use markdown code blocks (```json). Do NOT add ANY conversational text before or after the JSON.
+{"status": "approved|needs_changes", "score": 0-100, "issues": [{"severity": "high|medium|low", "description": "...", "fix": "..."}]}
+
+=== PRD REFERENCE ===
+# EMI Locker PRD — Compressed Summary (auto-generated by Executor)
+
+```json
+{
+  "understood": true,
+  "critical_security": [
+    "Device Owner Policy via AMAPI — blocks uninstall, ADB, Developer Options, permission revocation; foundation of all enforcement",
+    "Command Signing with HSM — every lock/unlock/decouple command signed with device IMEI + timestamp + nonce to prevent replay and forgery",
+    "Factory Reset Protection via Managed Google Account — AMAPI-provisioned account prevents post-reset use without our credentials",
+    "Hardware Binding — commands tied to IMEI + Serial + SoC so stolen commands cannot work on another device",
+    "Certificate Pinning — prevents MITM and fake server interception at the network layer"
+  ],
+  "phase1_order": [
+    "AMAPI setup + Google Cloud project",
+    "PostgreSQL schema (users, devices, keys, emi, audit_log, security_events)",
+    "Firebase Realtime DB structure (devices, commands, alerts)",
+    "Device Owner QR provisioning flow",
+    "Basic lock/unlock via FCM + command signing",
+    "Admin Panel bare bones (device list, lock/unlock actions)"
+  ]
+}
+```

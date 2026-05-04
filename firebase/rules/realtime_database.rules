@@ -1,0 +1,7 @@
+{
+  "rules": {
+    // Replace with real domain before deploy
+    ".read": false,
+    ".write": false
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "emi-builder-monitor",
+  "version": "1.0.0",
+  "description": "Live browser dashboard to monitor the EMI autonomous builder",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "chokidar": "^3.5.3",
+    "express": "^4.18.2"
+  }
+}

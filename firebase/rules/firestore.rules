@@ -1,0 +1,86 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isDealerOrAdmin() {
+      return isAuthenticated() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'dealer'];
+    }
+
+    // User documents - users can read their own data, admins can read all
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAdmin();
+      allow update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Device documents - owners and dealers can read, admins can write
+    match /devices/{deviceId} {
+      allow read: if isAuthenticated() &&
+        (resource.data.ownerId == request.auth.uid ||
+         resource.data.dealerId == request.auth.uid ||
+         isAdmin());
+      allow create: if isDealerOrAdmin();
+      allow update: if isDealerOrAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // EMI Schedules - owners and dealers can read, admins can write
+    match /emi_schedules/{scheduleId} {
+      allow read: if isAuthenticated() &&
+        (resource.data.userId == request.auth.uid ||
+         resource.data.dealerId == request.auth.uid ||
+         isAdmin());
+      allow create: if isDealerOrAdmin();
+      allow update: if isDealerOrAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Payments - owners and dealers can read, admins can write
+    match /payments/{paymentId} {
+      allow read: if isAuthenticated() &&
+        (resource.data.userId == request.auth.uid ||
+         resource.data.dealerId == request.auth.uid ||
+         isAdmin());
+      allow create: if isDealerOrAdmin();
+      allow update: if isDealerOrAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Audit log - only admins can read/write
+    match /audit_log/{logId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Device commands - only admins can write, devices can read their own
+    match /device_commands/{commandId} {
+      allow read: if isAuthenticated() &&
+        (resource.data.deviceId == request.auth.uid || isAdmin());
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Notifications - users can read their own
+    match /notifications/{notificationId} {
+      allow read: if isOwner(resource.data.userId);
+      allow create: if isDealerOrAdmin();
+      allow update: if isOwner(resource.data.userId) || isAdmin();
+      allow delete: if isOwner(resource.data.userId);
+    }
+  }
+}

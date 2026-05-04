@@ -1,0 +1,174 @@
+-- EMI Locker Platform - EMI Module Database Schema
+-- Run this migration to set up EMI-related tables and functions
+
+-- EMI Schedules table
+CREATE TABLE IF NOT EXISTS emi_schedules (
+    id UUID PRIMARY KEY,
+    device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    total_amount DECIMAL(12, 2) NOT NULL,
+    down_payment DECIMAL(12, 2) NOT NULL DEFAULT 0,
+    emi_amount DECIMAL(12, 2) NOT NULL,
+    duration INTEGER NOT NULL CHECK (duration >= 1 AND duration <= 60),
+    start_date DATE NOT NULL,
+    grace_days INTEGER NOT NULL DEFAULT 7 CHECK (grace_days >= 0 AND grace_days <= 30),
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'completed', 'cancelled', 'defaulted')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT emi_schedule_device_unique UNIQUE (device_id, status)
+);
+
+-- EMI Payments table
+CREATE TABLE IF NOT EXISTS emi_payments (
+    id UUID PRIMARY KEY,
+    schedule_id UUID NOT NULL REFERENCES emi_schedules(id) ON DELETE CASCADE,
+    device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    amount DECIMAL(12, 2) NOT NULL CHECK (amount > 0),
+    method VARCHAR(20) NOT NULL CHECK (method IN ('cash', 'bank_transfer', 'bKash', 'nagad', 'rocket', 'card', 'other')),
+    tx_id VARCHAR(255),
+    installment_number INTEGER,
+    note TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed', 'refunded')),
+    recorded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    verified_at TIMESTAMP WITH TIME ZONE,
+    verified_by UUID
+);
+
+-- Grace Period Requests table
+CREATE TABLE IF NOT EXISTS grace_period_requests (
+    id UUID PRIMARY KEY,
+    device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    schedule_id UUID NOT NULL REFERENCES emi_schedules(id) ON DELETE CASCADE,
+    reason TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    expires_at TIMESTAMP WITH TIME ZONE,
+    processed_at TIMESTAMP WITH TIME ZONE,
+    processed_by UUID
+);
+
+-- Decoupling State machine table
+CREATE TABLE IF NOT EXISTS decoupling_state (
+    id UUID PRIMARY KEY,
+    device_id UUID NOT NULL UNIQUE REFERENCES devices(id) ON DELETE CASCADE,
+    schedule_id UUID REFERENCES emi_schedules(id),
+    state VARCHAR(30) NOT NULL DEFAULT 'EMI_ACTIVE'
+        CHECK (state IN ('EMI_ACTIVE', 'FINAL_PAYMENT_RECEIVED', 'DEALER_NOTIFIED', 'PENDING_ADMIN_DECOUPLE', 'DEVICE_DECOUPLED')),
+    dealer_notified_at TIMESTAMP WITH TIME ZONE,
+    fraud_flag BOOLEAN DEFAULT FALSE,
+    fraud_flagged_by UUID,
+    fraud_flagged_at TIMESTAMP WITH TIME ZONE,
+    fraud_reason TEXT,
+    fraud_window_started_at TIMESTAMP WITH TIME ZONE,
+    fraud_window_ends_at TIMESTAMP WITH TIME ZONE,
+    admin_action_at TIMESTAMP WITH TIME ZONE,
+    admin_action_by UUID,
+    rtoc_code VARCHAR(100),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Decoupling State Log for audit trail
+CREATE TABLE IF NOT EXISTS decoupling_state_log (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    from_state VARCHAR(30),
+    to_state VARCHAR(30) NOT NULL,
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_emi_schedules_device_id ON emi_schedules(device_id);
+CREATE INDEX IF NOT EXISTS idx_emi_schedules_status ON emi_schedules(status);
+CREATE INDEX IF NOT EXISTS idx_emi_payments_schedule_id ON emi_payments(schedule_id);
+CREATE INDEX IF NOT EXISTS idx_emi_payments_device_id ON emi_payments(device_id);
+CREATE INDEX IF NOT EXISTS idx_emi_payments_status ON emi_payments(status);
+CREATE INDEX IF NOT EXISTS idx_emi_payments_payment_date ON emi_payments(payment_date);
+CREATE INDEX IF NOT EXISTS idx_grace_period_device_id ON grace_period_requests(device_id);
+CREATE INDEX IF NOT EXISTS idx_grace_period_status ON grace_period_requests(status);
+CREATE INDEX IF NOT EXISTS idx_decoupling_state_device_id ON decoupling_state(device_id);
+CREATE INDEX IF NOT EXISTS idx_decoupling_state_state ON decoupling_state(state);
+CREATE INDEX IF NOT EXISTS idx_decoupling_state_log_device_id ON decoupling_state_log(device_id);
+
+-- Function to calculate due dates for installments
+CREATE OR REPLACE FUNCTION calculate_due_dates(p_device_id UUID, p_start_date DATE, p_emi_amount DECIMAL, p_duration INTEGER)
+RETURNS TABLE(due_date DATE, installment_number INTEGER) AS $$
+DECLARE
+    v_current_date DATE := p_start_date;
+    v_installment INTEGER := 1;
+BEGIN
+    WHILE v_installment <= p_duration LOOP
+        due_date := v_current_date;
+        installment_number := v_installment;
+        RETURN NEXT;
+        v_current_date := v_current_date + INTERVAL '1 month';
+        v_installment := v_installment + 1;
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to generate installments
+CREATE OR REPLACE FUNCTION generate_installments(p_device_id UUID, p_total_amount DECIMAL, p_emi_amount DECIMAL, p_duration INTEGER)
+RETURNS TABLE(installment_number INTEGER, due_date DATE, expected_amount DECIMAL) AS $$
+DECLARE
+    v_start_date DATE;
+    v_current_date DATE;
+    v_installment INTEGER := 1;
+BEGIN
+    SELECT start_date INTO v_start_date FROM emi_schedules WHERE device_id = p_device_id ORDER BY created_at DESC LIMIT 1;
+
+    IF v_start_date IS NULL THEN
+        RETURN;
+    END IF;
+
+    v_current_date := v_start_date;
+
+    WHILE v_installment <= p_duration LOOP
+        installment_number := v_installment;
+        due_date := v_current_date;
+        expected_amount := p_emi_amount;
+        RETURN NEXT;
+        v_current_date := v_current_date + INTERVAL '1 month';
+        v_installment := v_installment + 1;
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to get upcoming EMI installments
+CREATE OR REPLACE FUNCTION get_upcoming_emi_installments(p_days INTEGER, p_current_date DATE)
+RETURNS TABLE(device_id UUID, next_due_date DATE, installment_number INTEGER) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        es.device_id,
+        (cal.due_date)::DATE as next_due_date,
+        cal.installment_number
+    FROM emi_schedules es
+    CROSS JOIN LATERAL calculate_due_dates(es.device_id, es.start_date::DATE, es.emi_amount::DECIMAL, es.duration::INTEGER) AS cal
+    WHERE es.status = 'active'
+    AND (cal.due_date)::DATE BETWEEN p_current_date AND (p_current_date + (p_days || ' days')::INTERVAL)
+    ORDER BY cal.due_date;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Updated constraint to allow multiple schedules per device (different statuses)
+ALTER TABLE emi_schedules DROP CONSTRAINT IF EXISTS emi_schedule_device_unique;
+
+-- Trigger to update updated_at timestamp
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER update_emi_schedules_updated_at
+    BEFORE UPDATE ON emi_schedules
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_decoupling_state_updated_at
+    BEFORE UPDATE ON decoupling_state
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();

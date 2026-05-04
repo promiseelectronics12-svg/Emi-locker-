@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">EMI Locker</string>
+
+    <!-- Notification Channels -->
+    <string name="channel_emi_service">EMI Locker Service</string>
+    <string name="channel_emi_service_desc">Persistent service for device management</string>
+    <string name="channel_emi_reminders">EMI Reminders</string>
+    <string name="channel_emi_reminders_desc">Payment reminders and alerts</string>
+    <string name="channel_emi_alerts">EMI Alerts</string>
+    <string name="channel_emi_alerts_desc">Critical payment and lock alerts</string>
+
+    <!-- Notification Text -->
+    <string name="notification_service_title">EMI Locker Active</string>
+    <string name="notification_service_text">Device protection is running</string>
+
+    <!-- Lock States -->
+    <string name="lock_state_unlocked">Active</string>
+    <string name="lock_state_reminder">Payment Reminder</string>
+    <string name="lock_state_warning">Payment Warning</string>
+    <string name="lock_state_overdue_alert">Payment Overdue</string>
+    <string name="lock_state_partial_lock">Device Partially Locked</string>
+    <string name="lock_state_full_lock">Device Locked</string>
+
+    <!-- Overlay Messages -->
+    <string name="overlay_reminder_title">EMI Payment Reminder</string>
+    <string name="overlay_reminder_message">Your EMI payment is due in %d days. Please make your payment to avoid device restrictions.</string>
+    <string name="overlay_warning_title">EMI Payment Warning</string>
+    <string name="overlay_warning_message">Your EMI payment is due in %d days. Please make your payment immediately.</string>
+    <string name="overlay_overdue_title">EMI Payment Overdue</string>
+    <string name="overlay_overdue_message">Your EMI payment is overdue. Your device will be restricted if payment is not made.</string>
+    <string name="overlay_overdue_days">%d days overdue</string>
+    <string name="overlay_partial_lock_title">Device Partially Locked</string>
+    <string name="overlay_partial_lock_message">Your device is partially locked due to overdue EMI payment. Only calls, SMS, and emergency services are available. Contact your dealer to resolve.</string>
+    <string name="overlay_full_lock_title">Device Locked</string>
+    <string name="overlay_full_lock_message">Your device is locked due to overdue EMI payment. Contact your dealer or call emergency services.</string>
+    <string name="overlay_full_lock_days">%d days overdue</string>
+    <string name="overlay_dealer_label">Your Dealer</string>
+    <string name="overlay_contact_your_dealer">Contact your dealer to resolve</string>
+    <string name="overlay_message_from_dealer">Message from Dealer</string>
+    <string name="overlay_emergency_always_available">Emergency calls (999 and 112) are always available</string>
+
+    <!-- Buttons -->
+    <string name="btn_pay_now">Pay Now</string>
+    <string name="btn_contact_dealer">Contact Dealer</string>
+    <string name="btn_call_dealer">Call Dealer</string>
+    <string name="btn_emergency">Emergency Call</string>
+    <string name="btn_emergency_999">Emergency Call (999)</string>
+    <string name="btn_emergency_112">Emergency Call (112)</string>
+    <string name="btn_dismiss">Dismiss (4h)</string>
+    <string name="btn_ok">OK</string>
+
+    <!-- Emergency Numbers -->
+    <string name="emergency_number">999</string>
+    <string name="emergency_number_alt">112</string>
+    <string name="btn_mark_as_read">Mark as Read</string>
+
+    <!-- Currency -->
+    <string name="currency_symbol">৳</string>
+</resources>

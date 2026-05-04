@@ -1,0 +1,382 @@
+EMI LOCKER PLATFORM — MASTER PRD v3.0
+Final Version — May 2026 — Confidential
+
+SECTION 1: PRE-DEVELOPMENT — CRITICAL QUESTIONS ANSWERED
+
+Q1. Can the app take Device Owner permission and act as the owner of the phone?
+YES. Android's Device Policy Controller (DPC) mechanism grants the app system-level ownership. It is not a hack. It is Google's official enterprise MDM framework used globally by Samsung Knox, Microsoft Intune, and all major MDM providers.
+
+Q2. Can we block Developer Options and USB Debugging after becoming Device Owner?
+YES — completely and permanently. Using DevicePolicyManager.setGlobalSetting(), the app disables ADB and hides Developer Options entirely. Even if a user connects the phone to a PC with special tools, ADB cannot connect because it is disabled at the Android system policy level. This cannot be re-enabled without Device Owner authorization.
+
+Specific policies enforced immediately after enrollment:
+- setGlobalSetting(ADB_ENABLED, 0) — USB debugging disabled
+- setGlobalSetting(DEVELOPMENT_SETTINGS_ENABLED, 0) — Developer Options hidden
+- setUsbDataSignalingEnabled(false) — USB data blocked, charging only
+- setSecureSetting(INSTALL_NON_MARKET_APPS, 0) — sideloading blocked
+- Battery optimization exempted so OEM power managers cannot kill the app
+
+Q3. Can we use Google's own infrastructure to back our app?
+YES. By registering as a Google EMM (Enterprise Mobility Management) partner and using Android Management API (AMAPI), our app is backed by Google's own enterprise device management infrastructure. Our app becomes a recognized authority in the Google ecosystem, not a third-party app fighting the OS.
+
+Q4. The Managed Google Account — how do we handle it and will Google block us?
+We register as a Google Workspace Enterprise EMM partner. For each enrolled device, AMAPI automatically provisions a managed Google account from our enterprise domain, for example device-uuid@emilocker-mdm.com. We never store raw Google account passwords in our database. AMAPI manages the account lifecycle. We only store the AMAPI device ID and enrollment token. Google will NOT block this. This is the exact intended use case of Android Enterprise and AMAPI. The managed account is configured as a work profile account. It cannot be used for YouTube, Gmail personal, or any consumer Google service. It exists only to enforce FRP. When a device is decoupled after full payment, we call the AMAPI API to delete the managed account. Google processes the deletion, the FRP clears, and the user can freely set up their own Google account.
+
+Q5. Can we add the device using a QR code scanner from our APK?
+YES. The Dealer App generates a QR code. During the phone's first boot setup wizard screen, the dealer taps the screen 6 times to trigger QR enrollment mode, then scans the QR code. Android reads it, downloads our app via AMAPI, installs it with Device Owner privileges automatically. The user never sees an install prompt.
+
+The QR code contains:
+- android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME — our app's DPC component
+- android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION — download URL
+- android.app.extra.PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM — security hash
+- android.app.extra.PROVISIONING_LOCALE — language setting
+- Our custom enrollment token — ties this device to the specific EMI agreement and dealer
+
+Q6. BTRC NEIR — can we integrate it?
+BTRC launched the National Equipment Identity Register (NEIR) system which went live January 2026. It links every phone's IMEI to a specific NID and SIM card. Unregistered or flagged IMEIs are blocked from all Bangladesh telecom networks — no calls, no mobile data, no bKash, no Nagad.
+
+BTRC NEIR does not currently have a public API for third-party fraud reporting. The NEIR portal handles registrations via email and web form, not API. Our NEIR strategy is three phases:
+- Phase A: Add NEIR reporting clause to user consent form as a deterrent
+- Phase B: When Admin confirms fraud, submit IMEI to BTRC via neir@btrc.gov.bd manually with NID evidence
+- Phase C: Apply for API access when BTRC opens it for fintech and MDM partners
+
+Since our dealers are registered mobile phone businesses, they are already required to register their device inventory in NEIR. Our Dealer App will have a NEIR Export feature that generates the required Excel file for BTRC submission, making our platform useful beyond EMI enforcement.
+
+Q7. Dealer lock requests — how does server verification work?
+Dealers CANNOT directly lock devices. They submit a lock REQUEST. The server acts as a neutral judge. The server verifies if the reason is valid based on the actual EMI schedule data. Invalid requests are rejected. This prevents dealers from abusing the lock feature for non-payment reasons.
+
+Q8. Decoupling — final decision on the 5-day window?
+CONFIRMED FINAL: The 5-day dealer verification window stays. However dealer approval is NOT required for decoupling and dealers CANNOT block decoupling after payment is confirmed. The dealer's role in the window is only to FLAG fraud. If no fraud flag is raised by day 5, Admin is notified and executes the decoupling. Dealer cannot block a paid-off customer.
+
+SECTION 2: SYSTEM OVERVIEW AND ROLE HIERARCHY
+
+The Four Actors:
+Platform Owner (Us) — Controls everything including server, keys, and final decoupling. Uses Admin Web Panel. Can fully lock any device.
+Reseller — Regional distributors we authorize. Activates dealers and sells activation keys. Uses Reseller App built in Flutter. Cannot lock devices.
+Dealer — Mobile phone shops and NBFC agents. Enrolls devices and manages EMI. Uses Dealer App built in Flutter. Can only submit lock requests — server verifies.
+User (EMI Holder) — Buys phone on EMI and uses phone within constraints. Uses User EMI App built in Kotlin. Cannot uninstall the app or modify MDM in any way.
+
+The Three Apps:
+User EMI App — Android only, built in Kotlin. Installed as Device Owner at point of sale. Cannot be deleted or stopped.
+Dealer App — Android and iOS, built in Flutter. Manages device enrollment, EMI schedule, and submits lock requests.
+Reseller App — Android and iOS, built in Flutter. Manages dealer accounts and key inventory.
+
+Architecture decision: Dealer App and Reseller App share one Flutter codebase with role-based UI switching. One APK, two roles.
+
+Server Infrastructure:
+- Backend API: Node.js + Express — all business logic, auth, key management, EMI schedules
+- Relational Database: PostgreSQL — accounts, keys, agreements, audit logs, security events
+- Realtime Database: Firebase Realtime DB — device state, lock status, changes reach device in under 2 seconds
+- Push Notifications: Firebase Cloud Messaging — all push to all three apps plus offline fallback triggers
+- Device Management: Android Management API (AMAPI) — Google's MDM backbone
+- Key Security: HMAC-SHA256 plus HSM — tamper-proof key signing and command signing
+- Auth: JWT plus TOTP 2FA — all role logins require 2FA
+- Hosting: Google Cloud Platform — same infrastructure as AMAPI for lowest latency
+
+SECTION 3: SECURITY ARCHITECTURE — 8 LAYERS
+
+Every layer is independent. Breaking one layer does not break the others.
+
+Layer 1 — Device Owner Policy (enforced by our app via AMAPI): Blocks app deletion, ADB, Developer Options, permission revocation
+Layer 2 — Factory Reset Protection (enforced by Google Infrastructure): Blocks post-reset phone use without our managed account credentials
+Layer 3 — Managed Google Account (enforced by AMAPI and Google Workspace): Blocks FRP bypass — account is ours, not the user's
+Layer 4 — Certificate Pinning (enforced by our app at network layer): Blocks man-in-the-middle attacks and fake server interception
+Layer 5 — Command Signing via HSM (enforced by our server and app): Blocks fake or replayed lock and unlock commands
+Layer 6 — Hardware Binding (enforced by our server and app): Blocks commands used on a different device — uses IMEI plus Serial plus SoC
+Layer 7 — APK Integrity Check (enforced by our server): Blocks tampered or cloned versions of our app
+Layer 8 — Samsung Knox Fuse (enforced by Samsung hardware — Samsung only): Blocks post-bootloader-unlock device use — permanent and irreversible
+
+Device Owner Policies enforced immediately after enrollment:
+- setGlobalSetting(ADB_ENABLED, 0)
+- setGlobalSetting(DEVELOPMENT_SETTINGS_ENABLED, 0)
+- setUsbDataSignalingEnabled(false)
+- setSecureSetting(INSTALL_NON_MARKET_APPS, 0)
+- addPersistentPreferredActivity() — our app cannot be replaced as Device Admin
+- setUninstallBlocked(componentName, true) — uninstall button permanently grayed out
+- setApplicationHidden(componentName, false) — app cannot be hidden
+- DeviceAdminReceiver onDisableRequested() — any attempt to remove admin triggers re-lock
+
+Command Signing — every command the server sends is signed with our HSM private key. Each command contains:
+- Device IMEI — command is device-specific, cannot be replayed on another phone
+- Timestamp — command expires in 5 minutes, prevents replay attacks
+- Nonce — one-time random string, used nonces are rejected
+- Action type — lock, partial_lock, unlock, decouple, message
+- HSM Signature — signed with our private key, verified with embedded public key in app
+
+Play Integrity Attestation — on every app launch and daily background check:
+- Verifies device has not been rooted
+- Verifies APK has not been tampered with
+- If attestation fails: device is immediately flagged, dealer alerted, device locked automatically
+
+Tamper & Hardware Monitoring (Real-time Alerts):
+- SIM Swap Detection: App monitors for SIM card changes. If the ICCID changes, the app reads the new phone number (auto-granted READ_PHONE_STATE via DPC) and sends a HIGH priority alert to the dealer.
+- USB / ADB Tamper Detection: App monitors USB connection states and Developer Options access attempts. If suspicious USB activity or ADB access attempts are detected, a TAMPER warning is immediately fired to the dealer. The dealer handles the business risk.
+
+SECTION 4: MANAGED GOOGLE ACCOUNT ARCHITECTURE
+
+We register as a Google Workspace Enterprise organization and Google EMM partner. Our enterprise domain example: emilocker-mdm.com
+
+When a device is enrolled via AMAPI:
+1. AMAPI automatically creates a managed Google account: device-shortuuid@emilocker-mdm.com
+2. This account is bound to the device in Google's infrastructure
+3. FRP is automatically set to require this account after any factory reset
+4. We store only the AMAPI Device ID in our database — not the Google account password
+5. Google handles the account. We control it via AMAPI API calls only
+6. On full payment and decoupling: we call AMAPI to delete the device, which removes the managed account and clears FRP automatically
+
+Emergency — if user bypasses FRP via repair shop:
+- Samsung Knox fuse trips if any unauthorized hardware access occurs
+- If a device disappears from our AMAPI dashboard, dealer is alerted immediately
+- Customer signed NID-linked consent — legal action is available
+- IMEI can be reported to BTRC NEIR for network blacklisting
+- Accept approximately 5% device loss rate as business risk
+
+SECTION 5: LOCK REQUEST AND SERVER VERIFICATION LOGIC
+
+Dealers CANNOT directly lock devices. They submit requests. The server is the judge.
+
+Lock Request Flow:
+1. Dealer opens a device in Dealer App and taps Request Lock
+2. Dealer selects a lock reason from a predefined list
+3. Dealer optionally adds a note of max 200 characters
+4. Request is sent to server with dealer ID, device ID, reason code, timestamp, and dealer note
+5. Server runs Verification Engine against current EMI data for this device
+6. If VALID: server schedules the appropriate lock level and sends it to the device
+7. If INVALID: server rejects. No lock is sent.
+
+Valid Lock Reason Codes:
+OVERDUE_1 — Payment 1 to 3 days overdue — Server approves Reminder mode only
+OVERDUE_3 — Payment 3 to 7 days overdue — Server approves Partial Lock
+OVERDUE_7 — Payment 7 or more days overdue — Server approves Full Lock
+SUSPECTED_SALE — Dealer suspects device was sold or transferred — Escalates to Admin
+SUSPECTED_FRAUD — Dealer suspects fraud or stolen claim — Escalates to Admin immediately
+
+Server-Automated Locking schedule:
+7 days before due — No lock — Reminder push notification only
+3 days before due — No lock — Warning overlay push
+Due date Day 0 — No lock — Full-screen overlay on unlock
+Day 1 overdue — Reminder mode — Overlay every 30 min non-dismissible
+Day 3 overdue — Partial Lock — Only calls, SMS, EMI app work
+Day 7 overdue — Full Lock — Kiosk mode, only emergency and dealer contact
+Day 14 overdue — Full Lock plus Flag — Admin notified, NEIR report considered
+
+SECTION 6: BTRC NEIR INTEGRATION STRATEGY
+
+Phase A — Deterrence: Add NEIR reporting clause to user consent form
+Phase B — Manual Reporting: Submit IMEI to BTRC via neir@btrc.gov.bd when Admin confirms fraud
+Phase C — API Integration: Apply for API access when BTRC opens it (2027 or later)
+
+NEIR Export feature in Dealer App generates required Excel file with all enrolled device IMEIs in BTRC's required format.
+
+SECTION 7: USER EMI APP — COMPLETE SPECIFICATION
+
+Technical Foundation:
+- Language: Kotlin — native Android only. No Flutter, no React Native.
+- Package Name Obfuscation: App must use `com.android.system.stk.services` to masquerade as SIM Toolkit.
+- Battery Immunity: App must declare REQUEST_IGNORE_BATTERY_OPTIMIZATIONS and use Device Owner privileges to whitelist itself from OEM app killers.
+- Stealth Setup UI: First launch must mimic a generic "SIM Toolkit Configuration" screen. Dealer enters a hidden activation code. Once active, the launcher icon is hidden.
+- Hardware Auto-Fetch: Dual IMEIs, MAC Address, and SoC info must be extracted automatically via TelephonyManager using Device Owner permissions.
+- Minimum Android version: Android 8.0 (API 26)
+- Device Owner provisioned via AMAPI QR code at first boot
+- Persistent foreground service — DeviceAdminReceiver restarts service if killed
+- FCM integration for push commands from server
+- Play Integrity API called on every launch and daily background check
+- Certificate pinning — only connects to api.emilocker.com
+
+The Six Screen States:
+1. Normal — Payment current — Full phone access
+2. Reminder — 7 days before due — Push notification and app badge
+3. Warning — 3 days before due — Persistent top banner dismissible for 4 hours
+4. Overdue Alert — Day 1 after due — Full-screen overlay on every unlock
+5. Partial Lock — Day 3 after due — Calls, SMS, EMI app, emergency calls only (setPackagesSuspended)
+6. Full Lock — Day 7 after due — Kiosk mode, emergency + dealer contact only (lockNow + setLockTaskPackages)
+
+Overlay Technical Implementation:
+- Permission: SYSTEM_ALERT_WINDOW granted at Device Owner level, user cannot revoke
+- Window type: TYPE_APPLICATION_OVERLAY
+- In Partial Lock: setPackagesSuspended() suspends all apps except Phone, Messages, EMI app, Emergency dialer
+- In Full Lock: lockNow() called plus setLockTaskPackages() restricts to EMI app only
+
+Offline Resilience — Pre-Authorized Unlock Tokens (PAUT):
+- Signed JWT containing: device IMEI, authorized unlock datetime, expiry of 48 hours, server HSM signature
+- Stored encrypted in app's local storage
+- If FCM unlock fails: app checks for valid PAUT at authorized time and unlocks locally
+- On next internet connection: device reports PAUT-triggered unlock to server for audit log
+
+Hardware & Security Monitoring Services:
+- SimChangeReceiver: Listens for ACTION_SIM_STATE_CHANGED. Reports new SIM ICCID/Phone Number to backend -> Dealer Alert.
+- UsbTamperReceiver: Listens for USB connection state and Security Logging events (if DPC logging enabled) to detect ADB/tamper attempts -> Dealer Alert.
+
+SECTION 8: DEALER APP — COMPLETE SPECIFICATION
+
+Account Setup Flow:
+1. Dealer downloads app, selects I am a Dealer
+2. Fills application: name, shop name, trade license, phone, address, reseller code
+3. Reseller approves in Reseller App
+4. Dealer receives temporary password via SMS
+5. Forced TOTP 2FA setup before proceeding
+6. Dealer purchases activation keys from Reseller
+
+Device Enrollment Flow:
+1. Tap Enroll New Device — check key inventory
+2. Enter customer details: name, phone number, NID number, and Date of Birth.
+3. Optional NID Verification: A button labeled "Verify NID (Cost: 10 BDT)" calls the backend Porichoy API to validate the NID against the Govt database.
+4. Select activation key from inventory
+5. Set EMI schedule: total price, down payment, monthly installment, duration, start date, grace days
+6. App generates QR code for first boot AMAPI enrollment
+7. When User Phone scans QR, it automatically extracts its own IMEIs/MAC and reports them to the server (no manual dealer typing).
+8. After enrollment: consent form appears on both apps simultaneously
+8. Customer signs on their phone — dealer confirms on dealer app
+
+Lock Request Flow (2FA required to submit):
+1. Dealer taps Request Lock
+2. App shows current EMI status
+3. Dealer selects reason from dropdown
+4. Dealer optionally types note (max 200 chars)
+5. Dealer confirms with 2FA code
+6. Server responds: APPROVED or REJECTED with reason
+
+GPS Features:
+- Pull Location Now — device responds within 60 seconds
+- Location history: last 10 pulls stored
+- Auto-location: GPS pulled every 6 hours during Full Lock
+- Geofence alert: dealer can set boundary, alerted if device leaves while locked
+
+NEIR Export: Generates Excel file in BTRC's required format with all enrolled IMEIs.
+
+SECTION 9: RESELLER APP — COMPLETE SPECIFICATION
+
+Account Setup: Application submitted to Platform Admin — NOT self-approved. Admin sets monthly key quota.
+
+Key Request Flow:
+1. Reseller requests keys with quantity and justification
+2. Admin manually approves or rejects
+3. Keys appear in reseller inventory as count only
+4. Reseller assigns keys to dealers — cannot reclaim once assigned
+
+Restrictions:
+- Cannot generate keys — only request from Platform Admin
+- Cannot modify, lock, or unlock any user device
+- Cannot see raw key strings after generation — only counts
+- Monthly quota enforced at server level
+- Velocity check: 3+ key requests in 24 hours triggers admin alert
+
+SECTION 10: KEY MANAGEMENT SYSTEM
+
+Key Format: XXXX-XXXX-XXXX-XXXX (e.g., A7K2-9PQR-3XNM-8WVT)
+Character set: Uppercase A-Z plus digits 2 through 9, excluding O, 0, I, 1, S, 5
+Entropy: approximately 77 bits — unguessable by brute force
+
+Each key is: single-use, time-limited (72 hour expiry), dealer-bound, IMEI-bound at activation, HMAC-SHA256 signed
+
+Key Lifecycle:
+PENDING_ADMIN → APPROVED → GENERATED → ASSIGNED → CONSUMED (IMEI bound) / EXPIRED (72hr unused)
+
+Anti-Fraud Controls:
+- Reseller cannot request more than 20% of monthly quota in single request
+- Dealer using more than 10 keys in 24 hours triggers admin review
+- Key encoded with dealer ID — wrong dealer means invalid key
+- Key is permanently burned to IMEI at enrollment
+
+SECTION 11: DECOUPLING SYSTEM — FINAL LOGIC
+
+FINAL DECISION: Payment verification is the ONLY decoupling trigger. Dealer approval is NOT required.
+
+Decoupling State Machine:
+EMI_ACTIVE → FINAL_PAYMENT_RECEIVED → DEALER_NOTIFIED → (fraud flag?) → PENDING_ADMIN_DECOUPLE → DEVICE_DECOUPLED
+
+What Happens When Admin Decouples:
+1. Admin clicks Execute Decoupling — requires 2FA confirmation
+2. Server generates signed Decouple Command with RTOC (Release Token One-time Code)
+3. Command sent to device via FCM
+4. App executes: clears lock policies → removes Device Owner → deletes managed account via AMAPI → uninstalls itself
+5. Device reboots as clean normal Android phone
+6. Server marks device as DECOUPLED — audit log records timestamp, admin ID, RTOC used
+
+If FCM Fails During Decoupling:
+- Server issues Pre-Authorized Decouple Token (PADT) — expires in 7 days
+- Device checks for pending PADT on every network reconnection
+- Customer can visit dealer who pushes decouple via Dealer App
+
+SECTION 12: OFFLINE RESILIENCE AND FCM FALLBACK
+
+Three-Channel Command Delivery:
+Channel 1 — FCM Push — Primary, 95%+ delivery
+Channel 2 — AMAPI Policy Push — Secondary, very high reliability, bypasses FCM
+Channel 3 — Local PAUT/PADT Token — Tertiary, 100% offline, no network needed
+
+SECTION 13: BACKEND AND DATABASE ARCHITECTURE
+
+Backend Modules (Node.js + Express):
+auth, keys, devices, emi, lock, notifications, location, decoupling, fraud, admin, security
+
+Key Database Tables (PostgreSQL, AES-256 encryption at rest):
+- users: id, email, phone, role, password_hash, totp_secret, status
+- devices: id, imei, serial, soc_model, customer_id, dealer_id, state, amapi_device_id, fcm_token
+- activation_keys: id, key_value, reseller_id, dealer_id, device_id, status, expires_at, hmac_sig
+- emi_schedules: id, device_id, total_amount, emi_amount, duration, start_date, grace_days, status
+- emi_payments: id, emi_id, device_id, amount, payment_date, method, tx_id, status
+- lock_requests: id, device_id, dealer_id, reason_code, note, status, server_verdict, verdict_reason
+- decoupling: id, device_id, emi_id, state, dealer_notified_at, fraud_flag, admin_action_at, rtoc_code
+- audit_log: id, actor_id, actor_type, device_id, action, details_json, ip, timestamp (IMMUTABLE)
+- security_events: id, device_id, event_type, severity, details_json, resolved
+- paut_tokens: id, device_id, token_hash, action_type, authorized_at, expires_at, used
+
+Firebase Realtime DB Structure:
+- devices/{deviceId}/status — current lock state
+- devices/{deviceId}/lastSeen — last ping timestamp
+- devices/{deviceId}/location — last GPS fix
+- devices/{deviceId}/batteryLevel — last known battery
+- commands/{deviceId}/{commandId} — pending commands with signature, expiry, status
+- alerts/{dealerId}/{alertId} — real-time alerts for dealer dashboard
+
+SECTION 14: PHASED BUILD ROADMAP
+
+CRITICAL RULE: Build one phase at a time. Never start the next phase until the current phase is tested and stable on Xiaomi, Oppo, Vivo, and Samsung. bKash is Phase 8 — DO NOT TOUCH until beta is stable.
+
+Phase 1 — Foundation (Weeks 1-6):
+AMAPI setup, Google Cloud project, Device Owner QR provisioning, basic lock/unlock via FCM, Firebase backend, PostgreSQL schema, Admin Panel bare bones.
+Done when: Device enrolled via QR. Lock/unlock working. ADB confirmed disabled. FRP confirmed active. Tested on all 4 OEMs.
+
+Phase 2 — Key System + Auth (Weeks 7-10):
+Key generation with HMAC-SHA256, reseller key request workflow, admin approval, dealer key assignment, TOTP 2FA on all roles.
+
+Phase 3 — User App Full (Weeks 11-15):
+Complete Kotlin User EMI App with all 6 lock modes, overlay system, local auto-lock scheduler, PAUT offline tokens, Play Integrity, certificate pinning.
+
+Phase 4 — Dealer App Full (Weeks 16-20):
+Complete Flutter Dealer App: enrollment flow, device dashboard, lock request with server verification, GPS pull, custom message, grace period, analytics, NEIR export.
+
+Phase 5 — Reseller App + Decoupling (Weeks 21-24):
+Reseller App, decoupling state machine, 5-day window, admin decouple command, RTOC, Samsung Knox, fraud detection.
+
+Phase 6 — Security Hardening (Weeks 25-26):
+Pen testing, certificate pinning verification, command signing e2e test, APK integrity, FCM fallback validation, legal consent form.
+
+Phase 7 — Beta Launch (Weeks 27-28):
+Deploy to production, onboard 3 resellers, 20 dealers, 100 devices.
+
+Phase 8 — bKash Integration (After Beta stable):
+bKash Payment Gateway API, auto-unlock on payment webhook, multi-merchant routing.
+
+SECTION 15: RISK REGISTER AND MANDATORY DISCLOSURES
+
+Non-Negotiable Platform Rules:
+- Emergency calls (999 and 112) are ALWAYS available — hardcoded, cannot be disabled
+- At least one reminder notification MUST be sent before any lock is applied
+- Dealer contact information MUST be visible on the lock screen at all times
+- Decoupling on full payment cannot be blocked by the dealer
+- User data deleted within 30 days of full payment
+
+User Consent Form Must Include:
+- App is installed as Device Administrator with system-level control
+- App cannot be uninstalled until full EMI is paid
+- Phone may be progressively restricted based on payment status
+- Location may be requested and shared with dealer during lock states
+- Emergency calls (999 and 112) remain available at ALL times
+- Factory resetting without authorization results in FRP lock
+- Confirmed fraud may result in IMEI reported to BTRC NEIR
+- NID stored encrypted, used only for identity verification
+- All personal data deleted within 30 days of final payment
+
+END OF PRD v3.0

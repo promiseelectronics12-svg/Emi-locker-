@@ -1,0 +1,81 @@
+// Firebase Messaging Service Worker
+// Copy this file to the public directory of admin-panel as firebase-messaging-sw.js
+// and update with your Firebase config
+
+importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js');
+
+// Replace with your Firebase config - Replace with real config before deploy
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+
+firebase.initializeApp(firebaseConfig);
+
+const messaging = firebase.messaging();
+
+messaging.onBackgroundMessage((payload) => {
+  console.log('Received background message:', payload);
+
+  const notificationTitle = payload.notification?.title || 'EMI Locker Alert';
+  const notificationOptions = {
+    body: payload.notification?.body || 'New notification received',
+    icon: '/icon.png',
+    badge: '/badge.png',
+    data: payload.data,
+    actions: payload.notification?.actions || []
+  };
+
+  return self.registration.showNotification(notificationTitle, notificationOptions);
+});
+
+self.addEventListener('notificationclick', (event) => {
+  console.log('Notification click:', event);
+
+  event.notification.close();
+
+  const urlToOpen = event.notification.data?.url || '/';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url === urlToOpen && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(urlToOpen);
+      }
+    })
+  );
+});
+
+self.addEventListener('push', (event) => {
+  console.log('Push event:', event);
+
+  if (!event.data) {
+    console.log('No data in push event');
+    return;
+  }
+
+  const data = event.data.json();
+
+  const notificationTitle = data.notification?.title || 'EMI Locker';
+  const notificationOptions = {
+    body: data.notification?.body || 'New notification',
+    icon: '/icon.png',
+    badge: '/badge.png',
+    tag: data.tag || 'default',
+    data: data.data,
+    requireInteraction: data.requireInteraction || false
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(notificationTitle, notificationOptions)
+  );
+});

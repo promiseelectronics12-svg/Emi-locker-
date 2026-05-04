@@ -1,0 +1,45 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "skipDangerousModePermissionPrompt": true,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"d:/EMI APP/rtk/.claude/hooks/rtk-rewrite.sh\"",
+            "shell": "bash",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "timeout": 10,
+            "command": "REQ='d:/EMI APP/CLAUDE_SUPERVISOR_REQUEST.json'; FLAG='d:/EMI APP/CLAUDE_SUPERVISOR_RESPONSE.flag'; DONE='d:/EMI APP/AUDIT_DONE.flag'; if [ -f \"$REQ\" ] && [ ! -f \"$FLAG\" ]; then echo \"Claude primary supervisor active — writing response flag\"; echo \"{\\\"supervisor\\\": \\\"Claude\\\", \\\"status\\\": \\\"audit_started\\\", \\\"timestamp\\\": \\\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\\"}\" > \"$FLAG\"; echo '{\"systemMessage\": \"SUPERVISOR REQUEST DETECTED: Phase 1 build complete. Claude is now the primary auditor. Audit all generated code against PRD v3.0, check failed modules (backend-devices, backend-lock-engine, backend-notifications), verify security layers, and confirm Phase 2 readiness.\"}'; elif [ -f 'd:/EMI APP/BUILD_COMPLETE.flag' ] && [ ! -f \"$DONE\" ]; then echo '{\"systemMessage\": \"BUILD COMPLETE: Phase 1 finished. Audit and write AUDIT_DONE.flag when complete.\"}'; fi"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "timeout": 10,
+            "command": "REQ='d:/EMI APP/CLAUDE_SUPERVISOR_REQUEST.json'; FLAG='d:/EMI APP/CLAUDE_SUPERVISOR_RESPONSE.flag'; if [ -f \"$REQ\" ] && [ ! -f \"$FLAG\" ]; then echo \"[Stop hook] Claude supervisor active — writing response flag\"; echo \"{\\\"supervisor\\\": \\\"Claude\\\", \\\"status\\\": \\\"audit_started\\\", \\\"timestamp\\\": \\\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\\"}\" > \"$FLAG\"; echo '{\"systemMessage\": \"SUPERVISOR REQUEST DETECTED (Stop hook): Build complete. Claude is the primary auditor. Audit generated code against PRD v3.0, check failed modules, verify security layers, confirm Phase 2 readiness.\"}'; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

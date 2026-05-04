@@ -1,0 +1,17 @@
+# Firebase artifacts - NEVER commit real credentials
+google-services.json
+*service*.json
+*.pem
+*.key
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+firebase-debug.log
+firestore-debug.log

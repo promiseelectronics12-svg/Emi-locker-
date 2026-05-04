@@ -1,0 +1,45 @@
+# Global ignores
+node_modules/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
+
+# Android / User App (Kotlin)
+user-app/app/build/
+user-app/.gradle/
+user-app/local.properties
+*.apk
+*.aab
+*.keystore
+*.jks
+google-services.json
+
+# Flutter / Dealer App
+dealer-app/.dart_tool/
+dealer-app/build/
+dealer-app/.flutter-plugins
+dealer-app/.flutter-plugins-dependencies
+dealer-app/.packages
+
+# Backend
+backend/dist/
+
+# Admin Panel (React/Vite)
+admin-panel/dist/
+admin-panel/build/
+
+# Temp Builder files
+__pycache__/
+*.flag
+review_request.json
+review_result.json
+build_log.md
+
+# Competitor APK Dumps (Exceeds Windows Path Limits)
+reference locker app decompiled/

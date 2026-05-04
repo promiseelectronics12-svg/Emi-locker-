@@ -1,0 +1,535 @@
+You are a Code Reviewer for the EMI Locker Platform.
+Review the implementation of module: dealer-app-device-management
+
+This is a SECURITY-CRITICAL Android MDM app. Score strictly. 95+ = PRODUCTION READY.
+
+IMPORTANT: Base your review on the ACTUAL FILE CONTENTS below, not on the worker summary.
+
+=== ACTUAL FILE CONTENTS ON DISK ===
+// === dealer-app/lib/core/config/api_config.dart ===
+import 'package:dio/dio.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+class ApiConfig {
+  static String get apiBaseUrl {
+    final url = dotenv.env['API_BASE_URL'];
+    if (url == null || url.isEmpty) {
+      return 'http://localhost:3000';
+    }
+    return url;
+  }
+
+  static bool get isDevelopment {
+    final env = dotenv.env['FLUTTER_ENV'];
+    return env == 'development';
+  }
+
+  static bool get disableCertificatePinning {
+    if (apiBaseUrl.contains('localhost') ||
+        apiBaseUrl.contains('127.0.0.1') ||
+        apiBaseUrl.contains('10.0.2.2')) {
+      return true;
+    }
+    return false;
+  }
+
+  static Dio createDio() {
+    final dio = Dio(
+      BaseOptions(
+        baseUrl: apiBaseUrl,
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 30),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      ),
+    );
+
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          return handler.next(options);
+        },
+        onResponse: (response, handler) {
+          return handler.next(response);
+        },
+        onError: (error, handler) {
+          return handler.next(error);
+        },
+      ),
+    );
+
+    return dio;
+  }
+}
+
+
+// === dealer-app/lib/core/config/env_config.dart ===
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+class EnvConfig {
+  EnvConfig._();
+
+  static String get apiBaseUrl {
+    final url = dotenv.env['API_BASE_URL'];
+    if (url == null || url.isEmpty) {
+      throw Exception('API_BASE_URL environment variable is not set');
+    }
+    return url;
+  }
+
+  static String get qrProvisioningUrl {
+    final url = dotenv.env['QR_PROVISIONING_URL'];
+    if (url == null || url.isEmpty) {
+      throw Exception('QR_PROVISIONING_URL environment variable is not set');
+    }
+    return url;
+  }
+
+  static String get firebaseApiKey {
+    final key = dotenv.env['FIREBASE_API_KEY'];
+    if (key == null || key.isEmpty) {
+      throw Exception('FIREBASE_API_KEY environment variable is not set');
+    }
+    return key;
+  }
+
+  static String get firebaseAppId => dotenv.env['FIREBASE_APP_ID'] ?? '';
+  static String get firebaseProjectId =>
+      dotenv.env['FIREBASE_PROJECT_ID'] ?? '';
+  static String get firebaseMessagingSenderId =>
+      dotenv.env['FIREBASE_MESSAGING_SENDER_ID'] ?? '';
+
+  static String get environment => dotenv.env['FLUTTER_ENV'] ?? 'development';
+
+  static bool get isDevelopment => environment == 'development';
+  static bool get isProduction => environment == 'production';
+
+  static bool get isLocalApi =>
+      apiBaseUrl.contains('localhost') || apiBaseUrl.contains('10.0.2.2');
+}
+
+// === dealer-app/lib/core/constants/app_constants.dart ===
+class AppConstants {
+  AppConstants._();
+
+  static const String appName = 'EMI Locker Dealer';
+  static const String defaultApiBaseUrl = 'http://localhost:3000';
+
+  static const int maxLoginAttempts = 5;
+  static const int lockoutDurationMinutes = 15;
+
+  static const Duration apiTimeout = Duration(seconds: 30);
+  static const Duration cacheDuration = Duration(minutes: 5);
+
+  static const int maxDevicesPerPage = 50;
+  static const int maxPaymentsPerPage = 50;
+
+  static const String dateFormat = 'dd MMM yyyy';
+  static const String timeFormat = 'hh:mm a';
+  static const String dateTimeFormat = 'dd MMM yyyy, hh:mm a';
+
+  static const String currencySymbol = '৳';
+  static const String phoneCountryCode = '+880';
+}
+
+
+// === dealer-app/lib/core/constants/constants.dart ===
+import '../config/env_config.dart';
+
+class ApiConstants {
+  static String get apiBaseUrl => EnvConfig.apiBaseUrl;
+
+  static const Duration connectTimeout = Duration(seconds: 30);
+  static const Duration receiveTimeout = Duration(seconds: 30);
+  static const Duration sendTimeout = Duration(seconds: 30);
+
+  static const String loginEndpoint = '/api/v1/auth/login';
+  static const String refreshEndpoint = '/api/v1/auth/refresh';
+  static const String verify2FAEndpoint = '/api/v1/auth/verify-2fa';
+  static const String setup2FAEndpoint = '/api/v1/auth/setup-2fa';
+  static const String changePasswordEndpoint = '/api/v1/auth/change-password';
+
+  static const String devicesEndpoint = '/api/v1/devices';
+  static const String lockRequestEndpoint = '/api/v1/lock-requests';
+  static const String dealersEndpoint = '/api/v1/dealers';
+  static const String resellersEndpoint = '/api/v1/resellers';
+  static const String keysEndpoint = '/api/v1/keys';
+  static const String neirExportEndpoint = '/api/v1/neir/export';
+  static const String verifyNidEndpoint = '/api/v1/nid/verify';
+
+  static const String firebasePath = 'devices';
+}
+
+class AppConstants {
+  static const String appName = 'EMI Dealer App';
+  static const String appVersion = '1.0.0';
+
+  static const int maxNoteLength = 200;
+  static const int nidVerifyCost = 10;
+
+  static const List<String> lockReasons = [
+    'EMI_PAYMENT_OVERDUE',
+    'FRAUD_SUSPECTED',
+    'THEFT_REPORTED',
+    'AGREEMENT_VIOLATION',
+    'CUSTOMER_REQUEST',
+  ];
+
+  static const Map<String, String> lockReasonLabels = {
+    'EMI_PAYMENT_OVERDUE': 'EMI Payment Overdue',
+    'FRAUD_SUSPECTED': 'Fraud Suspected',
+    'THEFT_REPORTED': 'Theft Reported',
+    'AGREEMENT_VIOLATION': 'Agreement Violation',
+    'CUSTOMER_REQUEST': 'Customer Request',
+  };
+}
+
+class StorageKeys {
+  static const String accessToken = 'access_token';
+  static const String refreshToken = 'refresh_token';
+  static const String userRole = 'user_role';
+  static const String userId = 'user_id
+
+// === dealer-app/lib/core/di/injection.dart ===
+import '../network/api_client.dart';
+import '../services/firebase_service.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../../features/enrollment/enrollment_service.dart';
+import '../../features/enrollment/data/enrollment_repository.dart';
+
+class Injection {
+  Injection._();
+
+  static late ApiClient apiClient;
+  static late FirebaseService firebaseService;
+  static late FlutterSecureStorage secureStorage;
+  static late EnrollmentRepository enrollmentRepository;
+  static late EnrollmentService enrollmentService;
+
+  static Future<void> init() async {
+    secureStorage = const FlutterSecureStorage();
+    apiClient = ApiClient(storage: secureStorage);
+    firebaseService = FirebaseService();
+    enrollmentRepository = EnrollmentRepository(apiClient: apiClient);
+    enrollmentService = EnrollmentService(repository: enrollmentRepository);
+  }
+}
+
+
+// === dealer-app/lib/core/network/api_client.dart ===
+import 'dart:convert';
+import 'dart:io';
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:dio/io.dart';
+import '../config/env_config.dart';
+import 'interceptors/auth_interceptor.dart';
+import 'interceptors/cert_pinning_interceptor.dart';
+import '../../shared/models/user_model.dart';
+
+class ApiClient {
+  late final Dio dio;
+  final FlutterSecureStorage _storage;
+  final String _baseUrl;
+
+  ApiClient({String? baseUrl, FlutterSecureStorage? storage})
+      : _storage = storage ?? const FlutterSecureStorage(),
+        _baseUrl = baseUrl ?? EnvConfig.apiBaseUrl {
+    dio = Dio(_baseOptions);
+    _configureInterceptors();
+    _configureCertificatePinning();
+  }
+
+  void _configureInterceptors() {
+    dio.interceptors.addAll([
+      AuthInterceptor(dio: dio, storage: _storage),
+      CertificatePinningInterceptor(),
+      LogInterceptor(requestBody: true, responseBody: true),
+    ]);
+  }
+
+  void _configureCertificatePinning() {
+    if (!EnvConfig.isLocalApi) {
+      dio.httpClientAdapter = IOHttpClientAdapter(
+        createHttpClient: () {
+          final securityContext = SecurityContext(withTrustedRoots: true);
+          _loadCertificateSync(securityContext);
+          final client = HttpClient(context: securityContext);
+          client.badCertificateCallback = (cert, host, port) => false;
+          return client;
+        },
+      );
+    }
+  }
+
+  void _loadCertificateSync(SecurityContext context) {
+    try {
+      final certData = rootBundle.loadSync('assets/certs/server.crt');
+      context.setTrustedCertificatesBytes(certData.buffer.asUint8List());
+    } catch (e) {
+      if (kDebugMode) {
+        print('ApiClient: Failed to load certificate: $e');
+      }
+      if (EnvConfig.isProduction) {
+        throw Exception('Certificate loading is mandatory in production. Failed: $e');
+      }
+    }
+  }
+
+  BaseOptions get _baseOpt
+
+// === dealer-app/lib/core/network/interceptors/auth_interceptor.dart ===
+import 'package:dio/dio.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+class AuthInterceptor extends Interceptor {
+  final Dio dio;
+  final FlutterSecureStorage storage;
+  bool _isRefreshing = false;
+
+  AuthInterceptor({required this.dio, required this.storage});
+
+  @override
+  void onRequest(
+    RequestOptions options,
+    RequestInterceptorHandler handler,
+  ) async {
+    final token = await storage.read(key: 'access_token');
+    if (token != null) {
+      options.headers['Authorization'] = 'Bearer $token';
+    }
+    handler.next(options);
+  }
+
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) async {
+    if (err.response?.statusCode == 401 && !_isRefreshing) {
+      _isRefreshing = true;
+      try {
+        final refreshToken = await storage.read(key: 'refresh_token');
+        if (refreshToken == null) {
+          await _clearAuth();
+          handler.next(err);
+          return;
+        }
+
+        final response = await dio.post(
+          '/api/v1/auth/refresh',
+          data: {'refreshToken': refreshToken},
+        );
+
+        final newToken = response.data['token'];
+        final newRefreshToken = response.data['refreshToken'] ?? refreshToken;
+
+        await storage.write(key: 'access_token', value: newToken);
+        await storage.write(key: 'refresh_token', value: newRefreshToken);
+
+        final opts = err.requestOptions;
+        opts.headers['Authorization'] = 'Bearer $newToken';
+
+        final retryResponse = await dio.fetch(opts);
+        handler.resolve(retryResponse);
+      } catch (e) {
+        await _clearAuth();
+        handler.next(err);
+      } finally {
+        _isRefreshing = false;
+      }
+    } else {
+      handler.next(err);
+    }
+  }
+
+  Future<void> _clearAuth() async {
+    await storage.delete(key: 'access_token');
+    await storage.delete(key: 'refresh_token');
+    await storage.delete(key: 'user_role');
+  }
+}
+
+
+// === dealer-app/lib/core/network/interceptors/cert_pinning_interceptor.dart ===
+import 'dart:io';
+import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import '../../config/env_config.dart';
+
+class CertificatePinningInterceptor extends Interceptor {
+  bool _initialized = false;
+  bool _initFailed = false;
+  SecurityContext? _securityContext;
+
+  @override
+  void onRequest(
+    RequestOptions options,
+    RequestInterceptorHandler handler,
+  ) async {
+    if (EnvConfig.isLocalApi) {
+      handler.next(options);
+      return;
+    }
+
+    if (_initFailed && EnvConfig.isProduction) {
+      handler.reject(
+        DioException(
+          requestOptions: options,
+          error: 'Certificate pinning initialization failed. Cannot make secure requests.',
+          type: DioExceptionType.badResponse,
+        ),
+      );
+      return;
+    }
+
+    if (!_initialized) {
+      await _initSecurityContext();
+    }
+
+    if (_securityContext != null) {
+      options.extra['securityContext'] = _securityContext;
+    }
+
+    handler.next(options);
+  }
+
+  Future<void> _initSecurityContext() async {
+    try {
+      final context = SecurityContext(withTrustedRoots: true);
+      final certData = await rootBundle.load('assets/certs/server.crt');
+      context.setTrustedCertificatesBytes(certData.buffer.asUint8List());
+      _securityContext = context;
+    } catch (e) {
+      if (kDebugMode) {
+        print('CertificatePinningInterceptor: Failed to load certificate: $e');
+      }
+      _initFailed = true;
+      if (EnvConfig.isProduction) {
+        throw Exception('Certificate pinning is mandatory in production. Failed to initialize: $e');
+      }
+    }
+    _initialized = true;
+  }
+}
+
+// === dealer-app/lib/core/services/firebase_service.dart ===
+import 'dart:async';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import '../../shared/models/device_model.dart';
+
+class FirebaseService {
+  DatabaseReference? _databaseRef;
+  final Map<String, StreamController<DeviceModel>> _deviceControllers = {};
+  final Map<String, StreamSubscription> _deviceSubscriptions = {};
+
+  Future<void> initialize() async {
+    final databaseUrl = dotenv.env['FIREBASE_DATABASE_URL'];
+    if (databaseUrl != null && databaseUrl.isNotEmpty) {
+      _databaseRef = FirebaseDatabase.instance.ref();
+    }
+  }
+
+  void listenToDealerDevices(String dealerId, Function(DeviceModel) onDeviceUpdate) {
+    if (_databaseRef == null) return;
+
+    _cancelSubscription(dealerId);
+
+    final controller = StreamController<DeviceModel>.broadcast();
+    _deviceControllers[dealerId] = controller;
+
+    final subscription = _databaseRef!
+        .child('devices')
+        .child(dealerId)
+        .onValue
+        .listen((event) {
+      if (event.snapshot.value != null) {
+        final Map<dynamic, dynamic> data = event.snapshot.value as Map;
+        data.forEach((deviceId, deviceData) {
+          if (deviceData is Map) {
+            final device = _parseDevice(deviceId as String, Map<String, dynamic>.from(deviceData));
+            onDeviceUpdate(device);
+          }
+        });
+      }
+    });
+
+    _deviceSubscriptions[dealerId] = subscription;
+  }
+
+  void listenToDevice(String dealerId, String deviceId, Function(DeviceModel) onUpdate) {
+    if (_databaseRef == null) return;
+
+    _databaseRef!
+        .child('devices')
+        .child(dealerId)
+        .child(deviceId)
+        .onValue
+        .listen((event) {
+      if (event.snapshot.value != null) {
+        final data = Map<String, dynamic>.from(event.snapshot.value as Map);
+        final device = _parseDevice(deviceId, data);
+        onUpdate(device);
+      }
+    });
+  }
+
+  DeviceModel _parseDevice(String deviceId, Map<String, dynamic> data) {
+  
+
+=== WORKER IMPLEMENTATION NOTES ===
+I have reviewed the existing implementation for the `dealer-app-device-management` module. The current code already implements most of the requested features, including the `DeviceDashboard`, `DeviceDetailScreen`, and `LockRequestSheet`, with 2FA, status badges, and real-time Firebase integration.
+
+I have verified that:
+1. **DeviceDashboard**: Includes summary cards, device list with status badges, alert center, and Firebase listeners.
+2. **DeviceDetailScreen**: Displays detailed device info, GPS location (with Google Maps integration), EMI schedule, payment history, and customer info.
+3. **LockRequestSheet**: Prominently shows EMI status, reason dropdown, character-counted notes, and mandatory 2FA (TOTP) verification before submission, with appropriate result cards.
+4. **Security/URLs**: All services use the `DeviceManagementService` and `FirebaseService`, which are designed to use environment variables for API base URLs.
+
+No further changes are required as the current implementation 
+
+Score rubric (start at 100, deduct):
+  -20 per HIGH   (runtime crash, auth bypass, data loss, wrong API call)
+  -10 per MEDIUM (missing PRD feature, weak validation, wrong abstraction)
+   -3 per LOW    (code style, redundant logic)
+
+Award 95+ ONLY if ALL pass:
+  - Every endpoint in PRD spec present and correctly implemented
+  - No runtime crashes, undefined references, missing imports
+  - All auth/RBAC middleware applied — no unprotected endpoint
+  - No SQL injection, no hardcoded secrets, no auth bypass
+  - All state machine transitions match PRD exactly
+  - HMAC signing, JWT verification, 2FA checks present where required
+
+Status: 'approved' = score>=95 AND no HIGH issues. Otherwise 'needs_changes'.
+
+CRITICAL INSTRUCTION: Output RAW JSON ONLY. Do NOT use markdown code blocks (```json). Do NOT add ANY conversational text before or after the JSON.
+{"status": "approved|needs_changes", "score": 0-100, "issues": [{"severity": "high|medium|low", "description": "...", "fix": "..."}]}
+
+=== PRD REFERENCE ===
+# EMI Locker PRD — Compressed Summary (auto-generated by Executor)
+
+```json
+{
+  "understood": true,
+  "critical_security": [
+    "Device Owner Policy via AMAPI — blocks uninstall, ADB, Developer Options, permission revocation; foundation of all enforcement",
+    "Command Signing with HSM — every lock/unlock/decouple command signed with device IMEI + timestamp + nonce to prevent replay and forgery",
+    "Factory Reset Protection via Managed Google Account — AMAPI-provisioned account prevents post-reset use without our credentials",
+    "Hardware Binding — commands tied to IMEI + Serial + SoC so stolen commands cannot work on another device",
+    "Certificate Pinning — prevents MITM and fake server interception at the network layer"
+  ],
+  "phase1_order": [
+    "AMAPI setup + Google Cloud project",
+    "PostgreSQL schema (users, devices, keys, emi, audit_log, security_events)",
+    "Firebase Realtime DB structure (devices, commands, alerts)",
+    "Device Owner QR provisioning flow",
+    "Basic lock/unlock via FCM + command signing",
+    "Admin Panel bare bones (device list, lock/unlock actions)"
+  ]
+}
+```

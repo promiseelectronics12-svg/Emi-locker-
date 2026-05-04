@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#1565C0</color>
+    <color name="primary_light">#1E88E5</color>
+    <color name="primary_dark">#0D47A1</color>
+    <color name="secondary">#FF6F00</color>
+    <color name="error">#D32F2F</color>
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+    <color name="notification_color">#1565C0</color>
+
+    <!-- Lock State Colors -->
+    <color name="state_active">#4CAF50</color>
+    <color name="state_reminder">#FFC107</color>
+    <color name="state_warning">#FF9800</color>
+    <color name="state_overdue">#F44336</color>
+    <color name="state_partial_lock">#D32F2F</color>
+    <color name="state_full_lock">#B71C1C</color>
+
+    <!-- Overlay -->
+    <color name="overlay_background">#E53935</color>
+    <color name="overlay_text">#FFFFFF</color>
+    <color name="overlay_button">#FFFFFF</color>
+    <color name="overlay_button_text">#D32F2F</color>
+    <color name="overlay_dim">#99000000</color>
+    <color name="overlay_card_background">#FFFFFF</color>
+    <color name="overlay_divider">#E0E0E0</color>
+    <color name="overlay_text_secondary">#757575</color>
+
+    <!-- Dashboard Colors -->
+    <color name="text_primary">#212121</color>
+    <color name="text_secondary">#757575</color>
+    <color name="text_hint">#9E9E9E</color>
+    <color name="green">#4CAF50</color>
+    <color name="blue">#2196F3</color>
+    <color name="orange">#FF9800</color>
+    <color name="red">#F44336</color>
+    <color name="yellow">#FFC107</color>
+    <color name="card_background">#FFFFFF</color>
+    <color name="divider">#E0E0E0</color>
+    <color name="surface">#F5F5F5</color>
+
+    <!-- Payment Status Colors -->
+    <color name="payment_success">#4CAF50</color>
+    <color name="payment_pending">#FFC107</color>
+    <color name="payment_failed">#F44336</color>
+    <color name="payment_default">#757575</color>
+
+    <!-- Notification Colors -->
+    <color name="notification_reminder">#2196F3</color>
+    <color name="notification_warning">#FFC107</color>
+    <color name="notification_overdue">#F44336</color>
+    <color name="notification_dealer">#9C27B0</color>
+    <color name="notification_system">#607D8B</color>
+    <color name="notification_read_background">#F5F5F5</color>
+</resources>

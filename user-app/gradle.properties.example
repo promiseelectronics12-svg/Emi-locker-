@@ -1,0 +1,29 @@
+# Project-wide Gradle settings.
+
+# AndroidX
+android.useAndroidX=true
+android.enableJetifier=true
+
+# Kotlin
+kotlin.code.style=official
+
+# JVM args
+org.gradle.jvmargs=-Xmx4096m -Dfile.encoding=UTF-8
+
+# Parallel builds
+org.gradle.parallel=true
+org.gradle.caching=true
+
+# Configuration cache
+org.gradle.configuration-cache=true
+
+# Non-transitive R classes
+android.nonTransitiveRClass=true
+android.nonFinalResIds=true
+
+# Default build features
+android.defaults.buildfeatures.buildconfig=true
+android.defaults.buildfeatures.aidl=true
+android.defaults.buildfeatures.renderscript=true
+android.defaults.buildfeatures.resvalues=true
+android.defaults.buildfeatures.shaders=true

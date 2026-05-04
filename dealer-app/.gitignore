@@ -1,0 +1,43 @@
+# Dependencies
+.packages
+.dart_tool/
+.pub-cache/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Environment - CRITICAL: Never commit .env files
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Build outputs
+build/
+*.apk
+*.aab
+*.jar
+*.so
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test
+coverage/
+
+# Keys - NEVER commit
+*.jks
+*.p12
+keystore.properties
+upload-keystore.jks
+
+# Firebase
+google-services.json

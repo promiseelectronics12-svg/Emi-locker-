@@ -1,0 +1,41 @@
+# Dependencies
+.gradle/
+build/
+*.apk
+*.aab
+*.keystore
+*.jks
+*.p12
+
+# Environment - CRITICAL: Never commit .env files
+.env
+.env.local
+.env.*.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+app/build/
+app/release/
+
+# Logs
+*.log
+
+# Keys - NEVER commit
+key.properties
+keystore.properties
+upload-keystore.jks
+
+# Local config - contains API URLs and secrets
+local.properties
+
+# Generated
+buildConfig.json
