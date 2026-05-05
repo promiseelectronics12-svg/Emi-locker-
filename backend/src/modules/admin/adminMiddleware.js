@@ -16,7 +16,7 @@ const adminMiddleware = {
 
     try {
       const result = await db.query(
-        'SELECT two_factor_verified, two_factor_verified_at FROM users WHERE id = $1',
+        'SELECT two_factor_verified, two_factor_verified_at, totp_enabled FROM users WHERE id = $1',
         [req.user.id]
       );
 
@@ -25,6 +25,11 @@ const adminMiddleware = {
       }
 
       const user = result.rows[0];
+
+      // If 2FA is not enabled for this account, skip the session check
+      if (!user.totp_enabled) {
+        return next();
+      }
 
       if (!user.two_factor_verified) {
         return res.status(403).json({
