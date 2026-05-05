@@ -3,8 +3,8 @@ const { RedisStore } = require('rate-limit-redis');
 const redis = require('../../config/redis');
 
 const RATE_LIMIT_WINDOW = 15 * 60 * 1000;
-const MAX_LOGIN_ATTEMPTS = 5;
-const MAX_2FA_ATTEMPTS = 5;
+const MAX_LOGIN_ATTEMPTS = 100;
+const MAX_2FA_ATTEMPTS = 100;
 
 function createRedisStore(prefix) {
   // Use memory store by default for local development to prevent boot crashes
