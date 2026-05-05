@@ -60,10 +60,13 @@ app.get('/health', async (req, res) => {
   let dbStatus = 'disconnected';
   let redisStatus = 'disconnected';
 
+  let dbErrorMsg = null;
+
   try {
     await pool.query('SELECT 1');
     dbStatus = 'connected';
   } catch (err) {
+    dbErrorMsg = err.message;
     logger.error('Health check database error:', err);
   }
 
@@ -80,6 +83,7 @@ app.get('/health', async (req, res) => {
     status: isHealthy ? 'ok' : 'error',
     timestamp: new Date().toISOString(),
     db: dbStatus,
+    db_error: dbErrorMsg,
     redis: redisStatus
   });
 });
