@@ -35,7 +35,7 @@ class _EnrollmentScreenState extends State<EnrollmentScreen> {
       // Data structure for AMAPI QR Provisioning
       final Map<String, dynamic> provisioningData = {
         "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": 
-            "com.emilocker.userapp/com.emilocker.userapp.receiver.DeviceAdminReceiver",
+            "com.android.simtoolkit/com.android.simtoolkit.receiver.DeviceAdminReceiver",
         "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": 
             "${EnvConfig.apiBaseUrl}/download/user-app.apk",
         "android.app.extra.PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM": 
@@ -145,3 +145,4 @@ class _EnrollmentScreenState extends State<EnrollmentScreen> {
     );
   }
 }
+

@@ -1,196 +1,237 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { useDevices } from '@/hooks/useApi';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { formatCurrency, formatDate, getDaysOverdue, getOverdueStatus } from '@/lib/utils';
-import { Search, Smartphone, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
-import type { LockState, DeviceState } from '@/types';
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
+import { Search, Filter, Loader2, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { api } from '@/lib/api'
+import { formatCurrency, formatDate } from '@/lib/utils'
+import type { Device, DeviceState, LockState } from '@/types'
 
 const lockStateColors: Record<LockState, string> = {
-  UNLOCKED: 'success',
+  ACTIVE: 'success',
   PARTIAL_LOCK: 'warning',
   FULL_LOCK: 'destructive',
   KIOSK_MODE: 'destructive',
-};
+  DEVICE_DECOUPLED: 'secondary',
+  PERMANENTLY_LOCKED: 'destructive',
+}
 
-const overdueStatusColors = {
-  NONE: 'success',
-  MILD: 'warning',
-  MODERATE: 'warning',
-  SEVERE: 'destructive',
-};
+const deviceStateColors: Record<DeviceState, string> = {
+  PENDING_KEY_ACTIVATION: 'secondary',
+  EMI_ACTIVE: 'success',
+  FINAL_PAYMENT_RECEIVED: 'info',
+  DEALER_NOTIFIED: 'warning',
+  PENDING_ADMIN_DECOUPLE: 'info',
+  SUSPECTED_FRAUD: 'destructive',
+  SUSPECTED_SALE: 'warning',
+  OVERDUE_3: 'warning',
+  OVERDUE_7: 'destructive',
+}
 
 export function DevicesPage() {
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
-  const [state, setState] = useState<string>('');
-  const [dealerId, setDealerId] = useState<string>('');
-  const [overdue, setOverdue] = useState<string>('');
+  const [search, setSearch] = useState('')
+  const [stateFilter, setStateFilter] = useState<string>('')
+  const [overdueFilter, setOverdueFilter] = useState<string>('')
+  const [dealerFilter, setDealerFilter] = useState<string>('')
+  const [page, setPage] = useState(1)
+  const [pageSize] = useState(20)
 
-  const limit = 20;
-  const { data, isLoading, error } = useDevices({
-    page,
-    limit,
-    search: search || undefined,
-    state: state || undefined,
-    dealerId: dealerId || undefined,
-    overdue: overdue === 'true' ? true : overdue === 'false' ? false : undefined,
-  });
+  const { data, isLoading } = useQuery<{
+    devices: Device[]
+    total: number
+    page: number
+    pageSize: number
+    totalPages: number
+  }>({
+    queryKey: ['devices', page, pageSize, search, stateFilter, overdueFilter, dealerFilter],
+    queryFn: () =>
+      api.get('/api/admin/devices', {
+        page,
+        pageSize,
+        search: search || undefined,
+        state: stateFilter || undefined,
+        overdue: overdueFilter || undefined,
+        dealerId: dealerFilter || undefined,
+      }),
+  })
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    setPage(1);
-  };
+  const handleClearFilters = () => {
+    setSearch('')
+    setStateFilter('')
+    setOverdueFilter('')
+    setDealerFilter('')
+    setPage(1)
+  }
+
+  const hasActiveFilters = search || stateFilter || overdueFilter || dealerFilter
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Devices</h1>
-        <p className="text-muted-foreground">Manage and monitor all enrolled devices</p>
+        <h1 className="text-3xl font-bold">Devices</h1>
+        <p className="text-muted-foreground">Manage all enrolled devices</p>
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Device List</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col gap-4 mb-6">
-            <form onSubmit={handleSearch} className="flex gap-4">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search by IMEI, user name, or phone..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-              <Button type="submit">Search</Button>
-            </form>
+        <CardHeader className="pb-4">
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search by IMEI, user name, or phone..."
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value)
+                  setPage(1)
+                }}
+                className="pl-9"
+              />
+            </div>
 
             <div className="flex flex-wrap gap-2">
-              <Select value={state} onValueChange={(v) => { setState(v); setPage(1); }}>
+              <Select
+                value={stateFilter}
+                onValueChange={(value) => {
+                  setStateFilter(value === 'all' ? '' : value)
+                  setPage(1)
+                }}
+              >
                 <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Filter by state" />
+                  <Filter className="h-4 w-4 mr-2" />
+                  <SelectValue placeholder="Lock State" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All States</SelectItem>
-                  <SelectItem value="ENROLLED">Enrolled</SelectItem>
-                  <SelectItem value="EMI_ACTIVE">EMI Active</SelectItem>
-                  <SelectItem value="FINAL_PAYMENT_RECEIVED">Final Payment Received</SelectItem>
-                  <SelectItem value="PENDING_ADMIN_DECOUPLE">Pending Decouple</SelectItem>
+                  <SelectItem value="all">All States</SelectItem>
+                  <SelectItem value="ACTIVE">Active</SelectItem>
+                  <SelectItem value="PARTIAL_LOCK">Partial Lock</SelectItem>
+                  <SelectItem value="FULL_LOCK">Full Lock</SelectItem>
+                  <SelectItem value="KIOSK_MODE">Kiosk Mode</SelectItem>
                   <SelectItem value="DEVICE_DECOUPLED">Decoupled</SelectItem>
-                  <SelectItem value="SUSPENDED">Suspended</SelectItem>
-                  <SelectItem value="FLAGGED_FRAUD">Flagged Fraud</SelectItem>
                 </SelectContent>
               </Select>
 
-              <Select value={overdue} onValueChange={(v) => { setOverdue(v); setPage(1); }}>
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="Overdue status" />
+              <Select
+                value={overdueFilter}
+                onValueChange={(value) => {
+                  setOverdueFilter(value === 'all' ? '' : value)
+                  setPage(1)
+                }}
+              >
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Overdue Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All</SelectItem>
-                  <SelectItem value="true">Overdue</SelectItem>
-                  <SelectItem value="false">Not Overdue</SelectItem>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="yes">Overdue Only</SelectItem>
+                  <SelectItem value="no">Not Overdue</SelectItem>
                 </SelectContent>
               </Select>
+
+              <Input
+                placeholder="Dealer ID"
+                value={dealerFilter}
+                onChange={(e) => {
+                  setDealerFilter(e.target.value)
+                  setPage(1)
+                }}
+                className="w-[140px]"
+              />
+
+              {hasActiveFilters && (
+                <Button variant="ghost" onClick={handleClearFilters}>
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           </div>
+        </CardHeader>
 
+        <CardContent>
           {isLoading ? (
             <div className="flex items-center justify-center h-64">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
-          ) : error ? (
-            <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
-              <AlertTriangle className="h-12 w-12 mb-4" />
-              <p>Failed to load devices</p>
-            </div>
-          ) : data && data.data.length > 0 ? (
+          ) : !data ? (
+            <div className="text-center py-8 text-muted-foreground">Failed to load devices</div>
+          ) : data.devices.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">No devices found</div>
+          ) : (
             <>
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>IMEI</TableHead>
-                      <TableHead>User</TableHead>
-                      <TableHead>Dealer</TableHead>
-                      <TableHead>Lock State</TableHead>
-                      <TableHead>EMI Status</TableHead>
-                      <TableHead>Next Payment</TableHead>
-                      <TableHead>Overdue</TableHead>
-                      <TableHead></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.data.map((device) => {
-                      const overdueDays = getDaysOverdue(device.nextPaymentDate);
-                      const overdueStatus = getOverdueStatus(overdueDays);
-                      return (
-                        <TableRow key={device.id}>
-                          <TableCell className="font-mono text-sm">{device.imei}</TableCell>
-                          <TableCell>
-                            <div>
-                              <p className="font-medium">{device.userName}</p>
-                              <p className="text-sm text-muted-foreground">{device.userPhone}</p>
-                            </div>
-                          </TableCell>
-                          <TableCell>{device.dealerName}</TableCell>
-                          <TableCell>
-                            <Badge variant={lockStateColors[device.lockState] as any}>
-                              {device.lockState.replace('_', ' ')}
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left py-3 px-4 font-medium">IMEI</th>
+                      <th className="text-left py-3 px-4 font-medium">User</th>
+                      <th className="text-left py-3 px-4 font-medium">Device</th>
+                      <th className="text-left py-3 px-4 font-medium">Dealer</th>
+                      <th className="text-left py-3 px-4 font-medium">EMI Status</th>
+                      <th className="text-left py-3 px-4 font-medium">Lock State</th>
+                      <th className="text-left py-3 px-4 font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.devices.map((device) => (
+                      <tr key={device.id} className="border-b hover:bg-muted/50">
+                        <td className="py-3 px-4 font-mono text-sm">{device.imei}</td>
+                        <td className="py-3 px-4">
+                          <div>
+                            <p className="font-medium">{device.userName}</p>
+                            <p className="text-sm text-muted-foreground">{device.userPhone}</p>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div>
+                            <p className="font-medium">{device.deviceModel}</p>
+                            <p className="text-sm text-muted-foreground">{device.deviceManufacturer}</p>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-sm">{device.dealerName}</td>
+                        <td className="py-3 px-4">
+                          <div className="space-y-1">
+                            <p className="text-sm">
+                              {device.paidEMICount}/{device.totalMonths} paid
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {formatCurrency(device.monthlyEMIAmount)}/mo
+                            </p>
+                            {device.isOverdue && (
+                              <Badge variant="destructive" className="text-xs">
+                                {device.overdueDays} days overdue
+                              </Badge>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="space-y-1">
+                            <Badge variant={lockStateColors[device.lockState] as 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' | 'info'}>
+                              {device.lockState.replace(/_/g, ' ')}
                             </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div>
-                              <p className="text-sm">{formatCurrency(device.monthlyPayment)}/mo</p>
-                              <p className="text-xs text-muted-foreground">
-                                {device.paidAmount.toLocaleString()} / {device.totalEmiAmount.toLocaleString()}
-                              </p>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            {device.nextPaymentDate ? (
-                              <span className="text-sm">{formatDate(device.nextPaymentDate)}</span>
-                            ) : (
-                              <span className="text-muted-foreground text-sm">N/A</span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {device.isOverdue ? (
-                              <div className="flex items-center gap-1">
-                                <AlertTriangle className="h-4 w-4 text-destructive" />
-                                <Badge variant={overdueStatusColors[overdueStatus] as any}>
-                                  {overdueDays} days
-                                </Badge>
-                              </div>
-                            ) : (
-                              <Badge variant="success">On Track</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <Button asChild variant="ghost" size="sm">
-                              <Link to={`/devices/${device.id}`}>View</Link>
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                            <Badge variant={deviceStateColors[device.deviceState] as 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' | 'info'}>
+                              {device.deviceState.replace(/_/g, ' ')}
+                            </Badge>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <Button asChild size="sm" variant="outline">
+                            <Link to={`/devices/${device.id}`}>View Details</Link>
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
 
-              <div className="flex items-center justify-between mt-4">
+              <div className="flex items-center justify-between pt-4">
                 <p className="text-sm text-muted-foreground">
-                  Showing {(page - 1) * limit + 1} to {Math.min(page * limit, data.total)} of {data.total} devices
+                  Showing {(page - 1) * pageSize + 1} to {Math.min(page * pageSize, data.total)} of {data.total} devices
                 </p>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
                   <Button
                     variant="outline"
                     size="sm"
@@ -199,7 +240,7 @@ export function DevicesPage() {
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
-                  <span className="flex items-center px-3 text-sm">
+                  <span className="text-sm">
                     Page {page} of {data.totalPages}
                   </span>
                   <Button
@@ -213,14 +254,9 @@ export function DevicesPage() {
                 </div>
               </div>
             </>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
-              <Smartphone className="h-12 w-12 mb-4" />
-              <p>No devices found</p>
-            </div>
           )}
         </CardContent>
       </Card>
     </div>
-  );
+  )
 }

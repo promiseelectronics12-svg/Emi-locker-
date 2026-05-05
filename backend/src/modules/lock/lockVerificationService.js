@@ -88,10 +88,10 @@ class LockVerificationService {
   async getDeviceWithEmi(deviceId) {
     const result = await db.query(
       `SELECT d.*, es.start_date as next_due_date, es.total_amount as total_emi_amount,
-              COALESCE((SELECT SUM(amount) FROM emi_payments WHERE schedule_id = es.id AND status = 'completed'), 0) as paid_amount,
+              COALESCE((SELECT SUM(amount) FROM emi_payments WHERE emi_schedule_id = es.id AND status = 'completed'), 0) as paid_amount,
               es.start_date, (es.start_date + (es.duration || ' months')::INTERVAL) as emi_end_date,
               es.duration as installments_total,
-              (SELECT COUNT(*) FROM emi_payments WHERE schedule_id = es.id AND status = 'completed') as installments_paid,
+              (SELECT COUNT(*) FROM emi_payments WHERE emi_schedule_id = es.id AND status = 'completed') as installments_paid,
               es.grace_days as grace_period_days
        FROM devices d
        LEFT JOIN emi_schedules es ON d.id = es.device_id AND es.status = 'active'

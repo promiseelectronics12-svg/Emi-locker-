@@ -36,7 +36,7 @@ export function SecurityEventsPage() {
   const [selectedEvent, setSelectedEvent] = useState<string | null>(null);
   const [resolution, setResolution] = useState<string>('');
 
-  const limit = 20;
+  const limit = 10;
   const { data, isLoading, error } = useSecurityEvents({
     page,
     limit,
@@ -111,8 +111,40 @@ export function SecurityEventsPage() {
           </div>
 
           {isLoading ? (
-            <div className="flex items-center justify-center h-64">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <div className="rounded-xl border border-border/50 overflow-hidden bg-card">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/30">
+                    <TableHead className="w-[120px]">Timestamp</TableHead>
+                    <TableHead className="w-[150px]">Device</TableHead>
+                    <TableHead className="w-[120px]">User</TableHead>
+                    <TableHead className="w-[120px]">Type</TableHead>
+                    <TableHead className="w-[100px]">Severity</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead className="w-[100px]">Status</TableHead>
+                    <TableHead className="w-[80px]"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {Array.from({ length: 10 }).map((_, i) => (
+                    <TableRow key={i}>
+                      <TableCell><div className="skeleton h-4 w-20"></div></TableCell>
+                      <TableCell>
+                        <div className="space-y-2">
+                          <div className="skeleton h-4 w-24"></div>
+                          <div className="skeleton h-3 w-16"></div>
+                        </div>
+                      </TableCell>
+                      <TableCell><div className="skeleton h-4 w-20"></div></TableCell>
+                      <TableCell><div className="skeleton h-6 w-24 rounded-full"></div></TableCell>
+                      <TableCell><div className="skeleton h-6 w-16 rounded-full"></div></TableCell>
+                      <TableCell><div className="skeleton h-4 w-full max-w-[200px]"></div></TableCell>
+                      <TableCell><div className="skeleton h-4 w-16"></div></TableCell>
+                      <TableCell><div className="skeleton h-8 w-16 rounded-md"></div></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
@@ -121,23 +153,23 @@ export function SecurityEventsPage() {
             </div>
           ) : data && data.data.length > 0 ? (
             <>
-              <div className="rounded-md border">
+              <div className="bento-card overflow-hidden">
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Timestamp</TableHead>
-                      <TableHead>Device</TableHead>
-                      <TableHead>User</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Severity</TableHead>
-                      <TableHead>Description</TableHead>
-                      <TableHead>Status</TableHead>
+                    <TableRow className="bg-muted/30 hover:bg-muted/30">
+                      <TableHead className="font-semibold">Timestamp</TableHead>
+                      <TableHead className="font-semibold">Device</TableHead>
+                      <TableHead className="font-semibold">User</TableHead>
+                      <TableHead className="font-semibold">Type</TableHead>
+                      <TableHead className="font-semibold">Severity</TableHead>
+                      <TableHead className="font-semibold">Description</TableHead>
+                      <TableHead className="font-semibold">Status</TableHead>
                       <TableHead></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {data.data.map((event) => (
-                      <TableRow key={event.id}>
+                    {data.data.map((event, index) => (
+                      <TableRow key={event.id} className="animate-in fade-in slide-in-from-bottom-2 duration-500" style={{ animationDelay: `${index * 50}ms` }}>
                         <TableCell className="whitespace-nowrap text-sm">{formatDateTime(event.createdAt)}</TableCell>
                         <TableCell>
                           <div>

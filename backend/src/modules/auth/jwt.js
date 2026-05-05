@@ -104,8 +104,8 @@ async function storeRefreshToken(userId, refreshToken) {
     JSON.stringify({ userId, tokenHash, issuedAt: decoded.iat || Math.floor(Date.now() / 1000) })
   );
 
-  await redis.sadd(`user_refresh_tokens:${userId}`, decoded.jti);
-  await redis.expire(`user_refresh_tokens:${userId}`, REFRESH_TOKEN_TTL_SECONDS);
+  await redis.sadd(`userRefreshTokens:${userId}`, decoded.jti);
+  await redis.expire(`userRefreshTokens:${userId}`, REFRESH_TOKEN_TTL_SECONDS);
 
   return decoded;
 }
@@ -145,7 +145,7 @@ async function invalidateRefreshToken(tokenOrJti) {
 
   if (session) {
     const { userId } = JSON.parse(session);
-    await redis.srem(`user_refresh_tokens:${userId}`, jti);
+    await redis.srem(`userRefreshTokens:${userId}`, jti);
   }
 
   await redis.del(`refresh:${jti}`);

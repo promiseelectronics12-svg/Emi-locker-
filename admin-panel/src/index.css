@@ -2,58 +2,108 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
-    --radius: 0.5rem;
+@import 'leaflet/dist/leaflet.css';
+
+/* Fix Leaflet z-index conflict with shadcn/ui dialogs */
+.leaflet-pane { z-index: 1; }
+.leaflet-top, .leaflet-bottom { z-index: 2; }
+
+
+:root {
+  --background: 150 33% 97%;
+  --foreground: 164 52% 9%;
+  --card: 0 0% 100%;
+  --card-foreground: 164 52% 9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 164 52% 9%;
+  --primary: 158 75% 28%;
+  --primary-foreground: 150 33% 98%;
+  --secondary: 152 28% 91%;
+  --secondary-foreground: 162 42% 14%;
+  --muted: 150 20% 92%;
+  --muted-foreground: 164 10% 40%;
+  --accent: 154 58% 90%;
+  --accent-foreground: 158 75% 20%;
+  --destructive: 0 72% 45%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 154 24% 84%;
+  --input: 154 24% 84%;
+  --ring: 158 75% 32%;
+  --success: 154 72% 32%;
+  --warning: 39 92% 50%;
+  --danger: 0 72% 45%;
+  --radius: 1.5rem;
+}
+
+* {
+  @apply border-border;
+}
+
+body {
+  @apply bg-background text-foreground antialiased;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply border border-white/70 bg-white/70 shadow-[0_18px_55px_rgba(15,118,110,0.10)] backdrop-blur-xl;
   }
 
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 50.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
+  .bento-grid-bg {
+    background:
+      radial-gradient(circle at 16% 12%, rgba(16, 185, 129, 0.08), transparent 30%),
+      radial-gradient(circle at 82% 8%, rgba(14, 165, 233, 0.06), transparent 24%),
+      linear-gradient(135deg, hsl(150 33% 98%), hsl(168 38% 95%));
+  }
+
+  .bento-card {
+    @apply bg-card border border-border/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)] rounded-[1.5rem] overflow-hidden transition-all duration-300;
+  }
+  
+  .bento-card-hover:hover {
+    @apply shadow-[0_20px_40px_rgb(0,0,0,0.08)] -translate-y-1 border-primary/20;
+  }
+
+  .skeleton {
+    @apply bg-muted relative overflow-hidden rounded-xl;
+  }
+  
+  .skeleton::after {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    transform: translateX(-100%);
+    background-image: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0) 0,
+      rgba(255, 255, 255, 0.2) 20%,
+      rgba(255, 255, 255, 0.5) 60%,
+      rgba(255, 255, 255, 0)
+    );
+    animation: shimmer 2s infinite;
+    content: '';
+  }
+
+  .state-pulse {
+    animation: state-pulse 2.6s ease-in-out infinite;
   }
 }
 
-@layer base {
-  * {
-    @apply border-border;
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
   }
-  body {
-    @apply bg-background text-foreground;
+}
+
+@keyframes state-pulse {
+  0%, 100% {
+    opacity: 0.72;
+    transform: scale(0.98);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
   }
 }

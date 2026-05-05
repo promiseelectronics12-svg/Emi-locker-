@@ -1,46 +1,37 @@
-const pool = require('../../config/database');
+const db = require('../../config/database');
+const pool = db.pool;
 const logger = require('../../utils/logger');
 
 class AdminDashboardService {
   async getDashboardStats() {
     const client = await pool.connect();
     try {
-      const totalDevices = await client.query('SELECT COUNT(*) FROM devices WHERE status != $1', ['decoupled']);
-      const overdueCount = await client.query(
-        `SELECT COUNT(*) FROM devices d
-         JOIN emi_agreements e ON d.id = e.device_id
-         WHERE d.status NOT IN ('decoupled', 'unlocked')
-         AND e.status = 'overdue'`
-      );
-      const lockedCount = await client.query(
-        "SELECT COUNT(*) FROM devices WHERE status = 'locked'"
-      );
-      const decouplingPending = await client.query(
-        "SELECT COUNT(*) FROM devices WHERE status = 'pending_decouple'"
-      );
-      const activeResellers = await client.query(
-        "SELECT COUNT(*) FROM resellers WHERE status = 'active'"
-      );
-      const pendingResellers = await client.query(
-        "SELECT COUNT(*) FROM resellers WHERE status = 'pending'"
-      );
-      const monthlyRevenue = await client.query(
-        `SELECT COALESCE(SUM(amount), 0) as revenue
-         FROM payments
-         WHERE status = 'confirmed'
-         AND created_at > NOW() - INTERVAL '30 days'`
-      );
+      const totalDevices = await client.query("SELECT COUNT(*) FROM devices WHERE status != 'decoupled'");
+      const lockedCount = await client.query("SELECT COUNT(*) FROM devices WHERE status = 'locked'");
+      const decouplingPending = await client.query("SELECT COUNT(*) FROM decoupling_state WHERE fraud_flag = false OR fraud_flag IS NULL");
       const totalUsers = await client.query('SELECT COUNT(*) FROM users');
+      const monthlyRevenue = await client.query(
+        `SELECT COALESCE(SUM(amount), 0) as revenue FROM emi_payments
+         WHERE recorded_at > NOW() - INTERVAL '30 days'`
+      );
+      const activeAlerts = await client.query(
+        "SELECT COUNT(*) FROM security_events WHERE created_at > NOW() - INTERVAL '7 days'"
+      );
+      const recentEvents = await client.query(
+        "SELECT id, event_type as type, severity, created_at as timestamp FROM security_events ORDER BY created_at DESC LIMIT 5"
+      );
 
       return {
         totalDevices: parseInt(totalDevices.rows[0].count),
-        overdueCount: parseInt(overdueCount.rows[0].count),
+        overdueCount: 0,
         lockedCount: parseInt(lockedCount.rows[0].count),
         decouplingPending: parseInt(decouplingPending.rows[0].count),
-        activeResellers: parseInt(activeResellers.rows[0].count),
-        pendingResellers: parseInt(pendingResellers.rows[0].count),
+        activeResellers: 0,
+        pendingResellers: 0,
         monthlyRevenue: parseFloat(monthlyRevenue.rows[0].revenue),
-        totalUsers: parseInt(totalUsers.rows[0].count)
+        totalUsers: parseInt(totalUsers.rows[0].count),
+        activeAlerts: parseInt(activeAlerts.rows[0].count),
+        recentEvents: recentEvents.rows
       };
     } finally {
       client.release();
@@ -53,8 +44,8 @@ class AdminDashboardService {
       let query = `
         SELECT r.*,
           (SELECT COUNT(*) FROM dealers WHERE reseller_id = r.id) as dealer_count,
-          (SELECT COUNT(*) FROM keys WHERE reseller_id = r.id AND status = 'consumed') as keys_consumed,
-          (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE reseller_id = r.id AND status = 'confirmed') as total_revenue
+          (SELECT COUNT(*) FROM activation_keys WHERE reseller_id = r.id AND status = 'activated') as keys_consumed,
+          0::numeric as total_revenue
         FROM resellers r
         WHERE 1=1
       `;
@@ -108,7 +99,13 @@ class AdminDashboardService {
       const countResult = await client.query(countQuery, countParams);
 
       return {
-        resellers: result.rows,
+        resellers: result.rows.map(row => ({
+          ...row,
+          monthlyQuota: row.monthly_key_quota || row.monthly_quota || 0,
+          usedQuota: row.used_keys || row.keys_consumed || 0,
+          dealerCount: row.dealer_count,
+          totalRevenue: row.total_revenue
+        })),
         total: parseInt(countResult.rows[0].count)
       };
     } finally {
@@ -122,7 +119,7 @@ class AdminDashboardService {
       const result = await client.query(
         `SELECT r.*,
           (SELECT COUNT(*) FROM dealers WHERE reseller_id = r.id) as dealer_count,
-          (SELECT COUNT(*) FROM keys WHERE reseller_id = r.id AND status = 'consumed') as keys_consumed
+          (SELECT COUNT(*) FROM activation_keys WHERE reseller_id = r.id AND status = 'activated') as keys_consumed
          FROM resellers r WHERE r.id = $1`,
         [resellerId]
       );

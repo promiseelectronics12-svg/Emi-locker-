@@ -17,6 +17,8 @@ const {
   refreshTokenHandler,
   logoutHandler,
   register,
+  registerDealer,
+  registerReseller,
   getMe
 } = authController;
 
@@ -44,6 +46,26 @@ router.post(
   body('phone').notEmpty().withMessage('Phone is required'),
   validateRequest,
   register
+);
+
+router.post(
+  '/register/dealer',
+  body('email').isEmail().normalizeEmail(),
+  ...passwordValidationRules,
+  body('name').trim().notEmpty().withMessage('Name is required'),
+  body('phone').notEmpty().withMessage('Phone is required'),
+  validateRequest,
+  registerDealer
+);
+
+router.post(
+  '/register/reseller',
+  body('email').isEmail().normalizeEmail(),
+  ...passwordValidationRules,
+  body('name').trim().notEmpty().withMessage('Name is required'),
+  body('phone').notEmpty().withMessage('Phone is required'),
+  validateRequest,
+  registerReseller
 );
 
 router.post(

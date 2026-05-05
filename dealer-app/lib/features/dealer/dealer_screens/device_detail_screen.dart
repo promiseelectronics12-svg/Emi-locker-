@@ -10,6 +10,7 @@ import '../../../shared/services/device_management_service.dart';
 import '../../../shared/theme/app_theme.dart';
 import '../../../shared/widgets/common_widgets.dart';
 import '../widgets/lock_request_sheet.dart';
+import '../widgets/device_location_map.dart';
 
 class DeviceDetailScreen extends StatefulWidget {
   final String deviceId;
@@ -302,39 +303,25 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
       );
     }
 
-    return Card(
-      child: InkWell(
-        onTap: _openMap,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              const Icon(Icons.location_on, color: Colors.red, size: 32),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _lastLocation!.address ?? 'Tap to view on map',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w500),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Last updated: ${DateFormat('MMM d, h:mm a').format(_lastLocation!.timestamp)}',
-                      style: const TextStyle(fontSize: 12, color: Colors.grey),
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right, color: Colors.grey),
-            ],
-          ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DeviceLocationMap(
+          latitude: _lastLocation!.latitude,
+          longitude: _lastLocation!.longitude,
+          title: _device?.model ?? 'Device Location',
         ),
-      ),
+        const SizedBox(height: 8),
+        Text(
+          'Last updated: ${DateFormat('MMM d, h:mm a').format(_lastLocation!.timestamp)}',
+          style: const TextStyle(fontSize: 12, color: Colors.grey),
+        ),
+        if (_lastLocation!.address != null)
+          Text(
+            _lastLocation!.address!,
+            style: const TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+      ],
     );
   }
 

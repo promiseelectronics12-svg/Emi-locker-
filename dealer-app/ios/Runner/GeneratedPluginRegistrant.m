@@ -30,6 +30,12 @@
 @import flutter_secure_storage;
 #endif
 
+#if __has_include(<google_maps_flutter_ios/FGMGoogleMapsPlugin.h>)
+#import <google_maps_flutter_ios/FGMGoogleMapsPlugin.h>
+#else
+@import google_maps_flutter_ios;
+#endif
+
 #if __has_include(<http_certificate_pinning/HttpCertificatePinningPlugin.h>)
 #import <http_certificate_pinning/HttpCertificatePinningPlugin.h>
 #else
@@ -73,6 +79,7 @@
   [FLTFirebaseDatabasePlugin registerWithRegistrar:[registry registrarForPlugin:@"FLTFirebaseDatabasePlugin"]];
   [FLTFirebaseMessagingPlugin registerWithRegistrar:[registry registrarForPlugin:@"FLTFirebaseMessagingPlugin"]];
   [FlutterSecureStoragePlugin registerWithRegistrar:[registry registrarForPlugin:@"FlutterSecureStoragePlugin"]];
+  [FGMGoogleMapsPlugin registerWithRegistrar:[registry registrarForPlugin:@"FGMGoogleMapsPlugin"]];
   [HttpCertificatePinningPlugin registerWithRegistrar:[registry registrarForPlugin:@"HttpCertificatePinningPlugin"]];
   [FLTImagePickerPlugin registerWithRegistrar:[registry registrarForPlugin:@"FLTImagePickerPlugin"]];
   [LocalAuthPlugin registerWithRegistrar:[registry registrarForPlugin:@"LocalAuthPlugin"]];

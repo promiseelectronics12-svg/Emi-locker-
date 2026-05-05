@@ -37,7 +37,7 @@ class DecouplingService {
     if (device.schedule_id) {
       const schedule = await emiModel.getScheduleByDeviceId(deviceId);
       const totalPaidResult = await require('../../config/database').query(
-        `SELECT COALESCE(SUM(amount), 0) as total_paid FROM emi_payments WHERE schedule_id = $1 AND status = 'completed'`,
+        `SELECT COALESCE(SUM(amount), 0) as total_paid FROM emi_payments WHERE emi_schedule_id = $1 AND status = 'completed'`,
         [device.schedule_id]
       );
       const totalPaid = parseFloat(totalPaidResult.rows[0].total_paid);

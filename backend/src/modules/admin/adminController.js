@@ -98,6 +98,32 @@ const adminController = {
     });
   },
 
+  async getDeviceById(req, res) {
+    const result = await adminDeviceService.getDeviceById(req.params.id);
+
+    if (!result) {
+      return res.status(404).json({ success: false, error: 'Device not found' });
+    }
+
+    res.json({ success: true, data: result });
+  },
+
+  async executeDeviceAction(req, res) {
+    const { id } = req.params;
+    const { type, reason } = req.body;
+
+    const actionReason = reason || `Admin ${type.toLowerCase()} from panel`;
+    const result = type === 'LOCK'
+      ? await adminDeviceService.lockDevice(id, req.user.id, actionReason, req.ip, 'FULL_LOCK')
+      : await adminDeviceService.unlockDevice(id, req.user.id, actionReason, req.ip);
+
+    if (!result.success) {
+      return res.status(400).json({ success: false, error: result.error });
+    }
+
+    res.json({ success: true, message: `Device ${type.toLowerCase()} executed`, data: result.device });
+  },
+
   async lockDevice(req, res) {
     const { id } = req.params;
     const { reason, lockLevel } = req.body;
@@ -181,6 +207,40 @@ const adminController = {
       limit: result.limit,
       offset: result.offset
     });
+  },
+
+  async resolveSecurityEvent(req, res) {
+    const result = await adminDeviceService.resolveSecurityEvent(
+      req.params.id,
+      req.user.id,
+      req.body.resolution || 'Resolved from admin panel'
+    );
+
+    if (!result.success) {
+      return res.status(404).json({ success: false, error: result.error });
+    }
+
+    res.json({ success: true, data: result.event });
+  },
+
+  async getNeirQueue(req, res) {
+    const result = await adminDeviceService.getNeirQueue();
+    res.json({ success: true, data: result.entries, total: result.total });
+  },
+
+  async reportNeirQueueItem(req, res) {
+    const result = await adminDeviceService.reportNeirQueueItem(req.body.imei, req.user.id);
+
+    if (!result.success) {
+      return res.status(404).json({ success: false, error: result.error });
+    }
+
+    res.json({ success: true, data: result.entry });
+  },
+
+  async getPendingDecoupling(req, res) {
+    const result = await adminDeviceService.getPendingDecoupling();
+    res.json({ success: true, data: result.entries, total: result.total });
   },
 
   async addToNeirQueue(req, res) {

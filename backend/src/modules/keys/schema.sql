@@ -1,57 +1,41 @@
--- EMI Locker Platform - Key Management Schema
--- Run this SQL to create required tables
+-- EMI Locker Platform - Canonical Key Management Schema
+-- Superseded in deployments by database/migrations/099_unify_schema.sql.
 
 CREATE TABLE IF NOT EXISTS key_requests (
-  id SERIAL PRIMARY KEY,
-  reseller_id INTEGER NOT NULL REFERENCES resellers(id),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  reseller_id UUID NOT NULL REFERENCES resellers(id),
   quantity INTEGER NOT NULL CHECK (quantity > 0),
-  justification TEXT NOT NULL,
-  status VARCHAR(20) NOT NULL DEFAULT 'PENDING_ADMIN',
-  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  approved_by INTEGER REFERENCES admins(id),
-  approved_at TIMESTAMP,
-  rejected_by INTEGER REFERENCES admins(id),
-  rejected_at TIMESTAMP,
+  justification TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  approved_quantity INTEGER,
+  approved_by UUID REFERENCES users(id),
+  approved_at TIMESTAMPTZ,
+  rejected_by UUID REFERENCES users(id),
+  rejected_at TIMESTAMPTZ,
   rejection_reason TEXT,
-  CONSTRAINT chk_key_request_status CHECK (status IN ('PENDING_ADMIN', 'APPROVED', 'REJECTED'))
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS keys (
-  id SERIAL PRIMARY KEY,
-  key_string VARCHAR(19) NOT NULL UNIQUE,
-  dealer_id INTEGER REFERENCES dealers(id),
-  reseller_id INTEGER NOT NULL REFERENCES resellers(id),
-  hmac_signature VARCHAR(64) NOT NULL,
-  timestamp BIGINT NOT NULL,
-  nonce VARCHAR(32) NOT NULL,
-  status VARCHAR(20) NOT NULL DEFAULT 'GENERATED',
-  imei VARCHAR(15),
-  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  expires_at TIMESTAMP NOT NULL,
-  assigned_at TIMESTAMP,
-  consumed_at TIMESTAMP,
-  expired_at TIMESTAMP,
-  request_id INTEGER REFERENCES key_requests(id),
-  CONSTRAINT chk_key_status CHECK (status IN ('PENDING_ADMIN', 'GENERATED', 'ASSIGNED', 'CONSUMED', 'EXPIRED', 'REVOKED'))
+CREATE TABLE IF NOT EXISTS activation_keys (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key_string TEXT NOT NULL UNIQUE,
+  reseller_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  dealer_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  device_id UUID REFERENCES devices(id) ON DELETE SET NULL,
+  request_id UUID REFERENCES key_requests(id) ON DELETE SET NULL,
+  hmac_signature TEXT NOT NULL,
+  nonce VARCHAR(64) NOT NULL,
+  sig_timestamp BIGINT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'available' CHECK (status IN ('available', 'assigned', 'activated', 'revoked')),
+  imei_hash TEXT,
+  assigned_at TIMESTAMPTZ,
+  activated_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_keys_reseller_id ON keys(reseller_id);
-CREATE INDEX idx_keys_dealer_id ON keys(dealer_id);
-CREATE INDEX idx_keys_status ON keys(status);
-CREATE INDEX idx_keys_expires_at ON keys(expires_at);
-CREATE INDEX idx_keys_key_string ON keys(key_string);
-
-CREATE INDEX idx_key_requests_reseller_id ON key_requests(reseller_id);
-CREATE INDEX idx_key_requests_status ON key_requests(status);
-
-CREATE TABLE IF NOT EXISTS audit_logs (
-  id SERIAL PRIMARY KEY,
-  user_id INTEGER,
-  action VARCHAR(50) NOT NULL,
-  metadata JSONB,
-  created_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_audit_logs_user_id ON audit_logs(user_id);
-CREATE INDEX idx_audit_logs_action ON audit_logs(action);
-CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_activation_keys_reseller_status ON activation_keys(reseller_id, status);
+CREATE INDEX IF NOT EXISTS idx_activation_keys_dealer_status ON activation_keys(dealer_id, status);
+CREATE INDEX IF NOT EXISTS idx_key_requests_reseller_id ON key_requests(reseller_id);
+CREATE INDEX IF NOT EXISTS idx_key_requests_status ON key_requests(status);

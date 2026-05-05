@@ -1,57 +1,45 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { useAuthStore } from '@/stores/authStore';
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import AdminLayout from '@/components/layout/AdminLayout';
 import { LoginPage } from '@/pages/LoginPage';
-import { AdminLayout } from '@/components/AdminLayout';
-import { DashboardPage } from '@/pages/DashboardPage';
-import { DevicesPage } from '@/pages/DevicesPage';
-import { DeviceDetailPage } from '@/pages/DeviceDetailPage';
-import { ResellersPage } from '@/pages/ResellersPage';
-import { KeyRequestsPage } from '@/pages/KeyRequestsPage';
-import { DecouplingPage } from '@/pages/DecouplingPage';
-import { AuditLogPage } from '@/pages/AuditLogPage';
-import { SecurityEventsPage } from '@/pages/SecurityEventsPage';
-import { NeirQueuePage } from '@/pages/NeiraQueuePage';
-import { TwoFactorModal } from '@/components/TwoFactorModal';
+import Dashboard from '@/pages/dashboard';
+import Devices from '@/pages/devices';
+import DeviceDetail from '@/pages/devices/DeviceDetail';
+import Resellers from '@/pages/resellers';
+import KeyRequests from '@/pages/key-requests';
+import Decoupling from '@/pages/decoupling';
+import AuditLogPage from '@/pages/audit-log';
+import SecurityEvents from '@/pages/security-events';
+import NeirQueue from '@/pages/neir-queue';
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuthStore();
-  
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-  
-  return <>{children}</>;
-}
+const queryClient = new QueryClient();
 
-function App() {
+const App: React.FC = () => {
   return (
-    <>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route
-          path="/"
-          element={
-            <ProtectedRoute>
-              <AdminLayout />
-            </ProtectedRoute>
-          }
-        >
-          <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="dashboard" element={<DashboardPage />} />
-          <Route path="devices" element={<DevicesPage />} />
-          <Route path="devices/:id" element={<DeviceDetailPage />} />
-          <Route path="resellers" element={<ResellersPage />} />
-          <Route path="key-requests" element={<KeyRequestsPage />} />
-          <Route path="decoupling" element={<DecouplingPage />} />
-          <Route path="audit-log" element={<AuditLogPage />} />
-          <Route path="security-events" element={<SecurityEventsPage />} />
-          <Route path="neir-queue" element={<NeirQueuePage />} />
-        </Route>
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
-      <TwoFactorModal />
-    </>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+
+          <Route element={<AdminLayout />}>
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/devices" element={<Devices />} />
+            <Route path="/devices/:id" element={<DeviceDetail />} />
+            <Route path="/resellers" element={<Resellers />} />
+            <Route path="/key-requests" element={<KeyRequests />} />
+            <Route path="/decoupling" element={<Decoupling />} />
+            <Route path="/audit-log" element={<AuditLogPage />} />
+            <Route path="/security-events" element={<SecurityEvents />} />
+            <Route path="/neir-queue" element={<NeirQueue />} />
+          </Route>
+
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </QueryClientProvider>
   );
-}
+};
 
 export default App;

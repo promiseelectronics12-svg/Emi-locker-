@@ -77,6 +77,23 @@ router.get('/devices',
   asyncHandler(adminController.getDevices)
 );
 
+router.get('/devices/:id',
+  [param('id').isUUID()],
+  validateRequest,
+  asyncHandler(adminController.getDeviceById)
+);
+
+router.post('/devices/:id/action',
+  [
+    param('id').isUUID(),
+    body('type').isIn(['LOCK', 'UNLOCK']),
+    body('reason').optional().isString().trim().isLength({ min: 5, max: 500 }),
+    body('twoFactorCode').optional().isString()
+  ],
+  validateRequest,
+  asyncHandler(adminController.executeDeviceAction)
+);
+
 router.post('/devices/:id/lock',
   [
     param('id').isUUID(),
@@ -125,6 +142,28 @@ router.get('/security-events',
   asyncHandler(adminController.getSecurityEvents)
 );
 
+router.patch('/security-events/:id',
+  [
+    param('id').isUUID(),
+    body('status').optional().isIn(['RESOLVED']),
+    body('resolution').optional().isString().trim()
+  ],
+  validateRequest,
+  asyncHandler(adminController.resolveSecurityEvent)
+);
+
+router.get('/neir-queue',
+  asyncHandler(adminController.getNeirQueue)
+);
+
+router.post('/neir-queue/report',
+  [
+    body('imei').isString().trim().isLength({ min: 8, max: 50 })
+  ],
+  validateRequest,
+  asyncHandler(adminController.reportNeirQueueItem)
+);
+
 router.post('/neir-queue',
   [
     body('deviceId').isUUID(),
@@ -132,6 +171,10 @@ router.post('/neir-queue',
   ],
   validateRequest,
   asyncHandler(adminController.addToNeirQueue)
+);
+
+router.get('/decoupling/pending',
+  asyncHandler(adminController.getPendingDecoupling)
 );
 
 router.get('/key-requests',

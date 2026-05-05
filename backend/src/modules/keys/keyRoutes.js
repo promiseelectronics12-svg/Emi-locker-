@@ -31,5 +31,7 @@ router.post('/approve/:requestId', requireRole('admin'), keyController.approveKe
 router.post('/reject/:requestId', requireRole('admin'), keyController.rejectKeyRequest);
 router.post('/assign', requireRole('reseller'), keyController.assignKeys);
 router.post('/consume', consumeLimiter, requireRole('dealer'), keyController.consumeKey);
+router.get('/my-keys', requireRole('dealer'), keyController.getDealerKeys);
+router.get('/inventory', requireRole('reseller'), keyController.getResellerKeys);
 
 module.exports = router;

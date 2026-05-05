@@ -40,6 +40,11 @@ __pycache__/
 review_request.json
 review_result.json
 build_log.md
+admin-panel/build_error.txt
+
+# Graphify
+graphify-out/
+.graphifyignore
 
 # Competitor APK Dumps (Exceeds Windows Path Limits)
 reference locker app decompiled/

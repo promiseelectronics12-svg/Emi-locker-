@@ -1,106 +1,61 @@
-import { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import { Loader2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { useTwoFactorStore } from '@/stores/twoFactorStore';
-import api from '@/lib/api';
+import React, { useState } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { useToast } from '@/hooks/use-toast';
 
-const twoFactorSchema = z.object({
-  code: z.string().length(6, 'Code must be 6 digits'),
-});
+interface TwoFactorModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: (code: string) => void;
+  title?: string;
+  description?: string;
+}
 
-type TwoFactorFormData = z.infer<typeof twoFactorSchema>;
+export const TwoFactorModal: React.FC<TwoFactorModalProps> = ({
+  isOpen,
+  onClose,
+  onConfirm,
+  title = '2FA Confirmation',
+  description = 'Please enter the 6-digit verification code from your authenticator app.',
+}) => {
+  const [code, setCode] = useState('');
+  const { toast } = useToast();
 
-export function TwoFactorModal() {
-  const { isOpen, isLoading, actionDescription, onSuccess, close, setLoading } = useTwoFactorStore();
-  const [error, setError] = useState<string | null>(null);
-
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-    reset,
-  } = useForm<TwoFactorFormData>({
-    resolver: zodResolver(twoFactorSchema),
-  });
-
-  const onSubmit = async (data: TwoFactorFormData) => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      await api.post('/api/admin/auth/verify-action', { code: data.code });
-      reset();
-      close();
-      if (onSuccess) {
-        onSuccess();
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Verification failed. Please try again.');
-      setLoading(false);
+  const handleSubmit = () => {
+    if (code.length !== 6) {
+      toast({
+        title: 'Invalid code',
+        description: 'Verification code must be 6 digits.',
+        variant: 'destructive',
+      });
+      return;
     }
-  };
-
-  const handleClose = () => {
-    reset();
-    setError(null);
-    close();
+    onConfirm(code);
+    setCode('');
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-md">
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent>
         <DialogHeader>
-          <DialogTitle>Two-Factor Authentication Required</DialogTitle>
-          <DialogDescription>
-            {actionDescription || 'This action requires additional verification.'}
-          </DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <p className="text-sm text-muted-foreground">{description}</p>
         </DialogHeader>
-
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="code">Enter 6-digit code</Label>
-            <Input
-              id="code"
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]{6}"
-              maxLength={6}
-              placeholder="000000"
-              {...register('code')}
-              className="text-center text-2xl tracking-widest font-mono"
-            />
-            {errors.code && (
-              <p className="text-sm text-destructive">{errors.code.message}</p>
-            )}
-            {error && (
-              <p className="text-sm text-destructive">{error}</p>
-            )}
-          </div>
-
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button type="button" variant="outline" onClick={handleClose} disabled={isLoading}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isLoading}>
-              {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Verify
-            </Button>
-          </DialogFooter>
-        </form>
+        <div className="py-4">
+          <Input
+            placeholder="000000"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+            maxLength={6}
+            className="text-center text-2xl tracking-widest"
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleSubmit}>Confirm</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
-}
+};

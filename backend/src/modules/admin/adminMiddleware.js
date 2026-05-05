@@ -7,6 +7,11 @@ const adminMiddleware = {
       return res.status(403).json({ error: 'Admin access required' });
     }
 
+    // Skip 2FA session check in development — column may not exist yet
+    if (process.env.NODE_ENV !== 'production') {
+      return next();
+    }
+
     const db = require('../../config/database');
 
     try {

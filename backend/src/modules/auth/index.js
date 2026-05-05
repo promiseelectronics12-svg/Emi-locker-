@@ -427,6 +427,127 @@ async function register(req, res) {
   return res.status(201).json(result.rows[0]);
 }
 
+async function registerRole(req, res, role) {
+  const {
+    email,
+    password,
+    name,
+    phone,
+    shopName,
+    shop_name: shopNameLegacy,
+    companyName,
+    company_name: companyNameLegacy,
+    tradeLicense,
+    trade_license: tradeLicenseLegacy,
+    address,
+    resellerCode,
+    reseller_code: resellerCodeLegacy
+  } = req.body;
+
+  const normalizedEmail = email.toLowerCase().trim();
+  const normalizedPhone = phone.trim();
+
+  const existingUser = await db.query(
+    'SELECT id FROM users WHERE email = $1 OR phone = $2',
+    [normalizedEmail, normalizedPhone]
+  );
+
+  if (existingUser.rows.length > 0) {
+    return errorResponse(res, 409, 'CONFLICT', 'User already exists with this email or phone');
+  }
+
+  const client = await db.getClient();
+  await client.query('BEGIN');
+
+  try {
+    const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const userResult = await client.query(
+      `INSERT INTO users (email, password_hash, name, phone, role, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, 'active', NOW(), NOW())
+       RETURNING id, email, name, phone, role, status, created_at`,
+      [normalizedEmail, hashedPassword, name.trim(), normalizedPhone, role]
+    );
+
+    const user = userResult.rows[0];
+
+    if (role === ROLES.RESELLER) {
+      await client.query(
+        `INSERT INTO resellers (
+          id, name, email, phone, company_name, trade_license, address, status, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', NOW(), NOW())`,
+        [
+          user.id,
+          name.trim(),
+          normalizedEmail,
+          normalizedPhone,
+          companyName || companyNameLegacy || null,
+          tradeLicense || tradeLicenseLegacy || null,
+          address || null
+        ]
+      );
+    }
+
+    if (role === ROLES.DEALER) {
+      let resellerId = null;
+      const code = resellerCode || resellerCodeLegacy;
+      if (code) {
+        const resellerResult = await client.query(
+          `SELECT id FROM resellers
+           WHERE id::TEXT = $1 OR email = $1
+           LIMIT 1`,
+          [String(code)]
+        );
+        resellerId = resellerResult.rows[0]?.id || null;
+      }
+
+      await client.query(
+        `INSERT INTO dealers (
+          user_id, reseller_id, name, email, phone, address, business_name,
+          shop_name, trade_license, role, status, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, 'dealer', 'active', NOW(), NOW())`,
+        [
+          user.id,
+          resellerId,
+          name.trim(),
+          normalizedEmail,
+          normalizedPhone,
+          address || null,
+          shopName || shopNameLegacy || null,
+          tradeLicense || tradeLicenseLegacy || null
+        ]
+      );
+    }
+
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user);
+    await storeSession(user.id, refreshToken.jti);
+    await storeRefreshToken(user.id, refreshToken.token);
+
+    await client.query('COMMIT');
+
+    return res.status(201).json({
+      accessToken: accessToken.token,
+      refreshToken: refreshToken.token,
+      user: sanitizeUser(user)
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function registerDealer(req, res) {
+  return registerRole(req, res, ROLES.DEALER);
+}
+
+async function registerReseller(req, res) {
+  return registerRole(req, res, ROLES.RESELLER);
+}
+
 async function getMe(req, res) {
   const result = await db.query(
     `SELECT id, email, name, phone, role, status, created_at, updated_at, last_login
@@ -477,7 +598,7 @@ async function invalidateSession(tokenId) {
 async function invalidateAllUserSessions(userId) {
   const redis = require('../../config/redis');
   const sessionIds = await redis.smembers(`user_sessions:${userId}`);
-  const refreshIds = await redis.smembers(`user_refresh_tokens:${userId}`);
+  const refreshIds = await redis.smembers(`userRefreshTokens:${userId}`);
 
   for (const sessionId of sessionIds) {
     await redis.del(`session:${sessionId}`);
@@ -488,7 +609,7 @@ async function invalidateAllUserSessions(userId) {
   }
 
   await redis.del(`user_sessions:${userId}`);
-  await redis.del(`user_refresh_tokens:${userId}`);
+  await redis.del(`userRefreshTokens:${userId}`);
   await revokeTokensIssuedBefore(userId);
 }
 
@@ -561,9 +682,14 @@ function sanitizeUser(user) {
   return {
     id: user.id,
     email: user.email,
-    name: user.name,
+    name: user.name || '',
+    phone: user.phone || '',
+    shop_name: user.shop_name || user.business_name || '',
     role: user.role,
-    status: user.status
+    status: user.status,
+    created_at: user.created_at || new Date().toISOString(),
+    two_factor_enabled: Boolean(user.totp_enabled),
+    is_active: user.status === 'active'
   };
 }
 
@@ -577,6 +703,8 @@ module.exports = {
   refreshTokenHandler,
   logoutHandler,
   register,
+  registerDealer,
+  registerReseller,
   getMe,
   storeSession,
   validateSession,

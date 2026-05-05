@@ -14,10 +14,12 @@ import '../auth/auth_state.dart';
 
 class DealerDeviceListScreen extends StatefulWidget {
   final bool showLockAction;
+  final String? dealerId;
 
   const DealerDeviceListScreen({
     super.key,
     this.showLockAction = false,
+    this.dealerId,
   });
 
   @override
@@ -42,9 +44,10 @@ class _DealerDeviceListScreenState extends State<DealerDeviceListScreen> {
       final authState = context.read<AuthBloc>().state;
       if (authState is AuthAuthenticated) {
         final apiClient = context.read<ApiClient>();
+        final dealerIdToQuery = widget.dealerId ?? authState.user!.id;
         final response = await apiClient.get(
           '/devices',
-          queryParameters: {'dealer_id': authState.user!.id},
+          queryParameters: {'dealer_id': dealerIdToQuery},
         );
         final data = response.data as Map<String, dynamic>;
         final devicesJson = data['devices'] as List<dynamic>;

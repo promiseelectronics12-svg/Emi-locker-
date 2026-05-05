@@ -5,8 +5,8 @@ class SecureStorageService {
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
 
-  static const String _tokenKey = 'access_token';
-  static const String _refreshTokenKey = 'refresh_token';
+  static const String _tokenKey = 'accessToken';
+  static const String _refreshTokenKey = 'refreshToken';
   static const String _userIdKey = 'user_id';
   static const String _userRoleKey = 'user_role';
   static const String _2faSetupKey = '2fa_setup_complete';

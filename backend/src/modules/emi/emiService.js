@@ -141,7 +141,7 @@ class EmiService {
     const totalPaidResult = await require('../../config/database').query(
       `SELECT COALESCE(SUM(amount), 0) as total_paid
        FROM emi_payments
-       WHERE schedule_id = $1 AND status IN ('completed', 'pending')`,
+       WHERE emi_schedule_id = $1 AND status IN ('completed', 'pending')`,
       [device.schedule_id]
     );
     const totalPaid = parseFloat(totalPaidResult.rows[0].total_paid);

@@ -7,12 +7,32 @@
     "backend-devices",
     "backend-lock-engine",
     "backend-emi",
+    "backend-notifications",
+    "backend-keys",
+    "backend-decoupling",
+    "backend-location",
+    "backend-admin-api",
+    "backend-fraud",
+    "user-app-foundation",
+    "user-app-lock-states",
+    "user-app-paut",
     "backend-server-entry",
-    "backend-notifications"
+    "dealer-app-enrollment",
+    "user-app-dashboard",
+    "dealer-app-foundation",
+    "dealer-app-analytics",
+    "dealer-app-device-management",
+    "reseller-app"
   ],
   "failed": [
-    "backend-notifications"
+    "user-app-dashboard",
+    "dealer-app-foundation",
+    "dealer-app-device-management",
+    "dealer-app-analytics",
+    "reseller-app",
+    "admin-panel",
+    "admin-panel"
   ],
-  "timestamp": "2026-05-03T00:13:42.875187",
+  "timestamp": "2026-05-04T19:03:23.332906",
   "instruction": "Claude: Phase 1 build is complete. Please audit the generated code against the PRD, check all failed modules, verify security requirements, and write your findings to CLAUDE_SUPERVISOR_RESPONSE.flag to confirm audit is done."
 }

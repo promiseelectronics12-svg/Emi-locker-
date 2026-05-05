@@ -1,279 +1,351 @@
-import { useState } from 'react';
-import { useResellers, useApproveReseller, useSuspendReseller, useUpdateResellerQuota } from '@/hooks/useApi';
-import { useTwoFactorStore } from '@/stores/twoFactorStore';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { formatDate } from '@/lib/utils';
-import { Users, AlertTriangle, Check, X, Settings } from 'lucide-react';
-import type { ResellerStatus } from '@/types';
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Search, Loader2, ChevronLeft, ChevronRight, X, Plus, Check, Ban } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
+import { api } from '@/lib/api'
+import { formatDate } from '@/lib/utils'
+import type { Reseller, ResellerListResponse } from '@/types'
 
-type ModalState = 
-  | { type: 'none' }
-  | { type: 'quota'; resellerId: string; currentQuota: number }
-  | { type: 'suspend'; resellerId: string };
+const quotaSchema = z.object({
+  monthlyQuota: z.number().min(1, 'Quota must be at least 1'),
+})
 
-const statusColors: Record<ResellerStatus, string> = {
-  PENDING: 'warning',
-  APPROVED: 'success',
-  SUSPENDED: 'destructive',
-};
+type QuotaFormData = z.infer<typeof quotaSchema>
 
 export function ResellersPage() {
-  const [page, setPage] = useState(1);
-  const [status, setStatus] = useState<string>('');
-  const [modalState, setModalState] = useState<ModalState>({ type: 'none' });
-  const [suspendReason, setSuspendReason] = useState<string>('');
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<string>('')
+  const [page, setPage] = useState(1)
+  const [pageSize] = useState(20)
+  const [selectedReseller, setSelectedReseller] = useState<Reseller | null>(null)
+  const [isQuotaModalOpen, setIsQuotaModalOpen] = useState(false)
 
-  const limit = 20;
-  const { data, isLoading, error } = useResellers({
-    page,
-    limit,
-    status: status || undefined,
-  });
+  const queryClient = useQueryClient()
 
-  const approveReseller = useApproveReseller();
-  const suspendReseller = useSuspendReseller();
-  const updateQuota = useUpdateResellerQuota();
-  const { open: open2FA } = useTwoFactorStore();
+  const { data, isLoading } = useQuery<ResellerListResponse>({
+    queryKey: ['resellers', page, pageSize, search, statusFilter],
+    queryFn: () =>
+      api.get('/api/admin/resellers', {
+        page,
+        pageSize,
+        search: search || undefined,
+        status: statusFilter || undefined,
+      }),
+  })
 
-  const handleApprove = (resellerId: string) => {
-    open2FA({
-      actionDescription: 'Approve this reseller',
-      onSuccess: () => {
-        approveReseller.mutate(resellerId);
-      },
-    });
-  };
+  const suspendMutation = useMutation({
+    mutationFn: (resellerId: string) =>
+      api.post(`/api/admin/resellers/${resellerId}/suspend`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['resellers'] })
+    },
+  })
 
-  const handleOpenSuspend = (resellerId: string) => {
-    setModalState({ type: 'suspend', resellerId });
-  };
+  const activateMutation = useMutation({
+    mutationFn: (resellerId: string) =>
+      api.post(`/api/admin/resellers/${resellerId}/activate`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['resellers'] })
+    },
+  })
 
-  const handleSuspend = () => {
-    if (modalState.type !== 'suspend' || !suspendReason) return;
-    open2FA({
-      actionDescription: 'Suspend this reseller',
-      onSuccess: () => {
-        suspendReseller.mutate({ resellerId: modalState.resellerId, reason: suspendReason });
-        setModalState({ type: 'none' });
-        setSuspendReason('');
-      },
-    });
-  };
+  const quotaForm = useForm<QuotaFormData>({
+    resolver: zodResolver(quotaSchema),
+  })
 
-  const handleOpenQuota = (resellerId: string, currentQuota: number) => {
-    setModalState({ type: 'quota', resellerId, currentQuota });
-  };
+  const handleOpenQuotaModal = (reseller: Reseller) => {
+    setSelectedReseller(reseller)
+    quotaForm.setValue('monthlyQuota', reseller.monthlyQuota)
+    setIsQuotaModalOpen(true)
+  }
 
-  const handleUpdateQuota = () => {
-    if (modalState.type !== 'quota') return;
-    open2FA({
-      actionDescription: 'Update reseller quota',
-      onSuccess: () => {
-        updateQuota.mutate({ resellerId: modalState.resellerId, quota: modalState.currentQuota });
-        setModalState({ type: 'none' });
-      },
-    });
-  };
+  const handleUpdateQuota = async (data: QuotaFormData) => {
+    if (!selectedReseller) return
 
-  const closeModal = () => {
-    setModalState({ type: 'none' });
-    setSuspendReason('');
-  };
+    await api.post(`/api/admin/resellers/${selectedReseller.id}/quota`, {
+      monthlyQuota: data.monthlyQuota,
+    })
+
+    queryClient.invalidateQueries({ queryKey: ['resellers'] })
+    setIsQuotaModalOpen(false)
+    setSelectedReseller(null)
+    quotaForm.reset()
+  }
+
+  const handleClearFilters = () => {
+    setSearch('')
+    setStatusFilter('')
+    setPage(1)
+  }
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Resellers</h1>
+        <h1 className="text-3xl font-bold">Resellers</h1>
         <p className="text-muted-foreground">Manage reseller accounts and quotas</p>
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Reseller List</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex gap-2 mb-6">
-            <Select value={status} onValueChange={(v) => { setStatus(v); setPage(1); }}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Filter by status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">All Status</SelectItem>
-                <SelectItem value="PENDING">Pending</SelectItem>
-                <SelectItem value="APPROVED">Approved</SelectItem>
-                <SelectItem value="SUSPENDED">Suspended</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+        <CardHeader className="pb-4">
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search by name, email, or company..."
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value)
+                  setPage(1)
+                }}
+                className="pl-9"
+              />
+            </div>
 
+            <div className="flex gap-2">
+              <Button
+                variant={statusFilter === 'ACTIVE' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => {
+                  setStatusFilter(statusFilter === 'ACTIVE' ? '' : 'ACTIVE')
+                  setPage(1)
+                }}
+              >
+                Active
+              </Button>
+              <Button
+                variant={statusFilter === 'PENDING' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => {
+                  setStatusFilter(statusFilter === 'PENDING' ? '' : 'PENDING')
+                  setPage(1)
+                }}
+              >
+                Pending
+              </Button>
+              <Button
+                variant={statusFilter === 'SUSPENDED' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => {
+                  setStatusFilter(statusFilter === 'SUSPENDED' ? '' : 'SUSPENDED')
+                  setPage(1)
+                }}
+              >
+                Suspended
+              </Button>
+
+              {(search || statusFilter) && (
+                <Button variant="ghost" onClick={handleClearFilters}>
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent>
           {isLoading ? (
             <div className="flex items-center justify-center h-64">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
-          ) : error ? (
-            <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
-              <AlertTriangle className="h-12 w-12 mb-4" />
-              <p>Failed to load resellers</p>
-            </div>
-          ) : data && data.data.length > 0 ? (
+          ) : !data ? (
+            <div className="text-center py-8 text-muted-foreground">Failed to load resellers</div>
+          ) : data.resellers.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">No resellers found</div>
+          ) : (
             <>
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Phone</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Quota</TableHead>
-                      <TableHead>Dealers</TableHead>
-                      <TableHead>Created</TableHead>
-                      <TableHead></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.data.map((reseller) => (
-                      <TableRow key={reseller.id}>
-                        <TableCell className="font-medium">{reseller.name}</TableCell>
-                        <TableCell>{reseller.email}</TableCell>
-                        <TableCell>{reseller.phone}</TableCell>
-                        <TableCell>
-                          <Badge variant={statusColors[reseller.status] as any}>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left py-3 px-4 font-medium">Company</th>
+                      <th className="text-left py-3 px-4 font-medium">Contact</th>
+                      <th className="text-left py-3 px-4 font-medium">Quota</th>
+                      <th className="text-left py-3 px-4 font-medium">Used (24h)</th>
+                      <th className="text-left py-3 px-4 font-medium">Status</th>
+                      <th className="text-left py-3 px-4 font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.resellers.map((reseller) => (
+                      <tr key={reseller.id} className="border-b hover:bg-muted/50">
+                        <td className="py-3 px-4">
+                          <div>
+                            <p className="font-medium">{reseller.companyName}</p>
+                            <p className="text-sm text-muted-foreground">ID: {reseller.id}</p>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div>
+                            <p className="font-medium">{reseller.name}</p>
+                            <p className="text-sm text-muted-foreground">{reseller.email}</p>
+                            <p className="text-sm text-muted-foreground">{reseller.phone}</p>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-primary"
+                                  style={{
+                                    width: `${(reseller.usedQuota / reseller.monthlyQuota) * 100}%`,
+                                  }}
+                                />
+                              </div>
+                              <span className="text-sm">
+                                {reseller.usedQuota}/{reseller.monthlyQuota}
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {reseller.remainingQuota} remaining
+                            </p>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span
+                            className={`font-medium ${
+                              reseller.keyRequestCount24h >= 3 ? 'text-destructive' : ''
+                            }`}
+                          >
+                            {reseller.keyRequestCount24h}
+                          </span>
+                          {reseller.keyRequestCount24h >= 3 && (
+                            <Badge variant="destructive" className="ml-2 text-xs">
+                              High
+                            </Badge>
+                          )}
+                        </td>
+                        <td className="py-3 px-4">
+                          <Badge
+                            variant={
+                              reseller.status === 'ACTIVE' ? 'success' :
+                              reseller.status === 'PENDING' ? 'warning' :
+                              'destructive'
+                            }
+                          >
                             {reseller.status}
                           </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <span>{reseller.usedQuota} / {reseller.monthlyQuota}</span>
-                            <Button 
-                              variant="ghost" 
-                              size="icon"
-                              onClick={() => handleOpenQuota(reseller.id, reseller.monthlyQuota)}
-                            >
-                              <Settings className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                        <TableCell>{reseller.dealerCount}</TableCell>
-                        <TableCell>{formatDate(reseller.createdAt)}</TableCell>
-                        <TableCell>
+                        </td>
+                        <td className="py-3 px-4">
                           <div className="flex gap-2">
-                            {reseller.status === 'PENDING' && (
-                              <Button 
-                                size="sm" 
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleOpenQuotaModal(reseller)}
+                            >
+                              Set Quota
+                            </Button>
+                            {reseller.status === 'ACTIVE' ? (
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => suspendMutation.mutate(reseller.id)}
+                                disabled={suspendMutation.isPending}
+                              >
+                                <Ban className="h-4 w-4" />
+                              </Button>
+                            ) : reseller.status === 'SUSPENDED' ? (
+                              <Button
+                                size="sm"
                                 variant="default"
-                                onClick={() => handleApprove(reseller.id)}
-                                disabled={approveReseller.isPending}
+                                onClick={() => activateMutation.mutate(reseller.id)}
+                                disabled={activateMutation.isPending}
                               >
                                 <Check className="h-4 w-4" />
                               </Button>
-                            )}
-                            {reseller.status !== 'SUSPENDED' && (
-                              <Button 
-                                size="sm" 
-                                variant="destructive"
-                                onClick={() => handleOpenSuspend(reseller.id)}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            )}
+                            ) : null}
                           </div>
-                        </TableCell>
-                      </TableRow>
+                        </td>
+                      </tr>
                     ))}
-                  </TableBody>
-                </Table>
+                  </tbody>
+                </table>
               </div>
 
-              <div className="flex items-center justify-between mt-4">
+              <div className="flex items-center justify-between pt-4">
                 <p className="text-sm text-muted-foreground">
-                  Showing {(page - 1) * limit + 1} to {Math.min(page * limit, data.total)} of {data.total} resellers
+                  Showing {(page - 1) * pageSize + 1} to {Math.min(page * pageSize, data.total)} of {data.total} resellers
                 </p>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
-                    Previous
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
                   </Button>
-                  <span className="flex items-center px-3 text-sm">Page {page} of {data.totalPages}</span>
-                  <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(data.totalPages, p + 1))} disabled={page === data.totalPages}>
-                    Next
+                  <span className="text-sm">
+                    Page {page} of {data.totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.min(data.totalPages, p + 1))}
+                    disabled={page === data.totalPages}
+                  >
+                    <ChevronRight className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
             </>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
-              <Users className="h-12 w-12 mb-4" />
-              <p>No resellers found</p>
-            </div>
           )}
         </CardContent>
       </Card>
 
-      <Dialog open={modalState.type === 'quota'} onOpenChange={closeModal}>
-        <DialogContent>
+      <Dialog open={isQuotaModalOpen} onOpenChange={setIsQuotaModalOpen}>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Update Reseller Quota</DialogTitle>
-            <DialogDescription>Set the monthly key quota for this reseller</DialogDescription>
+            <DialogTitle>Set Monthly Quota</DialogTitle>
+            <DialogDescription>
+              Update the monthly key quota for {selectedReseller?.companyName}
+            </DialogDescription>
           </DialogHeader>
-          {modalState.type === 'quota' && (
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="quota">Monthly Quota</Label>
-                <Input
-                  id="quota"
-                  type="number"
-                  min="0"
-                  value={modalState.currentQuota}
-                  onChange={(e) => setModalState({ ...modalState, currentQuota: parseInt(e.target.value, 10) || 0 })}
-                />
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={closeModal}>
-              Cancel
-            </Button>
-            <Button onClick={handleUpdateQuota} disabled={updateQuota.isPending}>
-              Update Quota
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
-      <Dialog open={modalState.type === 'suspend'} onOpenChange={closeModal}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Suspend Reseller</DialogTitle>
-            <DialogDescription>Provide a reason for suspending this reseller</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
+          <form onSubmit={quotaForm.handleSubmit(handleUpdateQuota)} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="reason">Reason</Label>
+              <Label htmlFor="monthlyQuota">Monthly Quota</Label>
               <Input
-                id="reason"
-                value={suspendReason}
-                onChange={(e) => setSuspendReason(e.target.value)}
-                placeholder="Enter suspension reason"
+                id="monthlyQuota"
+                type="number"
+                min={1}
+                {...quotaForm.register('monthlyQuota', { valueAsNumber: true })}
               />
+              {quotaForm.formState.errors.monthlyQuota && (
+                <p className="text-sm text-destructive">
+                  {quotaForm.formState.errors.monthlyQuota.message}
+                </p>
+              )}
             </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={closeModal}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={handleSuspend} disabled={!suspendReason || suspendReseller.isPending}>
-              Suspend Reseller
-            </Button>
-          </DialogFooter>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsQuotaModalOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit">Save Changes</Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>
-  );
+  )
 }

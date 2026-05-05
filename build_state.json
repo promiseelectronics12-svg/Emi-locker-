@@ -20,7 +20,8 @@
     "user-app-dashboard",
     "dealer-app-foundation",
     "dealer-app-analytics",
-    "dealer-app-device-management"
+    "dealer-app-device-management",
+    "reseller-app"
   ],
   "failed": [
     "user-app-dashboard",

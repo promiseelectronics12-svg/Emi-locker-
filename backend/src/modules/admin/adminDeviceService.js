@@ -2,6 +2,21 @@ const db = require('../../config/database');
 const logger = require('../../utils/logger');
 
 class AdminDeviceService {
+  mapDevice(row) {
+    if (!row) return null;
+
+    return {
+      ...row,
+      deviceId: row.id,
+      dealerId: row.dealer_id,
+      lockState: row.lock_level || (row.status === 'locked' ? 'FULL_LOCK' : 'UNLOCKED'),
+      isOverdue: false,
+      overdueDays: 0,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
+  }
+
   async getAllDevices(filters = {}) {
     const client = await db.connect();
     try {
@@ -9,15 +24,13 @@ class AdminDeviceService {
         SELECT d.*,
           u.name as owner_name, u.phone as owner_phone, u.email as owner_email,
           dl.name as dealer_name, dl.phone as dealer_phone,
-          r.name as reseller_name,
-          e.status as emi_status, e.monthly_amount, e.next_payment_date,
-          (SELECT COUNT(*) FROM payments p WHERE p.device_id = d.id AND p.status = 'confirmed') as payment_count,
-          (SELECT MAX(p.created_at) FROM payments p WHERE p.device_id = d.id AND p.status = 'confirmed') as last_payment_date
+          e.emi_amount, e.total_amount, e.duration,
+          (SELECT COUNT(*) FROM emi_payments p WHERE p.device_id = d.id) as payment_count,
+          (SELECT MAX(p.recorded_at) FROM emi_payments p WHERE p.device_id = d.id) as last_payment_date
         FROM devices d
         LEFT JOIN users u ON d.owner_id = u.id
         LEFT JOIN dealers dl ON d.dealer_id = dl.id
-        LEFT JOIN resellers r ON dl.reseller_id = r.id
-        LEFT JOIN emi_agreements e ON d.id = e.device_id
+        LEFT JOIN emi_schedules e ON d.id = e.device_id
         WHERE d.status != 'decoupled'
       `;
 
@@ -36,12 +49,6 @@ class AdminDeviceService {
         params.push(filters.dealerId);
       }
 
-      if (filters.resellerId) {
-        paramCount++;
-        query += ` AND dl.reseller_id = $${paramCount}`;
-        params.push(filters.resellerId);
-      }
-
       if (filters.imei) {
         paramCount++;
         query += ` AND d.imei ILIKE $${paramCount}`;
@@ -54,11 +61,6 @@ class AdminDeviceService {
         params.push(`%${filters.search}%`);
       }
 
-      if (filters.emiStatus) {
-        paramCount++;
-        query += ` AND e.status = $${paramCount}`;
-        params.push(filters.emiStatus);
-      }
 
       query += ' ORDER BY d.created_at DESC';
 
@@ -81,7 +83,7 @@ class AdminDeviceService {
       let countQuery = `SELECT COUNT(*) FROM devices d
         LEFT JOIN users u ON d.owner_id = u.id
         LEFT JOIN dealers dl ON d.dealer_id = dl.id
-        LEFT JOIN emi_agreements e ON d.id = e.device_id
+        LEFT JOIN emi_schedules e ON d.id = e.device_id
         WHERE d.status != 'decoupled'`;
       const countParams = [];
       let countParamCount = 0;
@@ -125,10 +127,30 @@ class AdminDeviceService {
       const countResult = await client.query(countQuery, countParams);
 
       return {
-        devices: result.rows,
+        devices: result.rows.map(row => this.mapDevice(row)),
         total: parseInt(countResult.rows[0].count),
         filters
       };
+    } finally {
+      client.release();
+    }
+  }
+
+  async getDeviceById(deviceId) {
+    const client = await db.connect();
+    try {
+      const result = await client.query(
+        `SELECT d.*,
+                u.name as owner_name, u.phone as owner_phone, u.email as owner_email,
+                dl.name as dealer_name, dl.phone as dealer_phone
+         FROM devices d
+         LEFT JOIN users u ON d.owner_id = u.id
+         LEFT JOIN dealers dl ON d.dealer_id = dl.id
+         WHERE d.id = $1`,
+        [deviceId]
+      );
+
+      return this.mapDevice(result.rows[0]);
     } finally {
       client.release();
     }
@@ -167,22 +189,27 @@ class AdminDeviceService {
         [reason, adminId, lockLevel, deviceId]
       );
 
-      const firebaseService = require('../devices/firebaseService');
-      await firebaseService.updateLockState(deviceId, 'locked', {
-        reason,
-        lockedBy: adminId,
-        adminLock: true,
-        lockLevel
-      });
+      let signedCommand = null;
+      try {
+        const firebaseService = require('../devices/firebaseService');
+        await firebaseService.updateLockState(deviceId, 'locked', {
+          reason,
+          lockedBy: adminId,
+          adminLock: true,
+          lockLevel
+        });
 
-      const commandSigningService = require('../devices/commandSigningService');
-      const signedCommand = await commandSigningService.createAndStoreSignedCommand(
-        deviceId,
-        'admin_lock',
-        { reason, lockedBy: adminId, lockLevel },
-        device.imei,
-        { serial_number: device.serial_number, soc_id: device.soc_id }
-      );
+        const commandSigningService = require('../devices/commandSigningService');
+        signedCommand = await commandSigningService.createAndStoreSignedCommand(
+          deviceId,
+          'admin_lock',
+          { reason, lockedBy: adminId, lockLevel },
+          device.imei,
+          { serial_number: device.serial_number, soc_id: device.soc_id }
+        );
+      } catch (error) {
+        logger.warn('Admin lock command delivery skipped:', error.message);
+      }
 
       await client.query(
         `INSERT INTO audit_log (actor, action, target_type, target_id, metadata, ip_address, created_at)
@@ -196,7 +223,7 @@ class AdminDeviceService {
 
       return {
         success: true,
-        device: updateResult.rows[0],
+        device: this.mapDevice(updateResult.rows[0]),
         command: signedCommand
       };
     } catch (error) {
@@ -236,21 +263,26 @@ class AdminDeviceService {
         [deviceId]
       );
 
-      const firebaseService = require('../devices/firebaseService');
-      await firebaseService.updateLockState(deviceId, 'unlocked', {
-        reason,
-        unlockedBy: adminId,
-        adminUnlock: true
-      });
+      let signedCommand = null;
+      try {
+        const firebaseService = require('../devices/firebaseService');
+        await firebaseService.updateLockState(deviceId, 'unlocked', {
+          reason,
+          unlockedBy: adminId,
+          adminUnlock: true
+        });
 
-      const commandSigningService = require('../devices/commandSigningService');
-      const signedCommand = await commandSigningService.createAndStoreSignedCommand(
-        deviceId,
-        'admin_unlock',
-        { reason, unlockedBy: adminId },
-        device.imei,
-        { serial_number: device.serial_number, soc_id: device.soc_id }
-      );
+        const commandSigningService = require('../devices/commandSigningService');
+        signedCommand = await commandSigningService.createAndStoreSignedCommand(
+          deviceId,
+          'admin_unlock',
+          { reason, unlockedBy: adminId },
+          device.imei,
+          { serial_number: device.serial_number, soc_id: device.soc_id }
+        );
+      } catch (error) {
+        logger.warn('Admin unlock command delivery skipped:', error.message);
+      }
 
       await client.query(
         `INSERT INTO audit_log (actor, action, target_type, target_id, metadata, ip_address, created_at)
@@ -264,7 +296,7 @@ class AdminDeviceService {
 
       return {
         success: true,
-        device: updateResult.rows[0],
+        device: this.mapDevice(updateResult.rows[0]),
         command: signedCommand
       };
     } catch (error) {
@@ -490,11 +522,39 @@ class AdminDeviceService {
       const countResult = await client.query(countQuery, countParams);
 
       return {
-        events: result.rows,
+        events: result.rows.map(row => ({
+          ...row,
+          type: row.event_type,
+          timestamp: row.created_at,
+          description: row.metadata?.message || row.metadata?.error || row.event_type,
+          status: row.resolved ? 'RESOLVED' : 'OPEN'
+        })),
         total: parseInt(countResult.rows[0].count),
         limit,
         offset
       };
+    } finally {
+      client.release();
+    }
+  }
+
+  async resolveSecurityEvent(eventId, adminId, resolution) {
+    const client = await db.connect();
+    try {
+      const result = await client.query(
+        `UPDATE security_events
+         SET resolved = TRUE, resolved_by = $1, resolved_at = NOW(),
+             metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb
+         WHERE id = $3
+         RETURNING *`,
+        [adminId, JSON.stringify({ resolution }), eventId]
+      );
+
+      if (result.rows.length === 0) {
+        return { success: false, error: 'Security event not found' };
+      }
+
+      return { success: true, event: result.rows[0] };
     } finally {
       client.release();
     }
@@ -619,7 +679,14 @@ class AdminDeviceService {
       const countResult = await client.query(countQuery, countParams);
 
       return {
-        requests: result.rows,
+        requests: result.rows.map(row => ({
+          ...row,
+          resellerId: row.reseller_id,
+          resellerName: row.reseller_name,
+          resellerEmail: row.reseller_email,
+          createdAt: row.created_at,
+          approvedByName: row.approved_by_name
+        })),
         total: parseInt(countResult.rows[0].count),
         limit,
         offset
@@ -707,7 +774,7 @@ class AdminDeviceService {
       const monthlyQuota = resellerResult.rows[0].monthly_key_quota;
 
       const approvedThisMonthResult = await client.query(
-        `SELECT COUNT(*) FROM keys
+        `SELECT COUNT(*) FROM activation_keys
          WHERE reseller_id = $1 AND created_at > NOW() - INTERVAL '30 days'`,
         [request.reseller_id]
       );
@@ -738,11 +805,14 @@ class AdminDeviceService {
       }
 
       for (const keyString of generatedKeys) {
-        const { signature, timestamp } = keyService.signKey(keyString, request.reseller_id, Date.now().toString());
+        const nonce = require('crypto').randomBytes(16).toString('hex');
+        const { signature, timestamp } = keyService.signKey(keyString, request.reseller_id, nonce);
         await client.query(
-          `INSERT INTO keys (key_string, reseller_id, status, signature, signature_timestamp, created_at)
-           VALUES ($1, $2, 'approved', $3, $4, NOW())`,
-          [keyString, request.reseller_id, signature, timestamp]
+          `INSERT INTO activation_keys (
+             key_string, reseller_id, request_id, status, hmac_signature, nonce, sig_timestamp, created_at, updated_at
+           )
+           VALUES ($1, $2, $3, 'available', $4, $5, $6, NOW(), NOW())`,
+          [keyString, request.reseller_id, requestId, signature, nonce, timestamp]
         );
       }
 
@@ -766,6 +836,69 @@ class AdminDeviceService {
       await client.query('ROLLBACK');
       logger.error('Failed to approve key request:', error);
       throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getNeirQueue() {
+    const client = await db.connect();
+    try {
+      const result = await client.query(
+        `SELECT id, device_id as "deviceId", imei, reason, reported_by as "reportedBy",
+                created_at as timestamp, status
+         FROM neir_queue
+         ORDER BY created_at DESC
+         LIMIT 200`
+      );
+      return { entries: result.rows, total: result.rows.length };
+    } catch (err) {
+      // Table may not exist yet — return empty
+      logger.warn('neir_queue table query failed:', err.message);
+      return { entries: [], total: 0 };
+    } finally {
+      client.release();
+    }
+  }
+
+  async reportNeirQueueItem(imei, adminId) {
+    const client = await db.connect();
+    try {
+      const result = await client.query(
+        `UPDATE neir_queue
+         SET status = 'submitted', submitted_at = NOW(), submitted_by = $1, updated_at = NOW()
+         WHERE imei = $2 AND status = 'pending'
+         RETURNING *`,
+        [adminId, imei]
+      );
+
+      if (result.rows.length === 0) {
+        return { success: false, error: 'Pending NEIR queue item not found' };
+      }
+
+      return { success: true, entry: result.rows[0] };
+    } finally {
+      client.release();
+    }
+  }
+
+  async getPendingDecoupling() {
+    const client = await db.connect();
+    try {
+      const result = await client.query(
+        `SELECT d.id, d.imei, d.status,
+                d.decoupling_initiated_at as "paymentConfirmedAt",
+                d.decoupling_window_expires_at as "windowExpiresAt",
+                d.fraud_flagged as "dealerFlaggedFraud",
+                d.id as "deviceId"
+         FROM devices d
+         WHERE d.status = 'pending_decouple'
+         ORDER BY d.decoupling_initiated_at ASC`
+      );
+      return { entries: result.rows, total: result.rows.length };
+    } catch (err) {
+      logger.warn('pending decoupling query failed:', err.message);
+      return { entries: [], total: 0 };
     } finally {
       client.release();
     }

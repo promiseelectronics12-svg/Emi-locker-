@@ -1,28 +1,23 @@
-import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
 interface AuthState {
-  isAuthenticated: boolean
-  admin: {
-    id: string
-    name: string
-    email: string
-    role: string
-  } | null
-  setAuth: (admin: AuthState['admin']) => void
-  logout: () => void
+  user: any | null;
+  token: string | null;
+  isAuthenticated: boolean;
+  setAuth: (user: any, token: string) => void;
+  logout: () => void;
 }
 
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
+      user: null,
+      token: null,
       isAuthenticated: false,
-      admin: null,
-      setAuth: (admin) => set({ isAuthenticated: !!admin, admin }),
-      logout: () => set({ isAuthenticated: false, admin: null }),
+      setAuth: (user, token) => set({ user, token, isAuthenticated: !!user }),
+      logout: () => set({ user: null, token: null, isAuthenticated: false }),
     }),
-    {
-      name: 'emi-auth-storage',
-    }
+    { name: 'auth-storage' }
   )
-)
+);

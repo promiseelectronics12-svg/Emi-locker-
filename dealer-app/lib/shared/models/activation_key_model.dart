@@ -6,8 +6,9 @@ class ActivationKey extends Equatable {
   final String? dealerId;
   final String keyCode;
   final bool isUsed;
+  final String status;
   final DateTime createdAt;
-  final DateTime? usedAt;
+  final DateTime? activatedAt;
   final String? deviceId;
 
   const ActivationKey({
@@ -15,9 +16,10 @@ class ActivationKey extends Equatable {
     required this.resellerId,
     this.dealerId,
     required this.keyCode,
-    required this.isUsed,
+    this.isUsed = false,
+    this.status = 'available',
     required this.createdAt,
-    this.usedAt,
+    this.activatedAt,
     this.deviceId,
   });
 
@@ -26,24 +28,28 @@ class ActivationKey extends Equatable {
       id: json['id'] as String,
       resellerId: json['reseller_id'] as String,
       dealerId: json['dealer_id'] as String?,
-      keyCode: json['key_code'] as String,
-      isUsed: json['is_used'] as bool,
+      keyCode: (json['key_string'] ?? json['key_code']) as String,
+      status: (json['status'] as String?) ?? 'available',
+      isUsed: ((json['status'] as String?) == 'activated') || (json['is_used'] as bool? ?? false),
       createdAt: DateTime.parse(json['created_at'] as String),
-      usedAt:
-          json['used_at'] != null ? DateTime.parse(json['used_at'] as String) : null,
+      activatedAt:
+          json['activated_at'] != null ? DateTime.parse(json['activated_at'] as String) : null,
       deviceId: json['device_id'] as String?,
     );
   }
+
+  DateTime? get usedAt => activatedAt;
 
   Map<String, dynamic> toJson() {
     return {
       'id': id,
       'reseller_id': resellerId,
       'dealer_id': dealerId,
-      'key_code': keyCode,
+      'key_string': keyCode,
       'is_used': isUsed,
+      'status': status,
       'created_at': createdAt.toIso8601String(),
-      'used_at': usedAt?.toIso8601String(),
+      'activated_at': activatedAt?.toIso8601String(),
       'device_id': deviceId,
     };
   }

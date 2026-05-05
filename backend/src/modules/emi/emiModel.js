@@ -69,11 +69,10 @@ class EmiModel {
               ep.method as payment_method, ep.tx_id, ep.status as payment_status,
               ep.recorded_at
        FROM generate_installments($1, $2, $3, $4) ei
-       LEFT JOIN emi_payments ep ON ep.schedule_id = es.id AND ep.installment_number = ei.installment_number AND ep.status = 'completed'
        LEFT JOIN LATERAL (
          SELECT id, amount, payment_date, method, tx_id, status, recorded_at
          FROM emi_payments
-         WHERE schedule_id = es.id AND installment_number = ei.installment_number AND status = 'completed'
+         WHERE emi_schedule_id = es.id AND installment_number = ei.installment_number AND status = 'completed'
          ORDER BY recorded_at DESC
          LIMIT 1
        ) ep ON true
@@ -101,7 +100,7 @@ class EmiModel {
 
     const paymentResult = await db.query(
       `INSERT INTO emi_payments (
-        id, schedule_id, device_id, amount, method, tx_id,
+        id, emi_schedule_id, device_id, amount, method, tx_id,
         installment_number, note, status, recorded_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', NOW())
       RETURNING *`,
@@ -111,7 +110,7 @@ class EmiModel {
     const verifyResult = await db.query(
       `SELECT ep.*, es.total_amount, es.emi_amount, es.duration
        FROM emi_payments ep
-       JOIN emi_schedules es ON ep.schedule_id = es.id
+       JOIN emi_schedules es ON ep.emi_schedule_id = es.id
        WHERE ep.id = $1`,
       [id]
     );
@@ -127,7 +126,7 @@ class EmiModel {
     const totalPaidResult = await db.query(
       `SELECT COALESCE(SUM(amount), 0) as total_paid
        FROM emi_payments
-       WHERE schedule_id = $1 AND status = 'completed'`,
+       WHERE emi_schedule_id = $1 AND status = 'completed'`,
       [scheduleId]
     );
     const totalPaid = parseFloat(totalPaidResult.rows[0].total_paid);

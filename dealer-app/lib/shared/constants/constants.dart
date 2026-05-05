@@ -1,41 +1,41 @@
 import 'package:flutter/material.dart';
 
 class ApiConstants {
-  static const String loginEndpoint = '/api/auth/login';
-  static const String registerEndpoint = '/api/auth/register';
-  static const String refreshTokenEndpoint = '/api/auth/refresh';
-  static const String logoutEndpoint = '/api/auth/logout';
-  static const String changePasswordEndpoint = '/api/auth/change-password';
-  static const String setup2FAEndpoint = '/api/auth/setup-2fa';
-  static const String verify2FAEndpoint = '/api/auth/verify-2fa';
-  static const String disable2FAEndpoint = '/api/auth/disable-2fa';
+  static const String loginEndpoint = '/api/v1/auth/login';
+  static const String registerEndpoint = '/api/v1/auth/register';
+  static const String refreshTokenEndpoint = '/api/v1/auth/refresh';
+  static const String logoutEndpoint = '/api/v1/auth/logout';
+  static const String changePasswordEndpoint = '/api/v1/users/change-password';
+  static const String setup2FAEndpoint = '/api/v1/auth/2fa/setup';
+  static const String verify2FAEndpoint = '/api/v1/auth/2fa/verify';
+  static const String disable2FAEndpoint = '/api/v1/auth/2fa/disable';
 
-  static const String devicesEndpoint = '/api/devices';
-  static const String enrollDeviceEndpoint = '/api/devices/enroll';
-  static const String lockRequestEndpoint = '/api/devices/lock-request';
-  static const String fraudFlagEndpoint = '/api/devices/fraud-flag';
+  static const String devicesEndpoint = '/api/v1/devices';
+  static const String enrollDeviceEndpoint = '/api/v1/devices/enroll';
+  static const String lockRequestEndpoint = '/api/v1/devices/lock-request';
+  static const String fraudFlagEndpoint = '/api/v1/devices/fraud-flag';
 
-  static const String emiScheduleEndpoint = '/api/emi/schedule';
-  static const String paymentEndpoint = '/api/emi/payment';
-  static const String decouplingEndpoint = '/api/emi/decouple';
+  static const String emiScheduleEndpoint = '/api/v1/emi/schedule';
+  static const String paymentEndpoint = '/api/v1/emi/payment';
+  static const String decouplingEndpoint = '/api/v1/emi/decouple';
 
-  static const String keysEndpoint = '/api/keys';
-  static const String purchaseKeyEndpoint = '/api/keys/purchase';
-  static const String activateKeyEndpoint = '/api/keys/activate';
+  static const String keysEndpoint = '/api/v1/keys';
+  static const String purchaseKeyEndpoint = '/api/v1/keys/request';
+  static const String activateKeyEndpoint = '/api/v1/keys/consume';
 
-  static const String dealersEndpoint = '/api/dealers';
-  static const String resellerDealersEndpoint = '/api/reseller/dealers';
+  static const String dealersEndpoint = '/api/v1/dealers';
+  static const String resellerDealersEndpoint = '/api/v1/reseller/dealers';
 
-  static const String analyticsEndpoint = '/api/analytics';
-  static const String neirExportEndpoint = '/api/export/neir';
+  static const String analyticsEndpoint = '/api/v1/dealer/analytics';
+  static const String neirExportEndpoint = '/api/v1/export/neir';
 
-  static const String profileEndpoint = '/api/profile';
-  static const String updateProfileEndpoint = '/api/profile/update';
+  static const String profileEndpoint = '/api/v1/users/me';
+  static const String updateProfileEndpoint = '/api/v1/users/me';
 }
 
 class StorageKeys {
-  static const String accessToken = 'access_token';
-  static const String refreshToken = 'refresh_token';
+  static const String accessToken = 'accessToken';
+  static const String refreshToken = 'refreshToken';
   static const String userRole = 'user_role';
   static const String userId = 'user_id';
   static const String dealerId = 'dealer_id';

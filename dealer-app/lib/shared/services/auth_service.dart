@@ -7,8 +7,9 @@ class AuthService {
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
   static const String _userKey = 'current_user';
+  static const String _tempTokenKey = 'tempToken';
 
-  AuthService({required ApiClient apiClient}) : _apiClient = apiClient;
+  AuthService({ApiClient? apiClient}) : _apiClient = apiClient ?? ApiClient();
 
   Future<User?> getCurrentUser() async {
     final userData = await _storage.read(key: _userKey);
@@ -37,7 +38,7 @@ class AuthService {
     required String password,
   }) async {
     final response = await _apiClient.post(
-      '/auth/login',
+      '/api/v1/auth/login',
       data: {
         'email': email,
         'password': password,
@@ -45,15 +46,30 @@ class AuthService {
     );
 
     final data = response.data as Map<String, dynamic>;
+    final tempToken = data['tempToken'] as String?;
+    if (tempToken == null) {
+      return data;
+    }
+    await _storage.write(key: _tempTokenKey, value: tempToken);
+
+    if (data['requires2FA'] == true) {
+      return data;
+    }
+
+    final verifyResponse = await _apiClient.post(
+      '/api/v1/auth/2fa/verify',
+      data: {'tempToken': tempToken},
+    );
+    final verifiedData = verifyResponse.data as Map<String, dynamic>;
     await _apiClient.setTokens(
-      data['access_token'] as String,
-      data['refresh_token'] as String,
+      accessToken: verifiedData['accessToken'] as String,
+      refreshToken: verifiedData['refreshToken'] as String,
     );
 
-    final user = User.fromJson(data['user'] as Map<String, dynamic>);
+    final user = User.fromJson(verifiedData['user'] as Map<String, dynamic>);
     await saveUser(user);
 
-    return data;
+    return verifiedData;
   }
 
   Future<Map<String, dynamic>> registerDealer({
@@ -67,7 +83,7 @@ class AuthService {
     required String resellerCode,
   }) async {
     final response = await _apiClient.post(
-      '/auth/register/dealer',
+      '/api/v1/auth/register/dealer',
       data: {
         'name': name,
         'email': email,
@@ -82,8 +98,8 @@ class AuthService {
 
     final data = response.data as Map<String, dynamic>;
     await _apiClient.setTokens(
-      data['access_token'] as String,
-      data['refresh_token'] as String,
+      accessToken: data['accessToken'] as String,
+      refreshToken: data['refreshToken'] as String,
     );
 
     final user = User.fromJson(data['user'] as Map<String, dynamic>);
@@ -102,7 +118,7 @@ class AuthService {
     required String address,
   }) async {
     final response = await _apiClient.post(
-      '/auth/register/reseller',
+      '/api/v1/auth/register/reseller',
       data: {
         'name': name,
         'email': email,
@@ -116,8 +132,8 @@ class AuthService {
 
     final data = response.data as Map<String, dynamic>;
     await _apiClient.setTokens(
-      data['access_token'] as String,
-      data['refresh_token'] as String,
+      accessToken: data['accessToken'] as String,
+      refreshToken: data['refreshToken'] as String,
     );
 
     final user = User.fromJson(data['user'] as Map<String, dynamic>);
@@ -128,29 +144,37 @@ class AuthService {
 
   Future<void> logout() async {
     try {
-      await _apiClient.post('/auth/logout');
+      await _apiClient.post('/api/v1/auth/logout');
     } catch (_) {}
     await _apiClient.clearTokens();
     await clearUser();
   }
 
   Future<Map<String, dynamic>> setup2FA() async {
-    final response = await _apiClient.post('/auth/2fa/setup');
+    final response = await _apiClient.post('/api/v1/auth/2fa/setup');
     return response.data as Map<String, dynamic>;
   }
 
   Future<bool> verify2FA(String code) async {
+    final tempToken = await _storage.read(key: _tempTokenKey);
     final response = await _apiClient.post(
-      '/auth/2fa/verify',
-      data: {'code': code},
+      '/api/v1/auth/2fa/verify',
+      data: {'tempToken': tempToken, 'code': code},
     );
     final data = response.data as Map<String, dynamic>;
-    return data['success'] as bool;
+    await _apiClient.setTokens(
+      accessToken: data['accessToken'] as String,
+      refreshToken: data['refreshToken'] as String,
+    );
+    await _storage.delete(key: _tempTokenKey);
+    final user = User.fromJson(data['user'] as Map<String, dynamic>);
+    await saveUser(user);
+    return true;
   }
 
   Future<void> disable2FA(String code) async {
     await _apiClient.post(
-      '/auth/2fa/disable',
+      '/api/v1/auth/2fa/disable',
       data: {'code': code},
     );
   }
@@ -160,10 +184,10 @@ class AuthService {
     required String newPassword,
   }) async {
     await _apiClient.post(
-      '/auth/change-password',
+      '/api/v1/users/change-password',
       data: {
-        'current_password': currentPassword,
-        'new_password': newPassword,
+        'currentPassword': currentPassword,
+        'newPassword': newPassword,
       },
     );
   }
@@ -174,11 +198,15 @@ class AuthService {
   }
 
   Future<Map<String, dynamic>> refreshTokens() async {
-    final response = await _apiClient.post('/auth/refresh');
+    final refreshToken = await _storage.read(key: 'refreshToken');
+    final response = await _apiClient.post(
+      '/api/v1/auth/refresh',
+      data: {'refreshToken': refreshToken},
+    );
     final data = response.data as Map<String, dynamic>;
     await _apiClient.setTokens(
-      data['access_token'] as String,
-      data['refresh_token'] as String,
+      accessToken: data['accessToken'] as String,
+      refreshToken: data['refreshToken'] as String,
     );
     return data;
   }

@@ -10,7 +10,7 @@ if (!HMAC_SECRET) {
   throw new Error('HMAC_SECRET environment variable must be set - key signatures cannot be securely generated without it');
 }
 
-async function generateKeyString() {
+async function generateKeyString(client = db) {
   let attempts = 0;
   const maxAttempts = 5;
   while (attempts < maxAttempts) {
@@ -26,7 +26,7 @@ async function generateKeyString() {
     }
     const keyString = segments.join('-');
     try {
-      const result = await db.query('SELECT id FROM keys WHERE key_string = $1', [keyString]);
+      const result = await client.query('SELECT id FROM activation_keys WHERE key_string = $1', [keyString]);
       if (result.rows.length === 0) {
         return keyString;
       }
@@ -51,6 +51,9 @@ function verifyKeySignature(keyString, dealerId, timestamp, nonce, signature) {
   const hmac = crypto.createHmac('sha256', HMAC_SECRET);
   hmac.update(data);
   const expectedSignature = hmac.digest('hex');
+  if (!signature || signature.length !== expectedSignature.length) {
+    return false;
+  }
   return crypto.timingSafeEqual(
     Buffer.from(signature, 'hex'),
     Buffer.from(expectedSignature, 'hex')

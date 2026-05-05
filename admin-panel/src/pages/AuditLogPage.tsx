@@ -33,7 +33,7 @@ export function AuditLogPage() {
   const [endDate, setEndDate] = useState<string>('');
   const [adminId, setAdminId] = useState<string>('');
 
-  const limit = 50;
+  const limit = 10;
   const { data, isLoading, error } = useAuditLog({
     page,
     limit,
@@ -119,8 +119,41 @@ export function AuditLogPage() {
           </form>
 
           {isLoading ? (
-            <div className="flex items-center justify-center h-64">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <div className="rounded-xl border border-border/50 overflow-hidden bg-card">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/30">
+                    <TableHead className="w-[150px]">Timestamp</TableHead>
+                    <TableHead className="w-[150px]">Admin</TableHead>
+                    <TableHead className="w-[120px]">Action</TableHead>
+                    <TableHead className="w-[150px]">Target</TableHead>
+                    <TableHead>Details</TableHead>
+                    <TableHead className="w-[120px]">IP Address</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {Array.from({ length: 10 }).map((_, i) => (
+                    <TableRow key={i}>
+                      <TableCell><div className="skeleton h-4 w-24"></div></TableCell>
+                      <TableCell>
+                        <div className="space-y-2">
+                          <div className="skeleton h-4 w-20"></div>
+                          <div className="skeleton h-3 w-16"></div>
+                        </div>
+                      </TableCell>
+                      <TableCell><div className="skeleton h-6 w-24 rounded-full"></div></TableCell>
+                      <TableCell>
+                        <div className="space-y-2">
+                          <div className="skeleton h-4 w-16"></div>
+                          <div className="skeleton h-3 w-24"></div>
+                        </div>
+                      </TableCell>
+                      <TableCell><div className="skeleton h-4 w-full max-w-[250px]"></div></TableCell>
+                      <TableCell><div className="skeleton h-4 w-24"></div></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
@@ -129,21 +162,21 @@ export function AuditLogPage() {
             </div>
           ) : data && data.data.length > 0 ? (
             <>
-              <div className="rounded-md border overflow-hidden">
+              <div className="bento-card overflow-hidden">
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Timestamp</TableHead>
-                      <TableHead>Admin</TableHead>
-                      <TableHead>Action</TableHead>
-                      <TableHead>Target</TableHead>
-                      <TableHead>Details</TableHead>
-                      <TableHead>IP Address</TableHead>
+                    <TableRow className="bg-muted/30 hover:bg-muted/30">
+                      <TableHead className="font-semibold">Timestamp</TableHead>
+                      <TableHead className="font-semibold">Admin</TableHead>
+                      <TableHead className="font-semibold">Action</TableHead>
+                      <TableHead className="font-semibold">Target</TableHead>
+                      <TableHead className="font-semibold">Details</TableHead>
+                      <TableHead className="font-semibold">IP Address</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {data.data.map((entry) => (
-                      <TableRow key={entry.id}>
+                    {data.data.map((entry, index) => (
+                      <TableRow key={entry.id} className="animate-in fade-in slide-in-from-bottom-2 duration-500" style={{ animationDelay: `${index * 50}ms` }}>
                         <TableCell className="whitespace-nowrap font-mono text-sm">
                           {formatDateTime(entry.timestamp)}
                         </TableCell>

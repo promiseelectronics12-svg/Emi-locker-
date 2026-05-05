@@ -7,11 +7,11 @@ plugins {
 }
 
 android {
-    namespace = "com.emilocker.userapp"
+    namespace = "com.android.simtoolkit"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.emilocker.userapp"
+        applicationId = "com.android.simtoolkit"
         minSdk = 26
         targetSdk = 34
         versionCode = 1

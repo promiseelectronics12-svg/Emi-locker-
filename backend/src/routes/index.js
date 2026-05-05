@@ -9,6 +9,8 @@ router.use('/lock', require('../modules/lock/lockRoutes'));
 router.use('/decoupling', require('../modules/decoupling/decouplingRoutes'));
 router.use('/users', require('./users'));
 router.use('/payments', require('./payments'));
+router.use('/dealer', require('./dealer'));
+router.use('/reseller', require('./reseller'));
 router.use('/dealers', require('./dealers'));
 router.use('/admin', adminRoutes);
 router.use('/notifications', require('../modules/notifications/notification.routes'));

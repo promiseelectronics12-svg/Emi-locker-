@@ -7,6 +7,7 @@ import '../../shared/widgets/common_widgets.dart';
 import '../../shared/utils/validators.dart';
 import '../auth/bloc/auth_bloc.dart';
 import '../auth/auth_state.dart';
+import '../dealer_screens/dealer_device_list_screen.dart';
 
 class ResellerDealerListScreen extends StatefulWidget {
   final bool addMode;
@@ -411,6 +412,26 @@ class _DealerDetailsSheet extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => DealerDeviceListScreen(dealerId: dealer.id),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.devices),
+                      label: const Text('View Devices'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
                   Expanded(
                     child: ElevatedButton.icon(
                       onPressed: onDeactivate,
