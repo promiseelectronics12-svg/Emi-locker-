@@ -101,7 +101,7 @@ class AdminDashboardService {
       return {
         resellers: result.rows.map(row => ({
           ...row,
-          monthlyQuota: row.monthly_key_quota || row.monthly_quota || 0,
+          monthlyQuota: row.monthly_quota || 0,
           usedQuota: row.used_keys || row.keys_consumed || 0,
           dealerCount: row.dealer_count,
           totalRevenue: row.total_revenue
@@ -206,7 +206,7 @@ class AdminDashboardService {
 
       const result = await client.query(
         `UPDATE resellers
-         SET monthly_key_quota = $1, quota_updated_at = NOW(), quota_updated_by = $2, updated_at = NOW()
+         SET monthly_quota = $1, quota_updated_at = NOW(), quota_updated_by = $2, updated_at = NOW()
          WHERE id = $3
          RETURNING *`,
         [monthlyQuota, adminId, resellerId]

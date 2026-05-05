@@ -400,10 +400,10 @@ class DecouplingModel {
 
   async verifyFinalPayment(deviceId, paymentId) {
     const paymentResult = await db.query(
-      `SELECT ep.id, ep.emi_schedule_id, ep.amount, ep.status
+      `SELECT ep.id, ep.emi_schedule_id, ep.amount, ep.payment_status
        FROM emi_payments ep
        JOIN emi_schedules es ON ep.emi_schedule_id = es.id
-       WHERE ep.id = $1 AND es.device_id = $2 AND ep.status = 'completed'`,
+       WHERE ep.id = $1 AND es.device_id = $2 AND ep.payment_status = 'completed'`,
       [paymentId, deviceId]
     );
 
@@ -415,7 +415,7 @@ class DecouplingModel {
       `SELECT es.total_amount,
               COALESCE(SUM(ep.amount), 0) as total_paid
        FROM emi_schedules es
-       LEFT JOIN emi_payments ep ON ep.emi_schedule_id = es.id AND ep.status = 'completed'
+       LEFT JOIN emi_payments ep ON ep.emi_schedule_id = es.id AND ep.payment_status = 'completed'
        WHERE es.device_id = $1 AND es.status = 'active'
        GROUP BY es.id, es.total_amount`,
       [deviceId]

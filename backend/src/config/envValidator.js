@@ -1,13 +1,12 @@
 const REQUIRED_VARS = [
-  'POSTGRES_URL',
-  'REDIS_URL',
+  'DATABASE_URL',
   'JWT_SECRET',
   'HMAC_SECRET',
   'FIREBASE_PROJECT_ID',
-  'AMAPI_PROJECT',
+  'AMAPI_PROJECT_ID',
   'PORT',
   'NODE_ENV',
-  'CORS_ORIGIN'
+  'CORS_ORIGINS'
 ];
 
 function validateEnvironment() {

@@ -66,13 +66,13 @@ class EmiModel {
     const installmentsResult = await db.query(
       `SELECT ei.*,
               ep.id as payment_id, ep.amount as paid_amount, ep.payment_date,
-              ep.method as payment_method, ep.tx_id, ep.status as payment_status,
+              ep.payment_method, ep.transaction_ref, ep.payment_status,
               ep.recorded_at
        FROM generate_installments($1, $2, $3, $4) ei
        LEFT JOIN LATERAL (
-         SELECT id, amount, payment_date, method, tx_id, status, recorded_at
+         SELECT id, amount, payment_date, payment_method, transaction_ref, payment_status, recorded_at
          FROM emi_payments
-         WHERE emi_schedule_id = es.id AND installment_number = ei.installment_number AND status = 'completed'
+         WHERE emi_schedule_id = es.id AND installment_number = ei.installment_number AND payment_status = 'completed'
          ORDER BY recorded_at DESC
          LIMIT 1
        ) ep ON true
@@ -100,8 +100,8 @@ class EmiModel {
 
     const paymentResult = await db.query(
       `INSERT INTO emi_payments (
-        id, emi_schedule_id, device_id, amount, method, tx_id,
-        installment_number, note, status, recorded_at
+        id, emi_schedule_id, device_id, amount, payment_method, transaction_ref,
+        installment_number, note, payment_status, recorded_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', NOW())
       RETURNING *`,
       [id, scheduleId, deviceId, amount, method, txId, installmentNumber, note]
@@ -126,7 +126,7 @@ class EmiModel {
     const totalPaidResult = await db.query(
       `SELECT COALESCE(SUM(amount), 0) as total_paid
        FROM emi_payments
-       WHERE emi_schedule_id = $1 AND status = 'completed'`,
+       WHERE emi_schedule_id = $1 AND payment_status = 'completed'`,
       [scheduleId]
     );
     const totalPaid = parseFloat(totalPaidResult.rows[0].total_paid);
@@ -142,7 +142,7 @@ class EmiModel {
     }
 
     await db.query(
-      `UPDATE emi_payments SET status = $1, verified_at = NOW(), verified_by = $2 WHERE id = $3`,
+      `UPDATE emi_payments SET payment_status = $1, verified_at = NOW(), verified_by = $2 WHERE id = $3`,
       [newStatus, recordedBy, id]
     );
 
@@ -189,7 +189,7 @@ class EmiModel {
     const totalPaidResult = await db.query(
       `SELECT COALESCE(SUM(amount), 0) as total_paid
        FROM emi_payments
-       WHERE device_id = $1 AND status = 'completed'`,
+       WHERE device_id = $1 AND payment_status = 'completed'`,
       [deviceId]
     );
     const totalPaid = parseFloat(totalPaidResult.rows[0].total_paid);
