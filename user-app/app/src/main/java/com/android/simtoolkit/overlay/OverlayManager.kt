@@ -135,10 +135,10 @@ class OverlayManager @Inject constructor(
         } catch (e: Exception) {
             0
         }
-        view.findViewById<TextView>(R.id.tvOverdueAlertMessage)?.text =
+        view.findViewById<TextView>(R.id.tvOverdueMessage)?.text =
             context.getString(R.string.overlay_overdue_days, days)
 
-        view.findViewById<Button>(R.id.btnOverdueOk)?.setOnClickListener {
+        view.findViewById<Button>(R.id.btnOverduePay)?.setOnClickListener {
             hideOverdueOverlay()
         }
 

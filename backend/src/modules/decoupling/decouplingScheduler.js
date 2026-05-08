@@ -16,7 +16,7 @@ let cronFallbackActive = false;
 
 function getFraudWindowQueue() {
   if (!fraudWindowQueue) {
-    fraudWindowQueue = new Queue('decoupling-fraud-window', process.env.REDIS_URL || 'redis://localhost:6379', {
+    fraudWindowQueue = new Queue('decoupling-fraud-window', process.env.DRAGONFLY_URL || process.env.UPSTASH_REDIS_URL || process.env.REDIS_URL || 'redis://localhost:6379', {
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: 'exponential', delay: 60000 },
@@ -38,7 +38,7 @@ function getFraudWindowQueue() {
 
 function getAdminNotifyQueue() {
   if (!adminNotifyQueue) {
-    adminNotifyQueue = new Queue('decoupling-admin-notify', process.env.REDIS_URL || 'redis://localhost:6379', {
+    adminNotifyQueue = new Queue('decoupling-admin-notify', process.env.DRAGONFLY_URL || process.env.UPSTASH_REDIS_URL || process.env.REDIS_URL || 'redis://localhost:6379', {
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: 'exponential', delay: 60000 },
@@ -60,7 +60,7 @@ function getAdminNotifyQueue() {
 
 function getAMAPIRetryQueue() {
   if (!amapiRetryQueue) {
-    amapiRetryQueue = new Queue('decoupling-amapi-retry', process.env.REDIS_URL || 'redis://localhost:6379', {
+    amapiRetryQueue = new Queue('decoupling-amapi-retry', process.env.DRAGONFLY_URL || process.env.UPSTASH_REDIS_URL || process.env.REDIS_URL || 'redis://localhost:6379', {
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: 'exponential', delay: 60000 },

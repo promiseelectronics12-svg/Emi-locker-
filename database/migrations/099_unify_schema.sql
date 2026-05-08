@@ -107,10 +107,20 @@ UPDATE resellers SET monthly_key_quota = COALESCE(monthly_key_quota, monthly_quo
 UPDATE resellers SET monthly_quota = COALESCE(monthly_quota, monthly_key_quota, 100);
 
 ALTER TABLE dealers ADD COLUMN IF NOT EXISTS reseller_id UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE dealers ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE dealers ADD COLUMN IF NOT EXISTS business_name TEXT;
 ALTER TABLE dealers ADD COLUMN IF NOT EXISTS shop_name TEXT;
 ALTER TABLE dealers ADD COLUMN IF NOT EXISTS trade_license TEXT;
 ALTER TABLE dealers ADD COLUMN IF NOT EXISTS suspended_at TIMESTAMPTZ;
 ALTER TABLE dealers ADD COLUMN IF NOT EXISTS reactivated_at TIMESTAMPTZ;
+UPDATE dealers SET business_name = COALESCE(business_name, shop_name);
+UPDATE dealers d
+SET user_id = u.id
+FROM users u
+WHERE d.user_id IS NULL
+  AND LOWER(d.email) = LOWER(u.email)
+  AND u.role = 'dealer';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dealers_user_id ON dealers(user_id) WHERE user_id IS NOT NULL;
 
 DO $$
 DECLARE
@@ -231,6 +241,22 @@ ALTER TABLE devices ADD COLUMN IF NOT EXISTS activation_key_id UUID REFERENCES a
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS totp_secret TEXT;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS lock_level TEXT DEFAULT 'NONE';
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+
+DO $$
+DECLARE
+  fk_name TEXT;
+BEGIN
+  FOR fk_name IN
+    SELECT con.conname
+    FROM pg_constraint con
+    JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = ANY(con.conkey)
+    WHERE con.conrelid = 'devices'::regclass
+      AND con.contype = 'f'
+      AND att.attname = 'dealer_id'
+  LOOP
+    EXECUTE format('ALTER TABLE devices DROP CONSTRAINT %I', fk_name);
+  END LOOP;
+END $$;
 
 DO $$
 BEGIN

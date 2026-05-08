@@ -6,7 +6,7 @@ const kmsSigningService = require('../devices/kmsSigningService');
 const Queue = require('bull');
 const crypto = require('crypto');
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+const REDIS_URL = process.env.DRAGONFLY_URL || process.env.UPSTASH_REDIS_URL || process.env.REDIS_URL || 'redis://localhost:6379';
 const AUTO_LOCK_LEVEL = 7;
 
 class LocationService {

@@ -805,6 +805,103 @@ class FraudService {
     };
   }
 
+  // Called when device reports a SIM_CHANGED event.
+  // If a location anomaly was also recorded for this device within the last 60 minutes,
+  // we have two corroborating signals — escalate immediately.
+  async handleSimChangeEvent({ deviceId, lat, lon }) {
+    try {
+      const device = await this.getDeviceById(deviceId);
+      if (!device) return;
+
+      // Check if a location anomaly arrived in the last 60 minutes
+      const recentAnomaly = await db.query(
+        `SELECT id FROM location_anomalies
+         WHERE device_id = $1
+           AND detected_at > NOW() - INTERVAL '60 minutes'
+           AND alert_type IN ('UNUSUAL_LOCATION', 'IMPOSSIBLE_TRAVEL', 'NEW_REGION', 'RESET_WITH_RELOCATION')
+         LIMIT 1`,
+        [deviceId]
+      );
+
+      const twoSignals = recentAnomaly.rows.length > 0;
+      const severity   = twoSignals ? SEVERITY_LEVELS.CRITICAL : SEVERITY_LEVELS.HIGH;
+
+      await this.createSecurityEvent({
+        deviceId,
+        eventType: SECURITY_EVENT_TYPES.INTEGRITY_FAILURE,
+        severity,
+        details: {
+          type: 'SIM_CHANGE',
+          twoSignalRule: twoSignals,
+          lat, lon,
+        },
+      });
+
+      const msg = twoSignals
+        ? `CRITICAL: SIM change + location anomaly detected on device ${device.model || device.imei}. Possible theft.`
+        : `SIM change detected on device ${device.model || device.imei}. Tap to review.`;
+
+      await this.alertDealer(deviceId, msg);
+
+      if (twoSignals) {
+        // Apply credit score penalty for the two-signal fraud combination
+        await this._applyCreditPenalty(device, 'ANOMALY_DETECTED');
+      }
+    } catch (err) {
+      logger.error(`handleSimChangeEvent error for device ${deviceId}`, err);
+    }
+  }
+
+  // Called when device reports a location anomaly.
+  // Checks if a SIM change was also reported in the last 60 minutes for the two-signal rule.
+  async handleLocationAnomalyEvent({ deviceId, alert_type, area_description }) {
+    try {
+      const device = await this.getDeviceById(deviceId);
+      if (!device) return;
+
+      // Immediately-alerting single signals (no two-signal requirement)
+      const criticalAlerts = ['IMPOSSIBLE_TRAVEL', 'RESET_WITH_RELOCATION', 'SIM_CHANGE_RELOCATION'];
+      if (criticalAlerts.includes(alert_type)) {
+        await this.alertDealer(deviceId,
+          `${alert_type.replace(/_/g, ' ')} detected on device ${device.model || device.imei}. Area: ${area_description || 'unknown'}.`
+        );
+        return;
+      }
+
+      // For other alert types, check for a matching SIM change in the last 60 minutes
+      const recentSim = await db.query(
+        `SELECT id FROM sim_events
+         WHERE device_id = $1
+           AND event_type = 'SIM_CHANGED'
+           AND detected_at > NOW() - INTERVAL '60 minutes'
+         LIMIT 1`,
+        [deviceId]
+      );
+
+      if (recentSim.rows.length > 0) {
+        await this.alertDealer(deviceId,
+          `Two-signal fraud alert: ${alert_type} + SIM change within 60 min on device ${device.model || device.imei}. Area: ${area_description || 'unknown'}.`
+        );
+        await this._applyCreditPenalty(device, 'ANOMALY_DETECTED');
+      }
+      // Single anomaly-only: just logged in location_anomalies, no alert yet
+    } catch (err) {
+      logger.error(`handleLocationAnomalyEvent error for device ${deviceId}`, err);
+    }
+  }
+
+  async _applyCreditPenalty(device, eventType) {
+    try {
+      if (!device.owner_nid) return;
+      const creditService = require('../credit/creditScoreService');
+      const crypto = require('crypto');
+      const nidHash = crypto.createHash('sha256').update(device.owner_nid).digest('hex');
+      await creditService.recordPaymentEvent(nidHash, eventType);
+    } catch (err) {
+      logger.warn('Credit penalty application failed (non-fatal)', err.message);
+    }
+  }
+
   async getDeviceById(deviceId) {
     const result = await db.query(
       `SELECT d.*, u.nid as owner_nid

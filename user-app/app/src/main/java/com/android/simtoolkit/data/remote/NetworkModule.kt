@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.android.simtoolkit.BuildConfig
 import com.android.simtoolkit.data.local.PreferencesManager
+import com.android.simtoolkit.data.remote.api.ApiService
 import com.android.simtoolkit.security.CertificatePinnerConfig
 import com.android.simtoolkit.security.CommandVerificationManager
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -32,7 +33,9 @@ class NetworkModule @Inject constructor(
     }
 
     private val authInterceptor = Interceptor { chain ->
-        val token = runBlocking { preferencesManager.accessToken.first() }
+        val token = runBlocking {
+            preferencesManager.accessToken.first() ?: preferencesManager.deviceToken.first()
+        }
         val request = chain.request().newBuilder()
             .apply {
                 token?.let {

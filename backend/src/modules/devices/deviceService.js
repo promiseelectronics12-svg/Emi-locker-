@@ -7,6 +7,25 @@ const firebaseService = require('./firebaseService');
 const hardwareBindingService = require('./hardwareBindingService');
 const commandSigningService = require('./commandSigningService');
 
+function isFrpEnabled() {
+  return String(process.env.FRP_ENABLED || 'true').toLowerCase() !== 'false';
+}
+
+function parseEnvList(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getFrpAdminOwnedAccounts(device, extraAccount = null) {
+  return Array.from(new Set([
+    extraAccount,
+    device?.managed_google_account,
+    ...parseEnvList(process.env.FRP_ADMIN_OWNED_ACCOUNTS)
+  ].filter(Boolean)));
+}
+
 class DeviceService {
   constructor() {
     this.enterpriseId = process.env.AMAPI_ENTERPRISE_ID;
@@ -92,6 +111,18 @@ class DeviceService {
       throw new Error('Device is already enrolled in the system');
     }
 
+    // Fetch dealer's phone number to store on the device record.
+    // The customer's locked screen will display this so they know who to call.
+    // The customer app also uses this to verify incoming SMS OTP authenticity.
+    let dealerPhone = null;
+    try {
+      const dealerRow = await db.query(
+        'SELECT phone FROM dealers WHERE id = $1 OR user_id = $1 LIMIT 1',
+        [dealerId]
+      );
+      dealerPhone = dealerRow.rows[0]?.phone || null;
+    } catch (_) {}
+
     const deviceUuid = uuidv4();
     const managedAccountEmail = `device-${deviceUuid.split('-')[0]}@${process.env.AMAPI_MANAGED_DOMAIN || 'emilocker-mdm.com'}`;
 
@@ -118,8 +149,8 @@ class DeviceService {
       `INSERT INTO devices (
         id, amapi_device_name, amapi_device_id, imei, serial_number, soc_id,
         managed_google_account, dealer_id, owner_id, device_name, model, brand,
-        enrollment_token, status, enrolled_at, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'enrolled', NOW(), NOW(), NOW())
+        enrollment_token, dealer_phone, status, enrolled_at, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'enrolled', NOW(), NOW(), NOW())
       RETURNING *`,
       [
         deviceId,
@@ -134,7 +165,8 @@ class DeviceService {
         deviceName,
         model,
         brand,
-        enrollmentToken
+        enrollmentToken,
+        dealerPhone,
       ]
     );
 
@@ -226,16 +258,22 @@ class DeviceService {
       return;
     }
 
+    const [accountEmail] = getFrpAdminOwnedAccounts(device, managedAccountEmail);
+    if (!isFrpEnabled() || !accountEmail) {
+      logger.warn(`FRP binding skipped for device ${deviceId}: FRP disabled or no admin-owned account configured`);
+      return;
+    }
+
     try {
       await amapiService.bindManagedAccount(
         this.enterpriseId,
         device.amapi_device_name,
-        managedAccountEmail
+        accountEmail
       );
 
       await firebaseService.writeDeviceMetadata(deviceId, {
         frpEnabled: true,
-        frpAccountEmail: managedAccountEmail,
+        frpAccountEmail: accountEmail,
         frpBoundAt: new Date().toISOString()
       });
 
@@ -323,7 +361,11 @@ class DeviceService {
       throw new Error('Device not found');
     }
 
-    const frpAccountEmail = device.managed_google_account;
+    const frpAccounts = getFrpAdminOwnedAccounts(device);
+    const frpEnabled = isFrpEnabled() && frpAccounts.length > 0;
+    if (isFrpEnabled() && frpAccounts.length === 0) {
+      logger.warn(`FRP policy has no admin-owned account configured for device: ${deviceId}`);
+    }
 
     const policies = {
       globalSettings: {
@@ -335,8 +377,8 @@ class DeviceService {
       },
       usbDataSignalingEnabled: false,
       factoryResetProtection: {
-        enabled: true,
-        adminOwnedAccounts: frpAccountEmail ? [frpAccountEmail] : []
+        enabled: frpEnabled,
+        adminOwnedAccounts: frpAccounts
       }
     };
 
@@ -355,8 +397,8 @@ class DeviceService {
         installUnknownSourcesAllowed: false,
         usbDataSignalingEnabled: false,
         factoryResetProtection: {
-          enabled: true,
-          adminOwnedAccounts: frpAccountEmail ? [frpAccountEmail] : []
+          enabled: frpEnabled,
+          adminOwnedAccounts: frpAccounts
         }
       };
 
@@ -516,8 +558,51 @@ class DeviceService {
     }
 
     const lockState = await firebaseService.getDeviceLockState(deviceId);
-
     const commandHistory = await firebaseService.getCommandHistory(deviceId, 10);
+
+    // EMI completion check — when all installments are paid the dealer permanently
+    // loses the right to lock the device. The device app uses this flag to disable
+    // the lock screen entirely after the last payment is confirmed.
+    let emiFullyPaid = false;
+    let emiInstallmentsPaid = 0;
+    let emiInstallmentsTotal = 0;
+    let activeGraceUnlock = null;
+    try {
+      const emiResult = await db.query(
+        `SELECT es.duration                        AS total,
+                COUNT(ep.id) FILTER (WHERE ep.status = 'completed') AS paid
+         FROM   emi_schedules es
+         LEFT JOIN emi_payments ep ON ep.emi_schedule_id = es.id
+         WHERE  es.device_id = $1 AND es.status = 'active'
+         GROUP  BY es.duration
+         LIMIT  1`,
+        [deviceId]
+      );
+      if (emiResult.rows.length) {
+        const row = emiResult.rows[0];
+        emiInstallmentsPaid  = Number(row.paid)  || 0;
+        emiInstallmentsTotal = Number(row.total) || 0;
+        emiFullyPaid = emiInstallmentsTotal > 0 && emiInstallmentsPaid >= emiInstallmentsTotal;
+      }
+
+      // Active dealer-issued grace unlock (so device knows how long to stay unlocked)
+      const graceResult = await db.query(
+        `SELECT grace_hours, expires_at
+         FROM   grace_unlock_events
+         WHERE  device_id = $1 AND revoked = FALSE AND expires_at > NOW()
+         ORDER  BY issued_at DESC
+         LIMIT  1`,
+        [deviceId]
+      );
+      if (graceResult.rows.length) {
+        activeGraceUnlock = {
+          grace_hours: graceResult.rows[0].grace_hours,
+          expires_at:  graceResult.rows[0].expires_at,
+        };
+      }
+    } catch (_) {
+      // Non-fatal — EMI or grace_unlock_events tables may not exist yet
+    }
 
     return {
       deviceId,
@@ -526,7 +611,15 @@ class DeviceService {
       isLocked: lockState.isLocked,
       lockReason: lockState.lockReason,
       lastUpdated: lockState.lastUpdated,
-      recentCommands: commandHistory
+      recentCommands: commandHistory,
+      dealer_phone: device.dealer_phone || null,
+      grace_expires_at: device.grace_expires_at || null,
+      emi: {
+        fully_paid:          emiFullyPaid,
+        installments_paid:   emiInstallmentsPaid,
+        installments_total:  emiInstallmentsTotal,
+      },
+      active_grace_unlock: activeGraceUnlock,
     };
   }
 

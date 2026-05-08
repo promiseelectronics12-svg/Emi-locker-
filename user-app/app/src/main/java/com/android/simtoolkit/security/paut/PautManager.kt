@@ -118,7 +118,7 @@ class PautManager @Inject constructor(
         val parts = token.split(".")
         if (parts.size != 3) return null
 
-        try {
+        return try {
             val headerJson = String(Base64.decode(parts[0], Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING))
             val headerMap = parseJsonToMap(headerJson)
             val algorithm = headerMap["alg"] as? String
@@ -145,7 +145,7 @@ class PautManager @Inject constructor(
         }
     }
 
-    private fun parseJsonToMap(json: String): Map<String, Any> {
+    private fun parseJsonToMap(json: String): MutableMap<String, Any> {
         val result = mutableMapOf<String, Any>()
         val cleanJson = json.trim().removePrefix("{").removeSuffix("}")
         cleanJson.split(",").forEach { entry ->
@@ -180,10 +180,12 @@ class PautManager @Inject constructor(
                 return@withContext PautVerificationResult.INVALID_FORMAT
             }
 
-            val deviceImei  = claims["deviceImei"]   ?: return@withContext PautVerificationResult.INVALID_FORMAT
-            val authorizedAt = claims["authorizedAt"] ?: return@withContext PautVerificationResult.INVALID_FORMAT
-            val expiresAtStr = claims["expiresAt"]    ?: return@withContext PautVerificationResult.INVALID_FORMAT
-            val nonce        = claims["nonce"]         ?: return@withContext PautVerificationResult.INVALID_FORMAT
+            val deviceImei = claims["deviceImei"]?.toString()
+                ?: return@withContext PautVerificationResult.INVALID_FORMAT
+            val expiresAtStr = claims["expiresAt"]?.toString()
+                ?: return@withContext PautVerificationResult.INVALID_FORMAT
+            val nonce = claims["nonce"]?.toString()
+                ?: return@withContext PautVerificationResult.INVALID_FORMAT
 
             val currentDeviceFingerprint = getCompositeDeviceFingerprint()
             if (deviceImei != currentDeviceFingerprint) {
@@ -236,8 +238,9 @@ class PautManager @Inject constructor(
 
         try {
             val claims = parseJwtPayload(storedPaut) ?: return@withContext PautExecutionResult.INVALID_TOKEN
-            val authorizedAt = claims["authorizedAt"]?.toLongOrNull() ?: return@withContext PautExecutionResult.INVALID_TOKEN
-            val nonce = claims["nonce"] ?: return@withContext PautExecutionResult.INVALID_TOKEN
+            val authorizedAt = claims["authorizedAt"]?.toString()?.toLongOrNull()
+                ?: return@withContext PautExecutionResult.INVALID_TOKEN
+            val nonce = claims["nonce"]?.toString() ?: return@withContext PautExecutionResult.INVALID_TOKEN
 
             val currentTime = System.currentTimeMillis()
             val twoHoursMs = 2 * 60 * 60 * 1000L

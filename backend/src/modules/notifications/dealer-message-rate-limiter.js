@@ -1,6 +1,6 @@
 const { Redis } = require('ioredis');
 
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+const redis = new Redis(process.env.DRAGONFLY_URL || process.env.UPSTASH_REDIS_URL || process.env.REDIS_URL || 'redis://localhost:6379');
 
 const DEALER_MESSAGE_LIMIT = 10;
 const DEALER_MESSAGE_WINDOW_SECONDS = 24 * 60 * 60;

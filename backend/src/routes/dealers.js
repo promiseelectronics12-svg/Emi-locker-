@@ -8,35 +8,47 @@ const { buildErrorResponse } = require('../middleware/errorHandler');
 const asyncHandler = require('express-async-handler');
 const db = require('../config/database');
 
+// NID verification is deferred — will be added in a future release.
+// nid column exists in the schema and remains nullable.
 const validateDealer = [
   body('name').notEmpty().trim(),
   body('email').isEmail().normalizeEmail(),
   body('phone').isMobilePhone('bn-BD'),
   body('address').notEmpty(),
-  body('nid').isLength({ min: 10, max: 17 }),
+  body('nid').optional({ nullable: true }).isLength({ min: 10, max: 17 }),
   body('role').isIn(['dealer', 'reseller']),
   validateRequest
 ];
 
 const registerDealer = asyncHandler(async (req, res) => {
   const { name, email, phone, address, nid, business_name, role } = req.body;
-  
-  const existing = await db.query(
-    'SELECT id FROM dealers WHERE email = $1 OR phone = $2 OR nid = $3',
-    [email, phone, nid]
-  );
-  
+  const nidValue = nid || null;
+
+  // Duplicate check: always check email + phone; only add NID check when provided
+  let existing;
+  if (nidValue) {
+    existing = await db.query(
+      'SELECT id FROM dealers WHERE email = $1 OR phone = $2 OR nid = $3',
+      [email, phone, nidValue]
+    );
+  } else {
+    existing = await db.query(
+      'SELECT id FROM dealers WHERE email = $1 OR phone = $2',
+      [email, phone]
+    );
+  }
+
   if (existing.rows.length > 0) {
     return res.status(409).json(buildErrorResponse(409, 'CONFLICT', 'Dealer already exists'));
   }
-  
+
   const result = await db.query(
     `INSERT INTO dealers (name, email, phone, address, nid, business_name, role, status, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', NOW())
      RETURNING id, name, email, role, status`,
-    [name, email, phone, address, nid, business_name, role]
+    [name, email, phone, address, nidValue, business_name, role]
   );
-  
+
   res.status(201).json(result.rows[0]);
 });
 

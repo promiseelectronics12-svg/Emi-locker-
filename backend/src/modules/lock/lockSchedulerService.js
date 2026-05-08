@@ -25,14 +25,23 @@ class LockSchedulerService {
 
     const cronSchedule = process.env.AUTO_LOCK_CRON || '0 0 * * *';
 
-    const job = cron.schedule(cronSchedule, async () => {
+    const dailyJob = cron.schedule(cronSchedule, async () => {
       logger.info('Auto-lock scheduler triggered');
       await this.runDailyCheck();
     }, { scheduled: true, timezone: process.env.TZ || 'UTC' });
 
-    this.jobs.push(job);
+    this.jobs.push(dailyJob);
+
+    // Grace expiry check — runs every 5 minutes.
+    // Finds devices whose dealer-issued grace period has expired and re-locks them.
+    const graceJob = cron.schedule('*/5 * * * *', async () => {
+      await this.runGraceExpiryCheck();
+    }, { scheduled: true, timezone: process.env.TZ || 'UTC' });
+
+    this.jobs.push(graceJob);
+
     this.started = true;
-    logger.info(`Lock scheduler started with cron: ${cronSchedule}`);
+    logger.info(`Lock scheduler started with cron: ${cronSchedule} + grace expiry every 5 min`);
   }
 
   stop() {
@@ -194,6 +203,59 @@ class LockSchedulerService {
     );
 
     logger.warn('Device flagged for admin review', { deviceId, overdueDays });
+  }
+
+  // Runs every 5 minutes. Finds devices whose dealer-issued grace period has expired
+  // and sends a re-lock command via FCM. Clears grace_expires_at after re-locking.
+  async runGraceExpiryCheck() {
+    try {
+      const expired = await db.query(
+        `SELECT id, fcm_token, model, brand
+         FROM devices
+         WHERE grace_expires_at IS NOT NULL
+           AND grace_expires_at < NOW()
+           AND status NOT IN ('decoupled', 'disabled')`
+      );
+
+      if (!expired.rows.length) return;
+
+      logger.info(`Grace expiry check: ${expired.rows.length} device(s) to re-lock`);
+
+      for (const device of expired.rows) {
+        try {
+          // Send FCM re-lock command
+          try {
+            await lockCommandService.sendLockCommand(device.id, {
+              reason:     'GRACE_EXPIRED',
+              lock_level: 'FULL_LOCK',
+            });
+          } catch (_) {}
+
+          // Clear grace_expires_at and update status
+          await db.query(
+            `UPDATE devices
+             SET grace_expires_at = NULL,
+                 status           = 'locked',
+                 updated_at       = NOW()
+             WHERE id = $1`,
+            [device.id]
+          );
+
+          // Audit log
+          await db.query(
+            `INSERT INTO audit_log (actor, action, device_id, metadata, result, created_at)
+             VALUES ('system', 'GRACE_EXPIRED_AUTO_RELOCK', $1, $2, 'success', NOW())`,
+            [device.id, JSON.stringify({ model: device.model, brand: device.brand })]
+          );
+
+          logger.info('Grace expired — device re-locked', { deviceId: device.id });
+        } catch (err) {
+          logger.error('Grace expiry re-lock failed', { deviceId: device.id, error: err.message });
+        }
+      }
+    } catch (err) {
+      logger.error('Grace expiry check run failed', { error: err.message });
+    }
   }
 }
 

@@ -68,6 +68,7 @@ class DealerContactActivity : AppCompatActivity() {
         } catch (e: Exception) {
             "880"
         }
+        return countryCode
     }
 
     private fun getNumericCodeForCountry(countryCode: String): String {

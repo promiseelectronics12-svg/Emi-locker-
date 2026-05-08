@@ -64,7 +64,7 @@ class NotificationHelper @Inject constructor(
         )
 
         val notification = NotificationCompat.Builder(context, CHANNEL_REMINDERS)
-            .setSmallIcon(R.drawable.ic_launcher_foreground) // Use appropriate icon
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(context.getString(R.string.overlay_reminder_title))
             .setContentText(context.getString(R.string.overlay_reminder_message, daysLeft))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -83,7 +83,7 @@ class NotificationHelper @Inject constructor(
         )
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ALERTS)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(context.getString(R.string.overlay_warning_title))
             .setContentText(context.getString(R.string.overlay_warning_message, daysLeft))
             .setPriority(NotificationCompat.PRIORITY_HIGH)

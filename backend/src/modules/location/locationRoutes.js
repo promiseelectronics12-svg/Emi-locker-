@@ -226,4 +226,45 @@ router.delete(
   locationController.deleteGeofence
 );
 
+// POST /location/:deviceId/anomaly — device reports a locally-detected anomaly
+// Raw GPS history never reaches the server; only the anomaly signal is sent.
+router.post(
+  '/:deviceId/anomaly',
+  reportRateLimiter,
+  validateDeviceToken,
+  deviceIdParam,
+  validateDeviceRequest,
+  body('alert_type').isIn([
+    'UNUSUAL_LOCATION', 'IMPOSSIBLE_TRAVEL', 'NEW_REGION',
+    'RESET_WITH_RELOCATION', 'SIM_CHANGE_RELOCATION', 'EXTENDED_OFFLINE'
+  ]).withMessage('Invalid alert_type'),
+  body('area_description').optional().isString().isLength({ max: 255 }),
+  body('confidence').optional().isInt({ min: 0, max: 100 }),
+  body('lat').optional().isFloat({ min: -90, max: 90 }),
+  body('lon').optional().isFloat({ min: -180, max: 180 }),
+  validateRequest,
+  async (req, res) => {
+    try {
+      const { deviceId } = req.params;
+      const { alert_type, area_description, confidence, lat, lon } = req.body;
+
+      await db.query(
+        `INSERT INTO location_anomalies
+           (device_id, alert_type, area_description, confidence, reveal_lat, reveal_lon)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [deviceId, alert_type, area_description || null, confidence || null, lat || null, lon || null]
+      );
+
+      // Delegate two-signal correlation to fraud service
+      const fraudService = require('../fraud/fraudService');
+      await fraudService.handleLocationAnomalyEvent({ deviceId, alert_type, area_description });
+
+      res.json({ success: true, received: true });
+    } catch (err) {
+      logger.error('Location anomaly report error', err);
+      res.status(500).json({ success: false, error: 'Failed to record anomaly' });
+    }
+  }
+);
+
 module.exports = router;

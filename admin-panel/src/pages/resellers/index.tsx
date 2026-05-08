@@ -81,7 +81,12 @@ const Resellers: React.FC = () => {
                   <TableRow key={reseller.id}>
                     <TableCell className="font-medium">{reseller.name || 'Unnamed reseller'}</TableCell>
                     <TableCell>{reseller.email}</TableCell>
-                    <TableCell>{reseller.usedQuota || 0} / {reseller.monthlyQuota || 0}</TableCell>
+                    <TableCell>
+                      <div className="font-medium">{reseller.usedQuota ?? 0} / {reseller.monthlyQuota ?? 0}</div>
+                      <div className="text-xs text-muted-foreground">
+                        Activated history: {(reseller as any).activatedKeys ?? 0}
+                      </div>
+                    </TableCell>
                     <TableCell>
                       <Badge variant={reseller.status === 'APPROVED' || (reseller as any).status === 'active' ? 'success' : 'outline'}>
                         {reseller.status || (reseller as any).status}
@@ -113,7 +118,8 @@ const Resellers: React.FC = () => {
                   </div>
                   <Badge variant="outline">{reseller.status || (reseller as any).status}</Badge>
                 </div>
-                <p className="mt-4 text-sm text-muted-foreground">Quota: {reseller.usedQuota || 0} / {reseller.monthlyQuota || 0}</p>
+                <p className="mt-4 text-sm text-muted-foreground">Quota: {reseller.usedQuota ?? 0} / {reseller.monthlyQuota ?? 0}</p>
+                <p className="text-xs text-muted-foreground">Activated history: {(reseller as any).activatedKeys ?? 0}</p>
                 <div className="mt-4 grid grid-cols-2 gap-2">
                   <Button variant="outline" onClick={() => statusMutation.mutate({ id: reseller.id, status: 'APPROVED' })}>Approve</Button>
                   <Button variant="destructive" onClick={() => statusMutation.mutate({ id: reseller.id, status: 'SUSPENDED' })}>Suspend</Button>

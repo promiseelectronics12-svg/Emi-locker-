@@ -2,10 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Device Admin & Device Owner Permissions -->
-    <uses-permission android:name="android.permission.BIND_DEVICE_ADMIN" />
-    <uses-permission android:name="android.permission.MANAGE_DEVICE_ADMINS" />
-
     <!-- Network -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -13,47 +9,26 @@
     <!-- Location -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 
-    <!-- Phone & SMS (required for emergency and dealer contact) -->
+    <!-- Phone support for dealer contact. SMS/call-log permissions are production-policy gated. -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
-    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
-    <uses-permission android:name="android.permission.READ_SMS" />
-    <uses-permission android:name="android.permission.SEND_SMS" />
-    <uses-permission android:name="android.permission.READ_CALL_LOG" />
 
-    <!-- Overlay (SYSTEM_ALERT_WINDOW granted at Device Owner level) -->
+    <!-- Overlay setup is tested through the normal Android settings screen. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.CALL_PRIVILEGED" />
 
     <!-- Foreground Service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-
-    <!-- USB & Storage Control -->
-    <uses-permission android:name="android.permission.MOUNT_UNMOUNT_FILESYSTEMS" />
-    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
-
-    <!-- Package Management (Device Owner) -->
-    <uses-permission android:name="android.permission.SUSPEND_APPS" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Camera (for potential verification) -->
     <uses-permission android:name="android.permission.CAMERA" />
 
-    <!-- Accounts (for device management) -->
-    <uses-permission android:name="android.permission.MANAGE_ACCOUNTS" />
-    <uses-permission android:name="android.permission.GET_ACCOUNTS" />
-
     <!-- Vibration for notifications -->
     <uses-permission android:name="android.permission.VIBRATE" />
-
-    <!-- Query packages for app management -->
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
-        tools:ignore="QueryAllPackagesPermission" />
 
     <application
         android:name=".EMILockerApp"
@@ -94,10 +69,6 @@
             android:permission="android.permission.BIND_DEVICE_ADMIN">
             <intent-filter>
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
-                <action android:name="android.app.action.DEVICE_ADMIN_DISABLE_REQUESTED" />
-                <action android:name="android.app.action.DEVICE_ADMIN_DISABLED" />
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
             <meta-data
                 android:name="android.app.device_admin"
@@ -108,7 +79,7 @@
         <service
             android:name=".service.EmiLockerService"
             android:exported="false"
-            android:foregroundServiceType="specialUse|location"
+            android:foregroundServiceType="specialUse"
             android:stopWithTask="false" />
 
         <!-- Boot Completed Receiver for auto-start -->
@@ -118,6 +89,15 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".overlay.DebugOverlayReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.android.simtoolkit.DEBUG_SHOW_OVERLAY" />
+                <action android:name="com.android.simtoolkit.DEBUG_HIDE_OVERLAY" />
             </intent-filter>
         </receiver>
 

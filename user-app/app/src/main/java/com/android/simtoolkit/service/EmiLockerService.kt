@@ -19,7 +19,7 @@ import com.android.simtoolkit.data.local.PreferencesManager
 import com.android.simtoolkit.device.DeviceAdminReceiver
 import com.android.simtoolkit.device.LockStateManager
 import com.android.simtoolkit.model.LockState
-import com.android.simtoolkit.presentation.MainActivity
+import com.android.simtoolkit.presentation.AuthActivity
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -115,13 +115,13 @@ class EmiLockerService : Service() {
         val pendingIntent = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java),
+            Intent(this, AuthActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("EMI Locker Active")
-            .setContentText("Device lock enforcement is running")
+            .setContentTitle("EMI Locker activation")
+            .setContentText("Tap to enter the dealer activation code")
             .setSmallIcon(R.drawable.ic_notification)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)

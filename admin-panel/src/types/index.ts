@@ -23,6 +23,7 @@ export interface Reseller {
   status: 'APPROVED' | 'SUSPENDED' | 'PENDING';
   monthlyQuota: number;
   usedQuota: number;
+  activatedKeys?: number;
 }
 
 export interface KeyRequest {

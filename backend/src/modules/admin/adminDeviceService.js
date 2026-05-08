@@ -762,7 +762,9 @@ class AdminDeviceService {
       const request = requestResult.rows[0];
 
       const resellerResult = await client.query(
-        'SELECT monthly_key_quota FROM resellers WHERE id = $1',
+        `SELECT COALESCE(monthly_key_quota, monthly_quota, 100) as monthly_key_quota
+         FROM resellers
+         WHERE id = $1`,
         [request.reseller_id]
       );
 
@@ -800,7 +802,7 @@ class AdminDeviceService {
       const keyService = require('../keys/keyService');
       const generatedKeys = [];
       for (let i = 0; i < approvedQuantity; i++) {
-        const keyString = await keyService.generateKeyString();
+        const keyString = await keyService.generateKeyString(client);
         generatedKeys.push(keyString);
       }
 
@@ -815,6 +817,14 @@ class AdminDeviceService {
           [keyString, request.reseller_id, requestId, signature, nonce, timestamp]
         );
       }
+
+      await client.query(
+        `UPDATE resellers
+         SET used_keys = COALESCE(used_keys, 0) + $1,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [approvedQuantity, request.reseller_id]
+      );
 
       await client.query(
         `INSERT INTO audit_log (actor, action, target_type, target_id, metadata, ip_address, created_at)

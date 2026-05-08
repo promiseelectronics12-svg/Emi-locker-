@@ -310,7 +310,7 @@ private fun EmiSummaryCard(uiState: DashboardUiState) {
             } else 0f
 
             LinearProgressIndicator(
-                progress = { progress },
+                progress = progress,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(8.dp)
@@ -463,6 +463,7 @@ private fun QuickActionsCard(
     onNavigateToDealerContact: () -> Unit,
     onNavigateToAgreement: (String) -> Unit
 ) {
+    val context = LocalContext.current
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -498,7 +499,6 @@ private fun QuickActionsCard(
                     icon = Icons.Default.Chat,
                     label = "WhatsApp",
                     onClick = {
-                        val context = LocalContext.current
                         val intent = Intent(Intent.ACTION_VIEW).apply {
                             data = Uri.parse("https://wa.me/${uiState.dealerInfo?.whatsappNumber}")
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

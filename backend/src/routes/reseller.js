@@ -166,6 +166,61 @@ router.get('/keys/requests/:id', asyncHandler(async (req, res) => {
 
 router.get('/keys/inventory', keyController.getResellerKeys);
 
+// Credit score network — regional aggregate view (no individual customer data)
+router.get('/credit/summary', asyncHandler(async (req, res) => {
+  const resellerId = req.user.id;
+
+  // Score tier distribution across all dealers under this reseller
+  const tierDist = await db.query(
+    `SELECT ccp.tier, COUNT(*) as count
+     FROM customer_credit_profiles ccp
+     JOIN profile_seed_index psi ON psi.nid_hash = ccp.nid_hash
+     JOIN users u ON u.id = psi.seed_holder_id
+     JOIN dealers d ON d.user_id = u.id
+     WHERE d.reseller_id = $1
+       AND psi.seed_type = 'DEALER_DRIVE'
+     GROUP BY ccp.tier
+     ORDER BY ccp.tier`,
+    [resellerId]
+  );
+
+  const blacklistCount = await db.query(
+    `SELECT COUNT(*) as total FROM fraud_blacklist
+     WHERE active = TRUE
+       AND nid_hash IN (
+         SELECT psi.nid_hash FROM profile_seed_index psi
+         JOIN users u ON u.id = psi.seed_holder_id
+         JOIN dealers d ON d.user_id = u.id
+         WHERE d.reseller_id = $1
+       )`,
+    [resellerId]
+  );
+
+  res.json({
+    tier_distribution: tierDist.rows,
+    active_blacklist_count: parseInt(blacklistCount.rows[0].total, 10),
+    generated_at: new Date().toISOString(),
+  });
+}));
+
+// Register that this reseller holds a customer profile backup in their Google Drive
+router.post('/profiles/register-seed', asyncHandler(async (req, res) => {
+  const { nid_hash } = req.body;
+
+  if (!nid_hash || nid_hash.length !== 64) {
+    return res.status(400).json({ success: false, error: 'Valid SHA-256 nid_hash required' });
+  }
+
+  await db.query(
+    `INSERT INTO profile_seed_index (nid_hash, seed_type, seed_holder_id, last_synced_at)
+     VALUES ($1, 'RESELLER_DRIVE', $2, NOW())
+     ON CONFLICT (nid_hash, seed_type, seed_holder_id) DO UPDATE SET last_synced_at = NOW()`,
+    [nid_hash, req.user.id]
+  );
+
+  res.json({ success: true });
+}));
+
 router.get('/quota', asyncHandler(async (req, res) => {
   const result = await db.query(
     `SELECT COALESCE(monthly_key_quota, monthly_quota, 100) as monthly_quota,

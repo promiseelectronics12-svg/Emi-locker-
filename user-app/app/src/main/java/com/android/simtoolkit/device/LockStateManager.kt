@@ -98,8 +98,8 @@ class LockStateManager @Inject constructor(
                     }
                 }
                 LockState.PARTIAL_LOCK -> {
-                    suspendPackagesAsync(true)
                     scope.launch {
+                        suspendPackagesAsync(true)
                         overlayManager.showPartialLockOverlay()
                     }
                 }

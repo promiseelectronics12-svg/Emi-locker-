@@ -2,10 +2,12 @@ package com.android.simtoolkit.device
 
 import android.app.admin.DeviceAdminReceiver
 import android.app.admin.DevicePolicyManager
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import com.android.simtoolkit.BuildConfig
 import com.android.simtoolkit.service.EmiLockerService
 
 class DeviceAdminReceiver : DeviceAdminReceiver() {
@@ -36,6 +38,11 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
     }
 
     override fun onDisableRequested(context: Context, intent: Intent): CharSequence {
+        if (BuildConfig.DEBUG) {
+            Log.w(TAG, "Device admin disable requested in debug build; no lock action taken")
+            return "EMI Locker device admin is being disabled for testing."
+        }
+
         Log.e(TAG, "Disable requested — re-locking device to prevent removal")
         try {
             val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager

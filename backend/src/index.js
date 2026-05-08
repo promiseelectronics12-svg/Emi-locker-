@@ -34,10 +34,20 @@ const allowedOrigins = (process.env.CORS_ORIGINS || '')
   .split(',')
   .map(o => o.trim())
   .filter(Boolean);
+const allowLocalhostCors = process.env.ALLOW_LOCALHOST_CORS === 'true' || process.env.NODE_ENV !== 'production';
+
+function isLoopbackOrigin(origin) {
+  try {
+    const { hostname } = new URL(origin);
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  } catch (err) {
+    return false;
+  }
+}
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin || allowedOrigins.includes(origin) || (allowLocalhostCors && isLoopbackOrigin(origin))) {
       callback(null, true);
     } else {
       callback(new Error(`CORS: origin ${origin} not allowed`));

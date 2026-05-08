@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -33,6 +34,9 @@ class PreferencesManager @Inject constructor(
         private val LAST_WARNING_DISMISS_TIME = stringPreferencesKey("last_warning_dismiss_time")
         private val CUSTOM_MESSAGE_DISMISSAL_TIME = longPreferencesKey("custom_message_dismissal_time")
         private val CUSTOM_MESSAGE_READ = booleanPreferencesKey("custom_message_read")
+        private val PENDING_ACTIVATION_CODE = stringPreferencesKey("pending_activation_code")
+        private val DEVICE_TOKEN = stringPreferencesKey("device_token")
+        private val ACTIVATED_DEVICE_ID = stringPreferencesKey("activated_device_id")
     }
 
     val accessToken: Flow<String?> = context.dataStore.data.map { prefs ->
@@ -83,6 +87,18 @@ class PreferencesManager @Inject constructor(
         prefs[CUSTOM_MESSAGE_READ]
     }
 
+    val pendingActivationCode: Flow<String?> = context.dataStore.data.map { prefs ->
+        prefs[PENDING_ACTIVATION_CODE]
+    }
+
+    val deviceToken: Flow<String?> = context.dataStore.data.map { prefs ->
+        prefs[DEVICE_TOKEN]
+    }
+
+    val activatedDeviceId: Flow<String?> = context.dataStore.data.map { prefs ->
+        prefs[ACTIVATED_DEVICE_ID]
+    }
+
     suspend fun saveLockState(state: com.android.simtoolkit.model.LockState) {
         context.dataStore.edit { prefs ->
             prefs[CURRENT_LOCK_STATE] = state.name
@@ -100,6 +116,20 @@ class PreferencesManager @Inject constructor(
         context.dataStore.edit { prefs ->
             prefs[AMOUNT_DUE] = amount
             prefs[DAYS_OVERDUE] = days.toString()
+        }
+    }
+
+    suspend fun savePendingActivationCode(code: String) {
+        context.dataStore.edit { prefs ->
+            prefs[PENDING_ACTIVATION_CODE] = code
+        }
+    }
+
+    suspend fun saveDeviceActivation(deviceId: String, token: String) {
+        context.dataStore.edit { prefs ->
+            prefs[ACTIVATED_DEVICE_ID] = deviceId
+            prefs[DEVICE_TOKEN] = token
+            prefs[ACCESS_TOKEN] = token
         }
     }
 

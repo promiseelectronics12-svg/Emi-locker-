@@ -18,6 +18,9 @@ interface ApiService {
     @POST("api/v1/auth/logout")
     suspend fun logout(@Body body: Map<String, String>): Response<Unit>
 
+    @POST("api/v1/device-activation/verify")
+    suspend fun verifyDeviceActivation(@Body request: DeviceActivationRequest): Response<DeviceActivationResponse>
+
     @GET("api/v1/users/me")
     suspend fun getCurrentUser(): Response<UserDto>
 
@@ -102,4 +105,34 @@ data class PaginationDto(
     val limit: Int,
     val total: Int,
     val pages: Int
+)
+
+data class DeviceActivationRequest(
+    val activationCode: String,
+    val deviceBoundId: String,
+    val androidId: String?,
+    val serialNumber: String?,
+    val socId: String?,
+    val deviceName: String,
+    val brand: String,
+    val model: String,
+    val sdk: Int
+)
+
+data class DeviceActivationResponse(
+    val success: Boolean,
+    val mode: String?,
+    val deviceId: String?,
+    val deviceToken: String?,
+    val policy: DeviceActivationPolicy?,
+    val message: String?,
+    val error: String?
+)
+
+data class DeviceActivationPolicy(
+    val locationEnabled: Boolean,
+    val lockEnabled: Boolean,
+    val resetEnabled: Boolean,
+    val frpEnabled: Boolean,
+    val testMode: Boolean
 )

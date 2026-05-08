@@ -5,7 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
-import com.android.simtoolkit.presentation.theme.EmiLockerTheme
+import com.android.simtoolkit.presentation.theme.EMILockerTheme
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -16,7 +16,7 @@ class AgreementDetailActivity : ComponentActivity() {
         val agreementId = intent.getStringExtra("agreementId") ?: ""
 
         setContent {
-            EmiLockerTheme {
+            EMILockerTheme {
                 AgreementDetailScreen(
                     agreementId = agreementId,
                     onNavigateBack = { finish() }

@@ -145,7 +145,7 @@ class CommandVerificationManager @Inject constructor(
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 val dm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? android.app.admin.DevicePolicyManager
-                val isSecure = dm?.isSecureDeviceManagementEnabled ?: false
+                val isSecure = dm?.isDeviceOwnerApp(context.packageName) ?: false
                 "SECURE:$isSecure"
             } else {
                 "LEGACY_DEVICE"
@@ -211,14 +211,16 @@ class CommandVerificationManager @Inject constructor(
         val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER)
         keyStore.load(null)
 
-        val currentVersion = getCurrentKeyVersion()
-        val keyAlias = "$HMAC_KEY_ALIAS-$currentVersion"
+        var currentVersion = getCurrentKeyVersion()
+        var keyAlias = "$HMAC_KEY_ALIAS-$currentVersion"
 
-        if (!keyStore.containsAlias(keyAlias)) {
-            rotateHmacKey(keyStore, currentVersion)
+        if (currentVersion == 0 || !keyStore.containsAlias(keyAlias)) {
+            currentVersion = rotateHmacKey(keyStore, currentVersion)
+            keyAlias = "$HMAC_KEY_ALIAS-$currentVersion"
         }
 
-        val entry = keyStore.getEntry(keyAlias, null) as KeyStore.SecretKeyEntry
+        val entry = keyStore.getEntry(keyAlias, null) as? KeyStore.SecretKeyEntry
+            ?: throw IllegalStateException("HMAC key entry missing for alias $keyAlias")
         return entry.secretKey
     }
 
@@ -226,7 +228,7 @@ class CommandVerificationManager @Inject constructor(
         return encryptedPrefs.getInt(HMAC_KEY_VERSION_ALIAS, 0)
     }
 
-    private fun rotateHmacKey(keyStore: KeyStore, currentVersion: Int) {
+    private fun rotateHmacKey(keyStore: KeyStore, currentVersion: Int): Int {
         val newVersion = currentVersion + 1
         val newAlias = "$HMAC_KEY_ALIAS-$newVersion"
 
@@ -262,6 +264,8 @@ class CommandVerificationManager @Inject constructor(
                 Log.w(TAG, "Failed to delete old HMAC key version $currentVersion", e)
             }
         }
+
+        return newVersion
     }
 
     fun shouldRotateKey(): Boolean {

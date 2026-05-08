@@ -14,8 +14,12 @@ router.use('/reseller', require('./reseller'));
 router.use('/dealers', require('./dealers'));
 router.use('/admin', adminRoutes);
 router.use('/notifications', require('../modules/notifications/notification.routes'));
+router.use('/alerts', require('./alerts'));
 router.use('/keys', require('../modules/keys/keyRoutes'));
+router.use('/device-activation', require('../modules/deviceActivation/deviceActivationRoutes'));
 router.use('/location', require('../modules/location/locationRoutes'));
 router.use('/fraud', require('../modules/fraud/fraudRoutes'));
+router.use('/evidence', require('./evidence'));
+router.use('/credit', require('../modules/credit/creditRoutes'));
 
 module.exports = router;
