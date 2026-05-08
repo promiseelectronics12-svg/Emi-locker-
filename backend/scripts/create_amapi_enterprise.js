@@ -169,10 +169,9 @@ async function main() {
   const enterpriseToken = await waitForEnterpriseToken();
   console.log('   ✓ Enterprise token received\n');
 
-  // Step 4: Create enterprise using service account
+  // Step 4: Create enterprise using user OAuth token (service account cannot create enterprises)
   console.log('Step 4: Creating enterprise record...');
-  const saToken = await getServiceAccountToken();
-  const enterprise = await createEnterprise(saToken, enterpriseToken, signupUrlName);
+  const enterprise = await createEnterprise(userAccessToken, enterpriseToken, signupUrlName);
 
   const enterpriseId = enterprise.name?.replace('enterprises/', '') || enterprise.name;
 
