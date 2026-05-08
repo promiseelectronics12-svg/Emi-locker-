@@ -101,6 +101,7 @@ const tlsOptions = connectionUrl.startsWith('rediss://')
 
 const client = new Redis(connectionUrl, {
   ...tlsOptions,
+  lazyConnect: true,
   maxRetriesPerRequest: null,
   enableOfflineQueue: false,
   connectTimeout: 5000,
@@ -172,6 +173,7 @@ const proxy = new Proxy({}, {
 function createClient() {
   return new Redis(connectionUrl, {
     ...tlsOptions,
+    lazyConnect: true,
     maxRetriesPerRequest: null,
     enableOfflineQueue: false,
     connectTimeout: 5000,
