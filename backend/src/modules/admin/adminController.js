@@ -317,7 +317,79 @@ const adminController = {
         rejectedAt: result.rejectedAt
       }
     });
-  }
+  },
+
+  async getDealers(req, res) {
+    const filters = {
+      status: req.query.status,
+      resellerId: req.query.resellerId,
+      search: req.query.search,
+      limit: req.query.limit,
+      offset: req.query.offset,
+    };
+    const result = await adminService.getDealers(filters);
+    res.json({ success: true, data: result.dealers, total: result.total, limit: result.limit, offset: result.offset });
+  },
+
+  async suspendDealer(req, res) {
+    const result = await adminService.suspendDealer(req.params.id, req.user.id, req.body.reason, req.ip);
+    if (!result.success) return res.status(400).json({ success: false, error: result.error });
+    res.json({ success: true, message: 'Dealer suspended', data: result.dealer });
+  },
+
+  async activateDealer(req, res) {
+    const result = await adminService.activateDealer(req.params.id, req.user.id, req.ip);
+    if (!result.success) return res.status(400).json({ success: false, error: result.error });
+    res.json({ success: true, message: 'Dealer activated', data: result.dealer });
+  },
+
+  async universalSearch(req, res) {
+    const results = await adminService.universalSearch(req.query.q);
+    res.json({ success: true, data: results });
+  },
+
+  async inviteReseller(req, res) {
+    const { email, name } = req.body;
+    const result = await adminService.inviteReseller(email, name, req.user.id);
+    res.json({ success: true, message: `Invite sent to ${email}`, data: result });
+  },
+
+  async verifyResellerInvite(req, res) {
+    const invite = await adminService.verifyResellerInviteToken(req.query.token);
+    if (!invite) return res.status(404).json({ success: false, error: 'Invalid or expired invite token' });
+    res.json({ success: true, data: { email: invite.email, name: invite.name } });
+  },
+
+  async completeResellerInvite(req, res) {
+    const { token, password, photoUrl } = req.body;
+    const bcrypt = require('bcrypt');
+    const passwordHash = await bcrypt.hash(password, 12);
+    const result = await adminService.consumeResellerInviteToken(token, passwordHash, photoUrl);
+    if (!result.success) return res.status(400).json({ success: false, error: result.error });
+    res.json({ success: true, message: 'Reseller account created', data: result.reseller });
+  },
+
+  async getKeyInventory(req, res) {
+    const filters = { tier: req.query.tier, resellerId: req.query.resellerId };
+    const data = await adminService.getKeyInventory(filters);
+    res.json({ success: true, data });
+  },
+
+  async getDistrictSummary(req, res) {
+    const data = await adminService.getDistrictSummary();
+    res.json({ success: true, data });
+  },
+
+  async getResellersByDistrict(req, res) {
+    const data = await adminService.getResellersByDistrict(req.params.district);
+    res.json({ success: true, data });
+  },
+
+  async getResellerStats(req, res) {
+    const data = await adminService.getResellerStats(req.params.id);
+    if (!data) return res.status(404).json({ success: false, error: 'Reseller not found' });
+    res.json({ success: true, data });
+  },
 };
 
 module.exports = adminController;

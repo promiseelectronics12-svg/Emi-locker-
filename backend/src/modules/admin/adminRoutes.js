@@ -24,6 +24,24 @@ router.get('/dashboard',
   asyncHandler(adminController.getDashboardStats)
 );
 
+// ── Districts & Reseller Distribution ─────────────────────────────────────────
+router.get('/districts/summary',
+  asyncHandler(adminController.getDistrictSummary)
+);
+
+router.get('/districts/:district/resellers',
+  [param('district').isString().trim().isLength({ min: 2, max: 64 })],
+  validateRequest,
+  asyncHandler(adminController.getResellersByDistrict)
+);
+
+router.get('/resellers/:id/stats',
+  [param('id').isUUID()],
+  validateRequest,
+  asyncHandler(adminController.getResellerStats)
+);
+
+// ── Resellers ─────────────────────────────────────────────────────────────────
 router.get('/resellers',
   [
     query('status').optional().isIn(['pending', 'active', 'suspended']),
@@ -33,6 +51,32 @@ router.get('/resellers',
   ],
   validateRequest,
   asyncHandler(adminController.getResellers)
+);
+
+// Invite routes must come before /:id routes to avoid "invite" matching as :id
+router.post('/resellers/invite',
+  [
+    body('email').isEmail().normalizeEmail(),
+    body('name').isString().trim().isLength({ min: 2, max: 100 }),
+  ],
+  validateRequest,
+  asyncHandler(adminController.inviteReseller)
+);
+
+router.get('/resellers/invite/verify',
+  [query('token').isString().isLength({ min: 32 })],
+  validateRequest,
+  asyncHandler(adminController.verifyResellerInvite)
+);
+
+router.post('/resellers/invite/complete',
+  [
+    body('token').isString().isLength({ min: 32 }),
+    body('password').isString().isLength({ min: 8 }),
+    body('photoUrl').optional().isURL(),
+  ],
+  validateRequest,
+  asyncHandler(adminController.completeResellerInvite)
 );
 
 router.post('/resellers/:id/approve',
@@ -204,6 +248,48 @@ router.post('/key-requests/:id/reject',
   ],
   validateRequest,
   asyncHandler(adminController.rejectKeyRequest)
+);
+
+// ── Dealers ───────────────────────────────────────────────────────────────────
+router.get('/dealers',
+  [
+    query('status').optional().isIn(['active', 'suspended', 'pending']),
+    query('resellerId').optional().isUUID(),
+    query('search').optional().isString().trim(),
+    query('limit').optional().isInt({ min: 1, max: 200 }),
+    query('offset').optional().isInt({ min: 0 }),
+  ],
+  validateRequest,
+  asyncHandler(adminController.getDealers)
+);
+
+router.post('/dealers/:id/suspend',
+  [param('id').isUUID(), body('reason').isString().trim().isLength({ min: 5, max: 500 })],
+  validateRequest,
+  asyncHandler(adminController.suspendDealer)
+);
+
+router.post('/dealers/:id/activate',
+  [param('id').isUUID()],
+  validateRequest,
+  asyncHandler(adminController.activateDealer)
+);
+
+// ── Universal search ──────────────────────────────────────────────────────────
+router.get('/search',
+  [query('q').isString().trim().isLength({ min: 2, max: 100 })],
+  validateRequest,
+  asyncHandler(adminController.universalSearch)
+);
+
+// ── Key inventory ─────────────────────────────────────────────────────────────
+router.get('/keys/inventory',
+  [
+    query('tier').optional().isIn(['standard', 'premium', 'vip']),
+    query('resellerId').optional().isUUID(),
+  ],
+  validateRequest,
+  asyncHandler(adminController.getKeyInventory)
 );
 
 module.exports = router;

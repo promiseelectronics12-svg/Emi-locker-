@@ -70,3 +70,34 @@ export interface User {
   role: 'SUPER_ADMIN' | 'AUDITOR';
   twoFactorEnabled: boolean;
 }
+
+// ── District Map Types ────────────────────────────────────────────────────────
+
+export interface DistrictSummary {
+  district: string;
+  reseller_count: number;
+  total_keys_distributed: number;
+}
+
+export interface DistrictReseller {
+  id: string;
+  name: string;
+  status: string;
+  district: string;
+  dealer_count: number;
+  keys_distributed: number;
+}
+
+export interface ResellerStatsData {
+  reseller: { id: string; name: string; status: string; district: string; phone: string; email: string };
+  monthly: { month: string; keys_distributed: number }[];
+  yearly: { month: string; keys_distributed: number }[];
+  dealers: {
+    id: string;
+    name: string;
+    phone: string;
+    keys_consumed: number;
+    devices_bound: number;
+    last_active: string | null;
+  }[];
+}

@@ -12,6 +12,8 @@ import Decoupling from '@/pages/decoupling';
 import AuditLogPage from '@/pages/audit-log';
 import SecurityEvents from '@/pages/security-events';
 import NeirQueue from '@/pages/neir-queue';
+import Dealers from '@/pages/dealers';
+import Districts from '@/pages/districts';
 
 const queryClient = new QueryClient();
 
@@ -27,6 +29,8 @@ const App: React.FC = () => {
             <Route path="/devices" element={<Devices />} />
             <Route path="/devices/:id" element={<DeviceDetail />} />
             <Route path="/resellers" element={<Resellers />} />
+            <Route path="/dealers" element={<Dealers />} />
+            <Route path="/districts" element={<Districts />} />
             <Route path="/key-requests" element={<KeyRequests />} />
             <Route path="/decoupling" element={<Decoupling />} />
             <Route path="/audit-log" element={<AuditLogPage />} />
