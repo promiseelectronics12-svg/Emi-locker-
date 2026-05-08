@@ -27,3 +27,14 @@ Stores the global defaults for a specific dealer. These apply to new device enro
 - **Device Enrollment**: When a device registers, the backend should query `dealer_defaults` and apply them to the device.
 - **App Policy Push**: The parameters (grace period, warning threshold) need to be included in the FCM policy payload sent to the Flutter/Android apps.
 - **Lock Commands**: The lock screen branding info must be attached to the lock payload if `FULL` lock is engaged.
+
+## Migrations 101-108: Advanced Device Security and Anomaly Detection
+Recent migrations added tables to support advanced device security features, location tracking, and dealer intelligence.
+- `101_grace_unlock.sql` - Offline token usage logs.
+- `102_device_grace_expires.sql` - Grace period expiration schedules.
+- `103_sim_events.sql` - SIM change anomaly tracking.
+- `104_location_anomalies.sql` - Geofence violation and anomaly detection.
+- `105_credit_scores.sql` - Dealer credit scoring logic.
+- `106_evidence_vault.sql` - Store photos and logs of device tampering.
+- `107_theft_protection.sql` - Stolen device marking and theft workflows.
+- `108_profile_seeds.sql` - Initial seed data for test profiles.
