@@ -132,20 +132,11 @@ async function connectRedis() {
     _redis = client;
     return _redis;
   } catch (err) {
-    if (!isDev) {
-      console.error('FATAL: Upstash Redis connection failed —', err.message);
-      console.error('The server cannot start without Redis.');
-      console.error('Check UPSTASH_REDIS_URL in your environment.');
-      process.exit(1);
-    }
-
-    // Development only: fall back to MemoryStore with loud warnings
-    console.warn('');
-    console.warn('⚠️  Upstash Redis unavailable — using in-memory store.');
-    console.warn('⚠️  Rate limiting, sessions and replay protection are DISABLED.');
-    console.warn('⚠️  This is acceptable for local development ONLY.');
-    console.warn('⚠️  Set UPSTASH_REDIS_URL before deploying to production.');
-    console.warn('');
+    // Fall back to MemoryStore in all environments — server must stay up
+    console.error('Upstash Redis connection failed —', err.message);
+    console.warn('⚠️  Redis unavailable — using in-memory store.');
+    console.warn('⚠️  Rate limiting, sessions and OTP features degraded.');
+    console.warn('⚠️  Fix UPSTASH_REDIS_URL to restore full functionality.');
     _redis = new MemoryStore();
     return _redis;
   }
