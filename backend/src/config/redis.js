@@ -3,7 +3,7 @@ const Redis = require('ioredis');
 const isDev = process.env.NODE_ENV !== 'production';
 
 // ── Development-only in-memory fallback ──────────────────────────────────────
-// Only used when no DragonflyDB/Redis URL is configured in local dev.
+// Only used when no Redis URL is configured in local dev.
 // NEVER active in production — the process will crash instead (see below).
 class MemoryStore {
   constructor() {
@@ -73,28 +73,25 @@ class MemoryStore {
   on() { return this; }
 }
 
-// ── DragonflyDB / Redis connection ────────────────────────────────────────────
-// DragonflyDB is 100% Redis-protocol compatible — ioredis connects to it
-// identically. Just point DRAGONFLY_URL at your Dragonfly Cloud instance.
-// Falls back to REDIS_URL for backward compatibility.
+// ── Upstash Redis connection ──────────────────────────────────────────────────
+// Uses UPSTASH_REDIS_URL (production) or REDIS_URL (local dev fallback).
+// TLS is required for Upstash (rediss://) — ioredis enables it automatically.
 
 const connectionUrl =
-  process.env.DRAGONFLY_URL    ||
   process.env.UPSTASH_REDIS_URL ||
   process.env.REDIS_URL         ||
   (isDev ? 'redis://localhost:6379' : null);
 
 if (!connectionUrl) {
   console.error(
-    'FATAL: No DragonflyDB/Redis URL configured.\n' +
-    'Set DRAGONFLY_URL in your environment.\n' +
-    'Get a free instance at: https://cloud.dragonflydb.io'
+    'FATAL: No Redis URL configured.\n' +
+    'Set UPSTASH_REDIS_URL in your environment.\n' +
+    'Get a free instance at: https://upstash.com'
   );
   process.exit(1);
 }
 
-// TLS is required for Dragonfly Cloud (rediss://) — ioredis enables it
-// automatically when the URL scheme is "rediss://".
+// TLS is required for Upstash (rediss://) — ioredis enables it automatically.
 const tlsOptions = connectionUrl.startsWith('rediss://')
   ? { tls: { rejectUnauthorized: true } }
   : {};
@@ -115,11 +112,10 @@ const client = new Redis(connectionUrl, {
   },
 });
 
-client.on('connect',        ()    => console.log('DragonflyDB connected'));
-client.on('reconnecting',   ()    => console.warn('DragonflyDB reconnecting…'));
+client.on('connect',        ()    => console.log('Upstash Redis connected'));
+client.on('reconnecting',   ()    => console.warn('Upstash Redis reconnecting…'));
 client.on('error',          (err) => {
-  // Log every error — never swallow silently
-  console.error('DragonflyDB error:', err.message);
+  console.error('Upstash Redis error:', err.message);
 });
 
 // ── Export ────────────────────────────────────────────────────────────────────
@@ -137,25 +133,25 @@ async function connectRedis() {
     return _redis;
   } catch (err) {
     if (!isDev) {
-      console.error('FATAL: DragonflyDB connection failed —', err.message);
-      console.error('The server cannot start without DragonflyDB.');
-      console.error('Check DRAGONFLY_URL and your Dragonfly Cloud instance.');
+      console.error('FATAL: Upstash Redis connection failed —', err.message);
+      console.error('The server cannot start without Redis.');
+      console.error('Check UPSTASH_REDIS_URL in your environment.');
       process.exit(1);
     }
 
     // Development only: fall back to MemoryStore with loud warnings
     console.warn('');
-    console.warn('⚠️  DragonflyDB unavailable — using in-memory store.');
+    console.warn('⚠️  Upstash Redis unavailable — using in-memory store.');
     console.warn('⚠️  Rate limiting, sessions and replay protection are DISABLED.');
     console.warn('⚠️  This is acceptable for local development ONLY.');
-    console.warn('⚠️  Set DRAGONFLY_URL before deploying to production.');
+    console.warn('⚠️  Set UPSTASH_REDIS_URL before deploying to production.');
     console.warn('');
     _redis = new MemoryStore();
     return _redis;
   }
 }
 
-// Eagerly connect on import so the server fails fast if DragonflyDB is down
+// Eagerly connect on import so the server fails fast if Redis is down
 connectRedis().catch(() => {}); // errors already handled inside connectRedis
 
 // Proxy: callers do `redis.get(...)` without awaiting connectRedis() themselves
