@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/amapi-callback.html",
+      "destination": "/amapi-callback.html"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
