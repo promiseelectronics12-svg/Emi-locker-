@@ -53,6 +53,29 @@ router.post(
   confirmBinding
 );
 
+// Called by user app after binding — registers FCM token on the enrolled device record.
+// No auth required: device just enrolled and has no credentials yet.
+router.post(
+  '/:deviceId/fcm',
+  rateLimit({ windowMs: 60 * 60 * 1000, max: 20, message: { error: 'Rate limit exceeded' } }),
+  body('fcm_token').isString().trim().isLength({ min: 10, max: 4096 }),
+  async (req, res) => {
+    const { validationResult } = require('express-validator');
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: 'Invalid request' });
+    const db = require('../../config/database');
+    try {
+      await db.query(
+        `UPDATE devices SET fcm_token = $1, updated_at = NOW() WHERE id = $2 AND status = 'enrolled'`,
+        [req.body.fcm_token, req.params.deviceId]
+      );
+      return res.json({ success: true });
+    } catch (e) {
+      return res.status(500).json({ error: 'Failed to update FCM token' });
+    }
+  }
+);
+
 // Device reports shutdown/boot events with GPS for theft detection
 router.post(
   '/:deviceId/events',
