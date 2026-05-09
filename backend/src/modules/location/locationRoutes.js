@@ -115,21 +115,19 @@ function verifyDeviceOwnership(req, res, next) {
     return next();
   }
 
+  // dealer_id on devices references dealers.id (not users.id), so join through dealers table
   db.query(
-    `SELECT dealer_id, owner_id, reseller_id FROM devices WHERE id = $1`,
-    [deviceId]
+    `SELECT d.id
+     FROM devices d
+     LEFT JOIN dealers dl ON dl.id = d.dealer_id
+     LEFT JOIN resellers r ON r.id = d.reseller_id
+     WHERE d.id = $1
+       AND (dl.user_id = $2 OR d.owner_id = $2 OR r.user_id = $2)`,
+    [deviceId, userId]
   ).then(result => {
     if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'Device not found' });
-    }
-
-    const { dealer_id, owner_id, reseller_id } = result.rows[0];
-    const isOwner = dealer_id === userId || owner_id === userId || reseller_id === userId;
-
-    if (!isOwner) {
       return res.status(403).json({ success: false, error: 'Access denied to this device' });
     }
-
     next();
   }).catch(error => {
     logger.error('Device ownership verification error:', error);
