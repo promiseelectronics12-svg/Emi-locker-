@@ -6604,15 +6604,22 @@ class LocationDialog extends StatefulWidget {
 
 class _LocationDialogState extends State<LocationDialog> {
   String message = 'Ready.';
+  bool _busy = false;
 
   Future<void> pull() async {
+    if (_busy) return;
+    setState(() { _busy = true; message = 'Sending pull request…'; });
     try {
       final response = await widget.api.post(
         '/api/v1/location/${widget.deviceId}/pull',
+        data: <String, dynamic>{},
       );
-      setState(() => message = jsonEncode(asMap(response.data)));
+      final data = asMap(response.data);
+      setState(() => message = data['message']?.toString() ?? 'Pull sent.');
     } catch (e) {
       setState(() => message = readableError(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -6625,7 +6632,12 @@ class _LocationDialogState extends State<LocationDialog> {
         onPressed: () => Navigator.pop(context),
         child: const Text('Close'),
       ),
-      FilledButton(onPressed: pull, child: const Text('Pull')),
+      FilledButton(
+        onPressed: _busy ? null : pull,
+        child: _busy
+            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+            : const Text('Pull'),
+      ),
     ],
   );
 }

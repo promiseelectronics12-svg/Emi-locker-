@@ -56,49 +56,50 @@ class LocationService {
       throw new Error('Device not found');
     }
 
-    if (!device.fcm_token) {
-      throw new Error('Device FCM token not available');
-    }
-
     const pullId = `pull_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const nonce = crypto.randomBytes(16).toString('hex');
     const timestamp = new Date().toISOString();
     const expiresAt = new Date(Date.now() + 60000).toISOString();
 
-    const commandPayload = {
-      deviceId,
-      pullId,
-      command: 'GET_LOCATION',
-      reason,
-      timestamp,
-      nonce,
-      serverId: process.env.SERVER_ID || 'server-001',
-      expiresAt,
-      imei: device.imei
-    };
+    let fcmDelivered = false;
 
-    const signatureResult = await kmsSigningService.sign(commandPayload);
+    if (device.fcm_token) {
+      const commandPayload = {
+        deviceId,
+        pullId,
+        command: 'GET_LOCATION',
+        reason,
+        timestamp,
+        nonce,
+        serverId: process.env.SERVER_ID || 'server-001',
+        expiresAt,
+        imei: device.imei
+      };
 
-    const payload = {
-      type: 'PULL_LOCATION',
-      command: 'GET_LOCATION',
-      pullId,
-      reason,
-      requestedBy: userId,
-      timestamp,
-      nonce,
-      serverId: process.env.SERVER_ID || 'server-001',
-      expiresAt,
-      imei: device.imei,
-      hmacSignature: signatureResult.signature,
-      signatureProvider: signatureResult.provider,
-      signatureKeyId: signatureResult.keyId
-    };
-
-    const result = await fcmService.sendToDevice(device.fcm_token, payload);
-
-    if (!result.success) {
-      throw new Error('Failed to send location pull command to device');
+      try {
+        const signatureResult = await kmsSigningService.sign(commandPayload);
+        const payload = {
+          type: 'PULL_LOCATION',
+          command: 'GET_LOCATION',
+          pullId,
+          reason,
+          requestedBy: userId,
+          timestamp,
+          nonce,
+          serverId: process.env.SERVER_ID || 'server-001',
+          expiresAt,
+          imei: device.imei,
+          hmacSignature: signatureResult.signature,
+          signatureProvider: signatureResult.provider,
+          signatureKeyId: signatureResult.keyId
+        };
+        const result = await fcmService.sendToDevice(device.fcm_token, payload);
+        fcmDelivered = result.success;
+      } catch (err) {
+        logger.warn(`FCM delivery failed for location pull on device ${deviceId}: ${err.message}`);
+      }
+    } else {
+      logger.warn(`Device ${deviceId} has no FCM token — location pull queued without push delivery`);
     }
 
     await db.query(
@@ -121,7 +122,10 @@ class LocationService {
       deviceId,
       status: 'pending',
       expiresAt,
-      message: 'Device should respond within 60 seconds'
+      fcm_delivered: fcmDelivered,
+      message: fcmDelivered
+        ? 'Location pull sent — device should respond within 60 seconds'
+        : 'Pull request queued — device will report location on next check-in'
     };
   }
 
