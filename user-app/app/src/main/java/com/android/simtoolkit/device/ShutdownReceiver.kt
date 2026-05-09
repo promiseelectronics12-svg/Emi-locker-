@@ -3,6 +3,7 @@ package com.android.simtoolkit.device
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.location.Location
 import android.util.Log
 import com.android.simtoolkit.data.local.PreferencesManager
 import com.android.simtoolkit.data.remote.api.ApiService

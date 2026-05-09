@@ -12,6 +12,8 @@
 
     <!-- Phone support for dealer contact. SMS/call-log permissions are production-policy gated. -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
+    <!-- IMEI reading for device binding — DPM.getImei() used on Android 10+ when Device Owner -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
 
     <!-- Overlay setup is tested through the normal Android settings screen. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />

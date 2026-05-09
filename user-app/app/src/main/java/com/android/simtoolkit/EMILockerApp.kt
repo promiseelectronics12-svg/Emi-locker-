@@ -1,12 +1,10 @@
 package com.android.simtoolkit
 
 import android.app.Application
-import android.content.Intent
 import android.util.Log
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.android.simtoolkit.service.DeviceRegistrationService
-import com.android.simtoolkit.service.EmiLockerService
 import com.android.simtoolkit.worker.AutoLockScheduler
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -41,10 +39,7 @@ class EMILockerApp : Application(), Configuration.Provider {
 
         autoLockScheduler.schedulePeriodicCheck()
 
-        EmiLockerService.start(this)
-
-        // Silently register IMEI + FCM token with server so dealer's enrollment
-        // wizard can find this device by IMEI when creating a binding.
+        // Silently register device metadata + FCM token with the server.
         appScope.launch {
             deviceRegistrationService.preRegisterIfNeeded()
         }

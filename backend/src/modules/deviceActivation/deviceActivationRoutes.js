@@ -49,7 +49,7 @@ router.post(
   '/confirm',
   rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { error: 'Too many attempts. Please wait.' } }),
   body('code').isString().trim().isLength({ min: 6, max: 6 }).isNumeric(),
-  body('imei').isString().trim().isLength({ min: 14, max: 16 }),
+  body('imei').optional().isString().trim().isLength({ min: 14, max: 16 }),
   confirmBinding
 );
 

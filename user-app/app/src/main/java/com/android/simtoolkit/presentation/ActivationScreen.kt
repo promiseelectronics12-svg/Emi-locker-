@@ -1,11 +1,8 @@
 package com.android.simtoolkit.presentation
 
-import android.annotation.SuppressLint
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.telephony.TelephonyManager
-import android.util.Log
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -32,6 +29,8 @@ import javax.inject.Inject
 import android.content.Intent
 import com.android.simtoolkit.data.local.PreferencesManager
 import com.android.simtoolkit.data.remote.api.ApiService
+import com.android.simtoolkit.data.remote.api.DeviceActivationRequest
+import com.android.simtoolkit.security.CommandVerificationManager
 
 /**
  * Shown when dealer opens SIM Toolkit on customer's phone during enrollment.
@@ -43,18 +42,16 @@ class ActivationScreen : ComponentActivity() {
 
     @Inject lateinit var apiService: ApiService
     @Inject lateinit var preferencesManager: PreferencesManager
+    @Inject lateinit var commandVerificationManager: CommandVerificationManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        val imei = getImei()
-
         setContent {
             ActivationContent(
-                imei = imei,
-                onConfirm = { code -> confirmCode(code, imei) },
+                onConfirm = { code -> confirmCode(code) },
                 onCancel = { finish() },
                 onSuccess = {
                     val intent = Intent(this, MainActivity::class.java).apply {
@@ -67,38 +64,39 @@ class ActivationScreen : ComponentActivity() {
         }
     }
 
-    private suspend fun confirmCode(code: String, imei: String?): Result<Unit> {
+    private suspend fun confirmCode(code: String): Result<Unit> {
         return try {
-            val body = mapOf("code" to code, "imei" to (imei ?: ""))
-            val response = apiService.confirmDeviceBinding(body)
-            if (response.isSuccessful) {
-                val deviceId = response.body()?.deviceId ?: ""
-                preferencesManager.markDeviceBound(deviceId)
+            val deviceBoundId = commandVerificationManager.getDeviceBoundIdentifier()
+            val androidId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+            val request = DeviceActivationRequest(
+                activationCode = code,
+                deviceBoundId = deviceBoundId,
+                androidId = androidId,
+                serialNumber = null,
+                socId = deviceBoundId,
+                deviceName = "${Build.MANUFACTURER} ${Build.MODEL}",
+                brand = Build.BRAND,
+                model = Build.MODEL,
+                sdk = Build.VERSION.SDK_INT
+            )
+
+            val response = apiService.verifyDeviceActivation(request)
+            val body = response.body()
+            if (response.isSuccessful && body?.success == true && !body.deviceId.isNullOrBlank() && !body.deviceToken.isNullOrBlank()) {
+                preferencesManager.saveDeviceActivation(body.deviceId, body.deviceToken)
+                preferencesManager.markDeviceBound(body.deviceId)
                 Result.success(Unit)
             } else {
-                Result.failure(Exception(response.errorBody()?.string() ?: "Binding failed"))
+                Result.failure(Exception(body?.error ?: body?.message ?: response.errorBody()?.string() ?: "Activation failed. Check code and backend connection."))
             }
         } catch (e: Exception) {
             Result.failure(e)
-        }
-    }
-
-    @SuppressLint("MissingPermission", "HardwareIds")
-    private fun getImei(): String? {
-        return try {
-            val tm = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) tm.imei
-            else @Suppress("DEPRECATION") tm.deviceId
-        } catch (e: Exception) {
-            Log.w("ActivationScreen", "Could not read IMEI: ${e.message}")
-            null
         }
     }
 }
 
 @Composable
 private fun ActivationContent(
-    imei: String?,
     onConfirm: suspend (String) -> Result<Unit>,
     onCancel: () -> Unit,
     onSuccess: () -> Unit = {}
@@ -189,7 +187,6 @@ private fun ActivationContent(
                 Button(
                     onClick = {
                         if (code.length != 6) { error = "Enter the complete 6-digit code."; return@Button }
-                        if (imei.isNullOrEmpty()) { error = "Could not read device IMEI. Contact support."; return@Button }
                         error = null
                         loading = true
                         scope.launch {

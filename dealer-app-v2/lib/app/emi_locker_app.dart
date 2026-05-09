@@ -53,7 +53,6 @@ String configuredApiBaseUrl() {
   if (dartDefinedApiBaseUrl.trim().isNotEmpty) {
     return _trimTrailingSlash(dartDefinedApiBaseUrl.trim());
   }
-  if (kDebugMode) return localApiBaseUrl;
   return _trimTrailingSlash(dotenv.env['API_BASE_URL'] ?? localApiBaseUrl);
 }
 

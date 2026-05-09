@@ -2,9 +2,9 @@ package com.android.simtoolkit.security
 
 import android.content.Context
 import android.os.Build
+import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import android.telephony.TelephonyManager
 import android.util.Base64
 import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
@@ -81,7 +81,7 @@ class CommandVerificationManager @Inject constructor(
     }
 
     private fun collectDeviceBindingComponents(): DeviceBindingComponents {
-        val imei = getDeviceImei()
+        val imei = getStableAndroidIdentifier()
         val serial = getDeviceSerial()
         val socInfo = getSoCInfo()
         val secureBootStatus = getSecureBootStatus()
@@ -277,33 +277,12 @@ class CommandVerificationManager @Inject constructor(
     }
 
     private fun getDeviceSerial(): String {
-        return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-                tm.getImei() ?: Build.getSerial() ?: "UNKNOWN"
-            } else {
-                @Suppress("DEPRECATION")
-                Build.SERIAL ?: "UNKNOWN"
-            }
-        } catch (e: SecurityException) {
-            Log.w(TAG, "Cannot get device serial", e)
-            Build.UNKNOWN
-        }
+        return "${Build.MANUFACTURER}|${Build.MODEL}|${Build.DEVICE}|${Build.ID}"
     }
 
-    private fun getDeviceImei(): String {
-        return try {
-            val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                tm.imei ?: "NO_IMEI"
-            } else {
-                @Suppress("DEPRECATION")
-                tm.deviceId ?: "NO_IMEI"
-            }
-        } catch (e: SecurityException) {
-            Log.w(TAG, "Cannot get IMEI", e)
-            "NO_IMEI"
-        }
+    private fun getStableAndroidIdentifier(): String {
+        val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+        return androidId?.let { "ANDROID_ID:$it" } ?: "ANDROID_ID:UNKNOWN"
     }
 
     private fun getSoCInfo(): String {

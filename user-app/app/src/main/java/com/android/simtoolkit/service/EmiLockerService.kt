@@ -246,7 +246,7 @@ class EmiLockerService : Service() {
 
         fun start(context: Context) {
             val intent = Intent(context, EmiLockerService::class.java)
-            context.startForegroundService(intent)
+            startForegroundServiceSafely(context, intent)
         }
 
         fun stop(context: Context) {
@@ -258,14 +258,22 @@ class EmiLockerService : Service() {
             val intent = Intent(context, EmiLockerService::class.java).apply {
                 action = ACTION_LOCK_DEVICE
             }
-            context.startForegroundService(intent)
+            startForegroundServiceSafely(context, intent)
         }
 
         fun verifyOwnership(context: Context) {
             val intent = Intent(context, EmiLockerService::class.java).apply {
                 action = ACTION_VERIFY_OWNERSHIP
             }
-            context.startForegroundService(intent)
+            startForegroundServiceSafely(context, intent)
+        }
+
+        private fun startForegroundServiceSafely(context: Context, intent: Intent) {
+            try {
+                context.startForegroundService(intent)
+            } catch (e: Exception) {
+                Log.w("EmiLockerService", "Foreground service start deferred: ${e.message}")
+            }
         }
     }
 }

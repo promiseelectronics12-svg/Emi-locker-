@@ -14,6 +14,7 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
 
     companion object {
         private const val TAG = "EmiDeviceAdminReceiver"
+        private const val DISALLOW_POWER_OFF_RESTRICTION = "no_power_off"
 
         fun isDeviceOwner(context: Context): Boolean {
             return try {
@@ -85,8 +86,21 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
             dpm.setSecureSetting(adminComponent, android.provider.Settings.Secure.INSTALL_NON_MARKET_APPS, "0")
             dpm.setUninstallBlocked(adminComponent, context.packageName, true)
             dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_FACTORY_RESET)
-            dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_POWER_OFF)
+            dpm.addUserRestriction(adminComponent, DISALLOW_POWER_OFF_RESTRICTION)
             dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_SAFE_BOOT)
+            // Blocks USB debugging and prevents developer options from being re-enabled
+            // (tapping Build Number 7 times no longer works after Device Owner is set)
+            dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_DEBUGGING_FEATURES)
+            // Auto-grant overlay permission — required for partial lock warning screens
+            // No user dialog needed when Device Owner is set (Android 10+)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                dpm.setPermissionGrantState(
+                    adminComponent,
+                    context.packageName,
+                    android.Manifest.permission.SYSTEM_ALERT_WINDOW,
+                    DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED
+                )
+            }
             Log.d(TAG, "Device Owner policies applied successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to apply Device Owner policies", e)

@@ -119,8 +119,11 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, DealerContactActivity::class.java))
         }
 
-        binding.btnActivateDevice?.setOnClickListener {
-            startActivity(Intent(this, ActivationScreen::class.java))
+        val activateDeviceButtonId = resources.getIdentifier("btnActivateDevice", "id", packageName)
+        if (activateDeviceButtonId != 0) {
+            binding.root.findViewById<View>(activateDeviceButtonId)?.setOnClickListener {
+                startActivity(Intent(this, ActivationScreen::class.java))
+            }
         }
 
         binding.btnViewAgreement.setOnClickListener {
@@ -286,4 +289,3 @@ class MainActivity : AppCompatActivity() {
         }
     }
 }
-

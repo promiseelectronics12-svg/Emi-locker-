@@ -88,7 +88,7 @@ class FakeShutdownActivity : ComponentActivity() {
                     Spacer(modifier = Modifier.height(8.dp))
 
                     LinearProgressIndicator(
-                        progress = { animatedProgress },
+                        progress = animatedProgress,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(2.dp)

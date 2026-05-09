@@ -66,7 +66,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.android.simtoolkit.data.local.PreferencesManager
 import com.android.simtoolkit.data.remote.NetworkModule
-import com.android.simtoolkit.data.remote.api.DeviceActivationRequest
 import com.android.simtoolkit.device.DeviceAdminReceiver
 import com.android.simtoolkit.presentation.theme.EMILockerTheme
 import com.android.simtoolkit.security.CommandVerificationManager
@@ -139,18 +138,15 @@ class AuthActivity : ComponentActivity() {
                         )
                     } else {
                         ActivationScreen(
-                            onVerifyBinding = { code, imei ->
-                                val body = mapOf("code" to code, "imei" to (imei ?: ""))
+                            onVerifyBinding = { code ->
                                 try {
-                                    val response = networkModule.apiService.confirmDeviceBinding(body)
-                                    if (response.isSuccessful) {
-                                        val deviceId = response.body()?.deviceId ?: ""
-                                        preferencesManager.markDeviceBound(deviceId)
+                                    val outcome = verifyActivation(code, deviceBoundId)
+                                    if (outcome.activated) {
                                         isActivated = true
                                         startPermissionOnboarding()
                                         Result.success(Unit)
                                     } else {
-                                        Result.failure(Exception("Incorrect code or code has expired."))
+                                        Result.failure(Exception(outcome.message))
                                     }
                                 } catch (e: Exception) {
                                     Result.failure(Exception("Could not reach server. Check your connection."))
@@ -248,35 +244,37 @@ class AuthActivity : ComponentActivity() {
         )
     }
 
-    private suspend fun verifyActivation(code: String, deviceBoundId: String): ActivationOutcome {
-        preferencesManager.savePendingActivationCode(code)
+    private fun readImei(): String? {
+        return try {
+            val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val admin = ComponentName(this, com.android.simtoolkit.device.DeviceAdminReceiver::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && dpm.isDeviceOwnerApp(packageName)) {
+                dpm.getImei(admin, 0)
+            } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                @Suppress("MissingPermission", "HardwareIds", "DEPRECATION")
+                val tm = getSystemService(Context.TELEPHONY_SERVICE) as android.telephony.TelephonyManager
+                tm.deviceId
+            } else null
+        } catch (_: Exception) { null }
+    }
 
-        val androidId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-        val request = DeviceActivationRequest(
-            activationCode = code,
-            deviceBoundId = deviceBoundId,
-            androidId = androidId,
-            serialNumber = null,
-            socId = deviceBoundId,
-            deviceName = "${Build.MANUFACTURER} ${Build.MODEL}",
-            brand = Build.BRAND,
-            model = Build.MODEL,
-            sdk = Build.VERSION.SDK_INT
-        )
+    private suspend fun verifyActivation(code: String, @Suppress("UNUSED_PARAMETER") deviceBoundId: String): ActivationOutcome {
+        val imei = readImei()
+        val body = mutableMapOf("code" to code)
+        if (!imei.isNullOrBlank()) body["imei"] = imei
 
-        val response = networkModule.apiService.verifyDeviceActivation(request)
+        val response = networkModule.apiService.confirmDeviceBinding(body)
         if (!response.isSuccessful) {
-            return ActivationOutcome(false, "Activation failed. Check code and backend connection.")
+            return ActivationOutcome(false, "Code is incorrect or has expired. Ask your dealer to try again.")
         }
 
-        val body = response.body()
-        if (body?.success == true && !body.deviceId.isNullOrBlank() && !body.deviceToken.isNullOrBlank()) {
-            preferencesManager.saveDeviceActivation(body.deviceId, body.deviceToken)
-            val modeLabel = if (body.policy?.testMode == true) "Staging test verified" else "Device activated"
-            return ActivationOutcome(true, "$modeLabel. Starting device setup.")
+        val result = response.body()
+        if (result?.success == true && !result.deviceId.isNullOrBlank()) {
+            preferencesManager.markDeviceBound(result.deviceId)
+            return ActivationOutcome(true, "Device bound. Starting setup.")
         }
 
-        return ActivationOutcome(false, body?.error ?: body?.message ?: "Activation response was incomplete.")
+        return ActivationOutcome(false, "Binding failed. Ask your dealer to generate a new code.")
     }
 }
 
@@ -295,25 +293,14 @@ private data class SetupStatus(
     val refreshKey: Int
 )
 
-@android.annotation.SuppressLint("MissingPermission", "HardwareIds")
-private fun android.content.Context.getImeiFromContext(): String? {
-    return try {
-        val tm = getSystemService(android.content.Context.TELEPHONY_SERVICE) as android.telephony.TelephonyManager
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) tm.imei
-        else @Suppress("DEPRECATION") tm.deviceId
-    } catch (e: Exception) { null }
-}
-
 @Composable
 private fun ActivationScreen(
-    onVerifyBinding: suspend (code: String, imei: String?) -> Result<Unit>
+    onVerifyBinding: suspend (code: String) -> Result<Unit>
 ) {
     val scope = rememberCoroutineScope()
     var code by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-
-    val context = LocalContext.current
 
     ActivationBackground {
         Header(
@@ -350,8 +337,7 @@ private fun ActivationScreen(
                 scope.launch {
                     loading = true
                     error = null
-                    val imei = context.getImeiFromContext()
-                    val result = withContext(Dispatchers.IO) { onVerifyBinding(code, imei) }
+                    val result = withContext(Dispatchers.IO) { onVerifyBinding(code) }
                     loading = false
                     if (result.isFailure) {
                         error = result.exceptionOrNull()?.message

@@ -20,13 +20,22 @@ async function startEnrollment({ dealerId, customer_name, nid_hash, phone_number
     [imei1]
   );
 
+  let device;
   if (!deviceRow.rows.length) {
-    const err = new Error('Device not found. The customer must open the SIM Toolkit app on their device first.');
-    err.statusCode = 404;
-    throw err;
+    // Device has not pre-registered yet (Android 10+ blocks IMEI reading for non-system apps).
+    // Dealer knows the IMEI from the box — create the record now so binding can proceed.
+    const created = await db.query(
+      `INSERT INTO devices (imei, brand, model, status, created_at, updated_at)
+       VALUES ($1, $2, $3, 'pending', NOW(), NOW())
+       ON CONFLICT (imei) DO UPDATE SET updated_at = NOW()
+       RETURNING id, status`,
+      [imei1, brand || null, model || null]
+    );
+    device = created.rows[0];
+    logger.info('Device created by dealer during enrollment', { imei: imei1.slice(-4) });
+  } else {
+    device = deviceRow.rows[0];
   }
-
-  const device = deviceRow.rows[0];
 
   if (device.status === 'enrolled' || device.status === 'active') {
     const err = new Error('This device is already enrolled.');
@@ -62,21 +71,39 @@ async function startEnrollment({ dealerId, customer_name, nid_hash, phone_number
 async function confirmFromDevice({ code, imei }) {
   const tokenHash = crypto.createHash('sha256').update(String(code)).digest('hex');
 
-  // Find a pending enrollment matching this IMEI and code hash
-  const row = await db.query(
-    `SELECT e.*, d.id AS dev_id
-     FROM enrollments e
-     JOIN devices d ON d.id = e.device_id
-     WHERE e.imei1 = $1
-       AND e.token_hash = $2
-       AND e.status = 'pending'
-       AND e.expires_at > NOW()
-     LIMIT 1`,
-    [imei, tokenHash]
-  );
+  // On Android 10+ most apps cannot read IMEI without system privilege.
+  // Primary match uses code hash + IMEI; fall back to code-only when IMEI is absent.
+  let row;
+  if (imei) {
+    row = await db.query(
+      `SELECT e.*, d.id AS dev_id
+       FROM enrollments e
+       JOIN devices d ON d.id = e.device_id
+       WHERE e.imei1 = $1
+         AND e.token_hash = $2
+         AND e.status = 'pending'
+         AND e.expires_at > NOW()
+       LIMIT 1`,
+      [imei, tokenHash]
+    );
+  }
+
+  // Fallback: match by token hash alone (when IMEI unavailable or no IMEI match found)
+  if (!imei || !row.rows.length) {
+    row = await db.query(
+      `SELECT e.*, d.id AS dev_id
+       FROM enrollments e
+       JOIN devices d ON d.id = e.device_id
+       WHERE e.token_hash = $1
+         AND e.status = 'pending'
+         AND e.expires_at > NOW()
+       ORDER BY e.created_at DESC
+       LIMIT 1`,
+      [tokenHash]
+    );
+  }
 
   if (!row.rows.length) {
-    // Give a generic message — don't reveal whether IMEI or code was wrong
     const err = new Error('Code is incorrect or has expired. Ask your dealer to try again.');
     err.statusCode = 422;
     throw err;
