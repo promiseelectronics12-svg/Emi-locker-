@@ -14,7 +14,8 @@ function generateSixDigitToken() {
  * plaintext code directly to the dealer app to show on screen.
  * No FCM involved — dealer physically types the code into the user app.
  */
-async function startEnrollment({ dealerId, customer_name, nid_hash, phone_number, brand, model, imei1, imei2 }) {
+async function startEnrollment({ dealerId, customer_name, nid_hash, phone_number, brand, model, imei1, imei2, tier }) {
+  const keyTier = ['standard', 'premium', 'vip'].includes(tier) ? tier : 'standard';
   const deviceRow = await db.query(
     `SELECT id, status FROM devices WHERE imei = $1 LIMIT 1`,
     [imei1]
@@ -51,10 +52,10 @@ async function startEnrollment({ dealerId, customer_name, nid_hash, phone_number
   await db.query(
     `INSERT INTO enrollments
        (id, device_id, dealer_id, customer_name, nid_hash, phone_number,
-        brand, model, imei1, imei2, token_hash, status, expires_at, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending',$12,NOW())`,
+        brand, model, imei1, imei2, token_hash, tier, status, expires_at, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',$13,NOW())`,
     [enrollmentId, device.id, dealerId, customer_name, nid_hash, phone_number,
-     brand, model, imei1, imei2 || null, tokenHash, expiresAt]
+     brand, model, imei1, imei2 || null, tokenHash, keyTier, expiresAt]
   );
 
   logger.info('Enrollment started', { enrollmentId, imei: imei1.slice(-4) });
@@ -126,6 +127,37 @@ async function confirmFromDevice({ code, imei }) {
     `UPDATE enrollments SET status = 'confirmed', confirmed_at = NOW() WHERE id = $1`,
     [enrollment.id]
   );
+
+  // Consume one activation key of the enrollment's tier for this dealer
+  try {
+    const keyTier = enrollment.tier || 'standard';
+    const keyRow = await db.query(
+      `UPDATE activation_keys
+       SET status = 'activated', device_id = $1, activated_at = NOW(), updated_at = NOW()
+       WHERE id = (
+         SELECT id FROM activation_keys
+         WHERE dealer_id = $2
+           AND tier = $3
+           AND status = 'assigned'
+           AND device_id IS NULL
+         ORDER BY created_at ASC
+         LIMIT 1
+       )
+       RETURNING id`,
+      [enrollment.dev_id, enrollment.dealer_id, keyTier]
+    );
+    if (keyRow.rows.length) {
+      logger.info('Activation key consumed', { keyId: keyRow.rows[0].id, tier: keyTier });
+      await db.query(
+        `UPDATE devices SET activation_key_id = $1 WHERE id = $2`,
+        [keyRow.rows[0].id, enrollment.dev_id]
+      );
+    } else {
+      logger.warn('No available activation key to consume', { dealerId: enrollment.dealer_id, tier: keyTier });
+    }
+  } catch (keyErr) {
+    logger.warn('Key consumption failed (non-fatal)', { error: keyErr.message });
+  }
 
   logger.info('Device bound via user app', { enrollmentId: enrollment.id, imei: imei ? imei.slice(-4) : 'unknown' });
 
