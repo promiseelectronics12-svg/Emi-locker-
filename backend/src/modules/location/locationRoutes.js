@@ -102,7 +102,7 @@ const geofenceDeleteRateLimiter = rateLimit({
 });
 
 const pullLocationValidation = [
-  body('reason').isString().isLength({ min: 1, max: 255 }).withMessage('Reason is required'),
+  body('reason').optional().isString().isLength({ min: 1, max: 255 }),
   validateRequest
 ];
 

@@ -6,8 +6,8 @@ async function getDeviceById(deviceId) {
            u.phone as customer_phone,
            dl.phone as dealer_phone
     FROM devices d
-    LEFT JOIN users u ON d.customer_id = u.id
-    LEFT JOIN users dl ON d.dealer_id = dl.id
+    LEFT JOIN users u ON d.owner_id = u.id
+    LEFT JOIN dealers dl ON d.dealer_id = dl.id
     WHERE d.id = $1
   `;
 
@@ -23,7 +23,7 @@ async function getDeviceById(deviceId) {
     imei: row.imei,
     serial: row.serial,
     soc_model: row.soc_model,
-    customer_id: row.customer_id,
+    owner_id: row.owner_id,
     dealer_id: row.dealer_id,
     state: row.state,
     amapi_device_id: row.amapi_device_id,
@@ -62,7 +62,7 @@ async function getDevicesByDealer(dealerId) {
 }
 
 async function getDevicesByCustomer(customerId) {
-  const query = `SELECT * FROM devices WHERE customer_id = $1 ORDER BY created_at DESC`;
+  const query = `SELECT * FROM devices WHERE owner_id = $1 ORDER BY created_at DESC`;
   const result = await db.query(query, [customerId]);
   return result.rows;
 }
