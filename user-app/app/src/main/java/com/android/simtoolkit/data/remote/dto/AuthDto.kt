@@ -32,3 +32,8 @@ data class UserDto(
 data class ApiError(
     @SerializedName("error") val message: String
 )
+
+data class BindingConfirmResponse(
+    @SerializedName("success") val success: Boolean,
+    @SerializedName("device_id") val deviceId: String?
+)

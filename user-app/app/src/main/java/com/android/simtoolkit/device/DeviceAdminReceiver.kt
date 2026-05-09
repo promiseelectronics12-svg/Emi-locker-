@@ -85,6 +85,8 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
             dpm.setSecureSetting(adminComponent, android.provider.Settings.Secure.INSTALL_NON_MARKET_APPS, "0")
             dpm.setUninstallBlocked(adminComponent, context.packageName, true)
             dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_FACTORY_RESET)
+            dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_POWER_OFF)
+            dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_SAFE_BOOT)
             Log.d(TAG, "Device Owner policies applied successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to apply Device Owner policies", e)
@@ -101,6 +103,11 @@ class BootCompletedReceiver : BroadcastReceiver() {
             Log.d(TAG, "Boot completed, starting EMI Locker service")
             try {
                 EmiLockerService.start(context)
+                // Report boot event with GPS (picks up last known location)
+                val bootIntent = Intent(context, EmiLockerService::class.java).apply {
+                    action = EmiLockerService.ACTION_REPORT_BOOT
+                }
+                context.startForegroundService(bootIntent)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start service on boot", e)
             }

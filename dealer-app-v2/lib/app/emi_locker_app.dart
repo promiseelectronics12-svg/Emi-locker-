@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
 import '../core/local_vault.dart';
 import '../core/google_vault.dart';
+import '../core/sse_service.dart';
 import '../screens/dealer/unlock_flow_screen.dart';
 import '../screens/dealer/lock_detail_screen.dart';
 import '../screens/dealer/device_search_screen.dart';
@@ -14,6 +16,7 @@ import '../screens/dealer/bind_device_wizard.dart';
 import '../screens/reseller/credit_summary_screen.dart';
 import '../screens/shared/biometric_lock_screen.dart';
 import '../screens/shared/google_drive_onboarding_screen.dart';
+import '../screens/shared/onboarding_screen.dart';
 
 import 'package:dio/dio.dart';
 import 'package:excel/excel.dart' hide Border;
@@ -30,6 +33,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shimmer/shimmer.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../core/biometric_service.dart';
 
@@ -115,12 +119,20 @@ class _EmiLockerAppState extends State<EmiLockerApp> {
   final api = ApiClient();
   Session? session;
   bool loading = true;
+  bool _showOnboarding = false;
+  late final SseService _sse = SseService(dio: api.dio, getToken: () => api.accessToken);
 
   @override
   void initState() {
     super.initState();
     api.onSessionExpired = _sessionExpired;
     _restore();
+  }
+
+  @override
+  void dispose() {
+    _sse.dispose();
+    super.dispose();
   }
 
   Future<void> _restore() async {
@@ -131,6 +143,12 @@ class _EmiLockerAppState extends State<EmiLockerApp> {
       final user = AppUser.fromJson(asMap(jsonDecode(rawUser)));
       api.setTokens(accessToken: access, refreshToken: refresh);
       session = Session(user: user, accessToken: access, refreshToken: refresh);
+      _sse.start();
+    } else {
+      final onboardingDone = await OnboardingScreen.isComplete();
+      if (!onboardingDone) _showOnboarding = true;
+      // Pre-populate local vault from Drive backup (survives reinstall)
+      _tryRestoreVaultFromDrive();
     }
     setState(() => loading = false);
   }
@@ -144,9 +162,38 @@ class _EmiLockerAppState extends State<EmiLockerApp> {
     await storage.write(key: 'refreshToken', value: next.refreshToken);
     await storage.write(key: 'user', value: jsonEncode(next.user.toJson()));
     setState(() => session = next);
+    _sse.start();
+    _maybeSyncVaultToDrive();
+  }
+
+  Future<void> _tryRestoreVaultFromDrive() async {
+    try {
+      if (!await GoogleVault.isBound()) return;
+      final snapshot = await GoogleVault.restoreFromDrive();
+      if (snapshot == null) return;
+      final devices = List<Map<String, dynamic>>.from(snapshot['devices'] as List? ?? []);
+      final keys    = List<Map<String, dynamic>>.from(snapshot['keys']    as List? ?? []);
+      final dealerId = snapshot['dealer_id']?.toString() ?? '';
+      if (dealerId.isNotEmpty && (devices.isNotEmpty || keys.isNotEmpty)) {
+        if (devices.isNotEmpty) await LocalVault.syncDevices(dealerId, devices);
+        if (keys.isNotEmpty)    await LocalVault.syncKeys(dealerId, keys);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _maybeSyncVaultToDrive() async {
+    try {
+      if (!await GoogleVault.isBound()) return;
+      final snapshot = await LocalVault.read();
+      if (snapshot == null || snapshot.isEmpty) return;
+      await GoogleVault.syncVaultBackup(snapshot.toJson());
+    } catch (_) {
+      // Background operation — silent failure, never surfaces to user
+    }
   }
 
   Future<void> _logout() async {
+    _sse.stop();
     try {
       await api.post('/api/v1/auth/logout');
     } catch (_) {}
@@ -156,6 +203,7 @@ class _EmiLockerAppState extends State<EmiLockerApp> {
   }
 
   Future<void> _sessionExpired() async {
+    _sse.stop();
     api.clearTokens();
     await storage.deleteAll();
     if (!mounted) return;
@@ -249,11 +297,40 @@ class _EmiLockerAppState extends State<EmiLockerApp> {
       ),
       home: loading
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
-          : session == null
-          ? LoginScreen(api: api, onAuthenticated: _authenticated)
-          : AppBiometricGate(child: Workspace(api: api, session: session!, onLogout: _logout)),
+          : session != null
+          ? AppBiometricGate(
+              onUsePassword: _logout,
+              child: AppEventScope(
+                events: _sse.events,
+                child: Workspace(api: api, session: session!, onLogout: _logout),
+              ),
+            )
+          : _showOnboarding
+          ? OnboardingScreen(
+              onComplete: () => setState(() => _showOnboarding = false),
+            )
+          : LoginScreen(api: api, onAuthenticated: _authenticated),
     );
   }
+}
+
+/// Provides the SSE event stream to any widget in the tree.
+/// Access via: AppEventScope.of(context).listen(...)
+class AppEventScope extends InheritedWidget {
+  const AppEventScope({
+    super.key,
+    required this.events,
+    required super.child,
+  });
+
+  final Stream<SseEvent> events;
+
+  static Stream<SseEvent>? of(BuildContext context) {
+    return context.dependOnInheritedWidgetOfExactType<AppEventScope>()?.events;
+  }
+
+  @override
+  bool updateShouldNotify(AppEventScope old) => events != old.events;
 }
 
 class ApiClient {
@@ -315,6 +392,8 @@ class ApiClient {
   static Duration _timeout(String key) =>
       Duration(milliseconds: int.tryParse(dotenv.env[key] ?? '') ?? 30000);
 
+  String? get accessToken => _accessToken;
+
   void setTokens({required String accessToken, required String refreshToken}) {
     _accessToken = accessToken;
     _refreshToken = refreshToken;
@@ -363,6 +442,9 @@ class ApiClient {
     dynamic data,
     Map<String, dynamic>? query,
   }) => dio.post<dynamic>(_path(path), data: data, queryParameters: query);
+
+  Future<Response<dynamic>> patch(String path, {dynamic data}) =>
+      dio.patch<dynamic>(_path(path), data: data);
 
   Future<Response<dynamic>> delete(String path, {Map<String, dynamic>? query}) =>
       dio.delete<dynamic>(_path(path), queryParameters: query);
@@ -432,42 +514,131 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final email = TextEditingController();
   final password = TextEditingController();
-  final code = TextEditingController(text: '000000');
+  final _otpController = TextEditingController();
   bool busy = false;
   String? error;
+  bool _showOtp = false;
+  String? _deviceFingerprint;
+  int _errorShakeKey = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOrGenFingerprint();
+  }
+
+  Future<void> _loadOrGenFingerprint() async {
+    var fp = await storage.read(key: 'device_fingerprint');
+    if (fp == null) {
+      final rand = Random.secure();
+      fp = List.generate(32, (_) => rand.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+      await storage.write(key: 'device_fingerprint', value: fp);
+    }
+    if (mounted) setState(() => _deviceFingerprint = fp);
+  }
+
+  void _completeLogin(Map<String, dynamic> data) {
+    final access = data['accessToken']?.toString();
+    final refresh = data['refreshToken']?.toString();
+    if (access == null || refresh == null) throw Exception('Tokens missing');
+    widget.onAuthenticated(Session(
+      user: AppUser.fromJson(asMap(data['user'])),
+      accessToken: access,
+      refreshToken: refresh,
+    ));
+  }
+
+  String _deviceName() {
+    try {
+      if (Platform.isAndroid) return 'Android Device';
+      if (Platform.isIOS) return 'iOS Device';
+      return Platform.localHostname;
+    } catch (_) {
+      return 'Mobile Device';
+    }
+  }
 
   Future<void> login() async {
-    setState(() {
-      busy = true;
-      error = null;
-    });
+    setState(() { busy = true; error = null; });
     try {
-      final loginResponse = await widget.api.post(
-        '/api/v1/auth/login',
-        data: {'email': email.text.trim(), 'password': password.text},
-      );
-      final tempToken = asMap(loginResponse.data)['tempToken']?.toString();
-      if (tempToken == null) throw Exception('Temporary token missing');
-      final verifyResponse = await widget.api.post(
-        '/api/v1/auth/2fa/verify',
-        data: {'tempToken': tempToken, 'code': code.text.trim()},
-      );
-      final data = asMap(verifyResponse.data);
-      final access = data['accessToken']?.toString();
-      final refresh = data['refreshToken']?.toString();
-      if (access == null || refresh == null) throw Exception('Tokens missing');
-      widget.onAuthenticated(
-        Session(
-          user: AppUser.fromJson(asMap(data['user'])),
-          accessToken: access,
-          refreshToken: refresh,
-        ),
-      );
+      final res = await widget.api.post('/api/v1/auth/login', data: {
+        'email': email.text.trim(),
+        'password': password.text,
+        'device_fingerprint': _deviceFingerprint,
+        'device_name': _deviceName(),
+      });
+      final data = asMap(res.data);
+      if (data['requiresDeviceVerification'] == true) {
+        setState(() { _showOtp = true; busy = false; });
+        return;
+      }
+      _completeLogin(data);
     } catch (e) {
-      setState(() => error = readableError(e));
+      setState(() { error = readableError(e); _errorShakeKey++; });
     } finally {
       if (mounted) setState(() => busy = false);
     }
+  }
+
+  Future<void> _verifyOtp() async {
+    setState(() { busy = true; error = null; });
+    try {
+      final res = await widget.api.post('/api/v1/auth/verify-device-otp', data: {
+        'email': email.text.trim(),
+        'device_fingerprint': _deviceFingerprint,
+        'otp': _otpController.text.trim(),
+      });
+      _completeLogin(asMap(res.data));
+      // Offer biometric enrollment on first trust of this device
+      _offerBiometricEnrollment();
+    } catch (e) {
+      setState(() { error = readableError(e); _errorShakeKey++; });
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> _offerBiometricEnrollment() async {
+    final bio = BiometricService();
+    final alreadyEnabled = await bio.isBiometricEnabled();
+    if (alreadyEnabled) return;
+    final available = await bio.isBiometricAvailable();
+    if (!available || !mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Enable fingerprint login?',
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+        content: const Text(
+          'Skip the email code on this device next time.\n'
+          'Use your fingerprint or PIN instead.',
+          style: TextStyle(fontSize: 14, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Later'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              await bio.setBiometricEnabled(true);
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('Enable'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    email.dispose();
+    password.dispose();
+    _otpController.dispose();
+    super.dispose();
   }
 
   Widget _buildApiChip() {
@@ -501,170 +672,212 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  static ThemeData _darkInputTheme() => ThemeData.dark().copyWith(
+    colorScheme: const ColorScheme.dark(primary: Color(0xFF00A86B)),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: const Color(0xFF0A1220),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFF1C2D45), width: 1),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFF1C2D45), width: 1),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFF00A86B), width: 1.5),
+      ),
+      labelStyle: const TextStyle(color: Color(0xFF4B6080), fontSize: 14),
+      prefixIconColor: const Color(0xFF4B6080),
+    ),
+  );
+
   Widget _buildLoginCard(BuildContext context) {
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 450),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(28, 32, 28, 28),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+          boxShadow: [
+            BoxShadow(
+              color: AppTone.brand.withValues(alpha: 0.06),
+              blurRadius: 40,
+              offset: const Offset(0, 8),
+            ),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 24,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Brand accent stripe
-            Container(
-              height: 4,
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [AppTone.accent, AppTone.brand],
-                ),
-              ),
-            ),
-            _AnimatedSurface(
-                  padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Header: logo + text
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          const _BrandMark(size: 48),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'EMI Locker',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 28,
-                                    fontWeight: FontWeight.w900,
-                                    color: AppTone.ink,
-                                    letterSpacing: -0.8,
-                                    height: 1.0,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Secure workspace access',
-                                  style: GoogleFonts.inter(
-                                    color: AppTone.muted,
-                                    fontWeight: FontWeight.w500,
-                                    fontSize: 13,
-                                    letterSpacing: 0.1,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 28),
-                      _SecureInput(
-                        controller: email,
-                        label: 'Email address',
-                        icon: Icons.alternate_email,
-                        keyboardType: TextInputType.emailAddress,
-                      ),
-                      const SizedBox(height: 12),
-                      _SecureInput(
-                        controller: password,
-                        label: 'Password',
-                        icon: Icons.lock_outline,
-                        obscure: true,
-                      ),
-                      const SizedBox(height: 18),
-                      _SixDigitCodeInput(controller: code),
-                      AnimatedSize(
-                        duration: _medium,
-                        curve: Curves.easeOutCubic,
-                        child: error == null
-                            ? const SizedBox.shrink()
-                            : Padding(
-                                padding: const EdgeInsets.only(top: 14),
-                                child: _InlineNotice(
-                                  message: error!,
-                                  tone: AppTone.red,
-                                  icon: Icons.error_outline,
-                                ),
-                              ),
-                      ),
-                      const SizedBox(height: 24),
-                      FilledButton.icon(
-                        onPressed: busy ? null : login,
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size.fromHeight(52),
-                          textStyle: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        icon: busy
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Icon(Icons.login),
-                        label: Text(busy ? 'Signing in…' : 'Sign in securely'),
-                      ),
-                      const SizedBox(height: 20),
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: AppTone.page,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: AppTone.line),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Demo accounts',
-                              style: TextStyle(
-                                color: AppTone.muted,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                _DemoAccountButton(
-                                  label: 'Dealer demo',
-                                  onPressed: () {
-                                    email.text = 'dealer@emi-locker.com';
-                                    password.text = 'Demo@123456';
-                                  },
-                                ),
-                                _DemoAccountButton(
-                                  label: 'Reseller demo',
-                                  onPressed: () {
-                                    email.text = 'reseller@emi-locker.com';
-                                    password.text = 'Demo@123456';
-                                  },
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
+            // Header with breathing icon
+            Row(
+              children: [
+                Container(
+                  width: 44, height: 44,
+                  decoration: BoxDecoration(
+                    color: AppTone.brand,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTone.brand.withValues(alpha: 0.28),
+                        blurRadius: 14,
+                        offset: const Offset(0, 5),
                       ),
                     ],
                   ),
+                  child: const Icon(Icons.security_rounded, size: 22, color: Colors.white),
                 )
-                .animate()
-                .fadeIn(duration: 360.ms, delay: 80.ms)
-                .slideY(begin: 0.04, end: 0),
+                    .animate(onPlay: (c) => c.repeat(reverse: true))
+                    .scale(
+                      begin: const Offset(1, 1),
+                      end: const Offset(1.05, 1.05),
+                      duration: 2800.ms,
+                      curve: Curves.easeInOut,
+                    ),
+                const SizedBox(width: 14),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'EMI Locker',
+                      style: GoogleFonts.inter(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                        color: AppTone.ink,
+                        letterSpacing: -0.5,
+                        height: 1.1,
+                      ),
+                    ),
+                    Text(
+                      'Secure workspace access',
+                      style: GoogleFonts.inter(
+                        color: AppTone.muted,
+                        fontWeight: FontWeight.w500,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 28),
+            _LightLoginInput(
+              controller: email,
+              label: 'Email address',
+              icon: Icons.alternate_email,
+              keyboardType: TextInputType.emailAddress,
+            ),
+            const SizedBox(height: 12),
+            _LightLoginInput(
+              controller: password,
+              label: 'Password',
+              icon: Icons.lock_outline,
+              obscure: true,
+            ),
+            if (_showOtp) ...[
+              const SizedBox(height: 18),
+              _InlineNotice(
+                message: 'A verification code was sent to your email. Enter it below.',
+                tone: AppTone.info,
+                icon: Icons.mark_email_unread_outlined,
+              ),
+              const SizedBox(height: 12),
+              _LightLoginInput(
+                controller: _otpController,
+                label: '6-digit verification code',
+                icon: Icons.pin_outlined,
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: busy ? null : () => setState(() => _showOtp = false),
+                  style: TextButton.styleFrom(foregroundColor: AppTone.brand),
+                  child: const Text('Use a different account'),
+                ),
+              ),
+            ],
+            AnimatedSize(
+              duration: _medium,
+              curve: Curves.easeOutCubic,
+              child: error == null
+                  ? const SizedBox.shrink()
+                  : Padding(
+                      padding: const EdgeInsets.only(top: 14),
+                      child: _InlineNotice(
+                        message: error!,
+                        tone: AppTone.red,
+                        icon: Icons.error_outline,
+                      )
+                          .animate(key: ValueKey(_errorShakeKey))
+                          .shake(hz: 4, offset: const Offset(5, 0), duration: 400.ms),
+                    ),
+            ),
+            const SizedBox(height: 24),
+            _GradientLoginButton(
+              busy: busy,
+              showOtp: _showOtp,
+              onPressed: busy ? null : (_showOtp ? _verifyOtp : login),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Text(
+                  'TRY DEMO',
+                  style: TextStyle(
+                    color: AppTone.muted,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: Divider(color: AppTone.line, height: 1)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _LightDemoButton(
+                    label: 'Dealer',
+                    onPressed: () {
+                      email.text = 'dealer@emi-locker.com';
+                      password.text = 'Demo@123456';
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _LightDemoButton(
+                    label: 'Reseller',
+                    onPressed: () {
+                      email.text = 'reseller@emi-locker.com';
+                      password.text = 'Demo@123456';
+                    },
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
-      ),
+      )
+          .animate()
+          .fadeIn(duration: 400.ms, delay: 100.ms)
+          .slideY(begin: 0.04, end: 0, curve: Curves.easeOutCubic),
     );
   }
 
@@ -672,40 +885,114 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
     final compact = width < 820;
+    const bg = Color(0xFFF8FFFE);
 
     if (compact) {
       return Scaffold(
-        backgroundColor: AppTone.ink,
-        body: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        backgroundColor: bg,
+        body: Stack(
           children: [
-            const _MobileLoginBriefing()
-                .animate()
-                .fadeIn(duration: 420.ms)
-                .slideY(begin: -0.02, end: 0),
-            Expanded(
-              child: Container(
-                decoration: const BoxDecoration(
-                  color: AppTone.page,
-                  borderRadius: BorderRadius.vertical(
-                    top: Radius.circular(28),
-                  ),
-                ),
-                child: SafeArea(
-                  top: false,
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
+            // Aurora blobs — light pastel, slowly drifting
+            Positioned(top: -80, left: -60,
+              child: _DriftingBlob(color: AppTone.brand.withValues(alpha: 0.10), size: 340, delay: 0)),
+            Positioned(bottom: -40, right: -40,
+              child: _DriftingBlob(color: const Color(0xFF34D399).withValues(alpha: 0.08), size: 280, delay: 1200)),
+            Positioned(top: 200, right: -80,
+              child: _DriftingBlob(color: AppTone.accent.withValues(alpha: 0.05), size: 220, delay: 600)),
+            // Shimmer top bar
+            const Positioned(top: 0, left: 0, right: 0, child: _ShimmerTopBar()),
+            SafeArea(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
                     child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _buildLoginCard(context),
-                        if (kDebugMode) ...[
-                          const SizedBox(height: 16),
-                          _buildApiChip(),
-                        ],
+                        Row(
+                          children: [
+                            // Breathing logo
+                            Container(
+                              width: 36, height: 36,
+                              decoration: BoxDecoration(
+                                color: AppTone.brand,
+                                borderRadius: BorderRadius.circular(10),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: AppTone.brand.withValues(alpha: 0.30),
+                                    blurRadius: 12,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: const Icon(Icons.security_rounded, size: 18, color: Colors.white),
+                            )
+                                .animate(onPlay: (c) => c.repeat(reverse: true))
+                                .scale(
+                                  begin: const Offset(1, 1),
+                                  end: const Offset(1.06, 1.06),
+                                  duration: 2600.ms,
+                                  curve: Curves.easeInOut,
+                                ),
+                            const SizedBox(width: 10),
+                            Text(
+                              'EMI Locker',
+                              style: GoogleFonts.inter(
+                                color: AppTone.ink,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.4,
+                              ),
+                            ),
+                          ],
+                        )
+                            .animate()
+                            .fadeIn(duration: 300.ms)
+                            .slideY(begin: -0.03, end: 0),
+                        const SizedBox(height: 20),
+                        Text(
+                          'Command centre\nfor device control',
+                          style: GoogleFonts.inter(
+                            color: AppTone.ink,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 28,
+                            height: 1.1,
+                            letterSpacing: -0.7,
+                          ),
+                        )
+                            .animate()
+                            .fadeIn(duration: 380.ms, delay: 60.ms)
+                            .slideY(begin: -0.02, end: 0),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Dealer & reseller workspace',
+                          style: TextStyle(
+                            color: AppTone.muted,
+                            fontSize: 14,
+                          ),
+                        )
+                            .animate()
+                            .fadeIn(duration: 300.ms, delay: 100.ms),
+                        const SizedBox(height: 28),
                       ],
                     ),
                   ),
-                ),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                      child: Column(
+                        children: [
+                          _buildLoginCard(context),
+                          if (kDebugMode) ...[
+                            const SizedBox(height: 16),
+                            _buildApiChip(),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -713,114 +1000,49 @@ class _LoginScreenState extends State<LoginScreen> {
       );
     }
 
+    // Desktop layout
     return Scaffold(
-      backgroundColor: AppTone.page,
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(28),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1120),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Expanded(
-                    child: const _LoginBriefing()
-                        .animate()
-                        .fadeIn(duration: 420.ms)
-                        .slideX(begin: -0.03, end: 0),
-                  ),
-                  const SizedBox(width: 28),
-                  Expanded(
-                    child: Column(
-                      children: [
-                        _buildLoginCard(context),
-                        if (kDebugMode) ...[
-                          const SizedBox(height: 14),
-                          _buildApiChip(),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _MobileLoginBriefing extends StatelessWidget {
-  const _MobileLoginBriefing();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF0D1117), Color(0xFF151B2E)],
-        ),
-      ),
-      child: Stack(
+      backgroundColor: bg,
+      body: Stack(
         children: [
-          Positioned.fill(child: CustomPaint(painter: _DotGridPainter())),
+          Positioned(top: -120, left: -80,
+            child: _DriftingBlob(color: AppTone.brand.withValues(alpha: 0.10), size: 480, delay: 0)),
+          Positioned(bottom: -80, right: -60,
+            child: _DriftingBlob(color: const Color(0xFF34D399).withValues(alpha: 0.08), size: 400, delay: 900)),
+          Positioned(top: 120, right: 80,
+            child: _DriftingBlob(color: AppTone.accent.withValues(alpha: 0.04), size: 260, delay: 1500)),
+          const Positioned(top: 0, left: 0, right: 0, child: _ShimmerTopBar()),
           SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 28, 24, 36),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(28),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1100),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      const _BrandMark(size: 38, dark: true),
-                      const SizedBox(width: 12),
-                      const Text(
-                        'EMI Locker',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.3,
+                      Expanded(
+                        child: const _LoginHeroPanel()
+                            .animate()
+                            .fadeIn(duration: 480.ms)
+                            .slideX(begin: -0.03, end: 0),
+                      ),
+                      const SizedBox(width: 40),
+                      Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _buildLoginCard(context),
+                            if (kDebugMode) ...[
+                              const SizedBox(height: 14),
+                              _buildApiChip(),
+                            ],
+                          ],
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 22),
-                  Text(
-                    'Command center for\nfinanced device control',
-                    style: GoogleFonts.inter(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 26,
-                      height: 1.15,
-                      letterSpacing: -0.6,
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: const [
-                      _LoginSignal(
-                        icon: Icons.key_outlined,
-                        label: 'Activation keys',
-                      ),
-                      _LoginSignal(
-                        icon: Icons.phone_android,
-                        label: 'Device lock flow',
-                      ),
-                      _LoginSignal(
-                        icon: Icons.shield_outlined,
-                        label: 'Enterprise grade',
-                      ),
-                    ],
-                  ),
-                ],
+                ),
               ),
             ),
           ),
@@ -830,129 +1052,95 @@ class _MobileLoginBriefing extends StatelessWidget {
   }
 }
 
-class _LoginBriefing extends StatelessWidget {
-  const _LoginBriefing();
+// Login hero panel (desktop left side)
+class _LoginHeroPanel extends StatelessWidget {
+  const _LoginHeroPanel();
+
+  static const _features = [
+    (Icons.key_rounded, 'Activation key management'),
+    (Icons.phone_android_rounded, 'Remote device lock & unlock'),
+    (Icons.route_rounded, 'Field agent location tracking'),
+    (Icons.shield_rounded, 'Enterprise-grade security'),
+  ];
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 300),
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF0D1117), Color(0xFF151B2E)],
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // Top label
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: AppTone.brand.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: AppTone.brand.withValues(alpha: 0.2)),
+            ),
+            child: const Text(
+              'DEVICE FLEET MANAGEMENT',
+              style: TextStyle(
+                color: AppTone.brand,
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.2,
+              ),
+            ),
           ),
-        ),
-        child: Stack(
-          children: [
-            Positioned.fill(child: CustomPaint(painter: _DotGridPainter())),
-            // Bottom fade overlay
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: 120,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.transparent,
-                      const Color(0xFF0D1117).withValues(alpha: 0.85),
-                    ],
+          const SizedBox(height: 28),
+          // Pulsing rings centered
+          Center(child: _PulsingRingsWidget(size: 200)),
+          const SizedBox(height: 32),
+          // Headline
+          Text(
+            'Command centre\nfor financed\ndevice control',
+            style: GoogleFonts.inter(
+              color: AppTone.ink,
+              fontWeight: FontWeight.w900,
+              fontSize: 36,
+              height: 1.07,
+              letterSpacing: -0.9,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Dealer and reseller operations\nin one controlled workspace.',
+            style: TextStyle(
+              color: AppTone.muted,
+              fontSize: 14,
+              height: 1.65,
+            ),
+          ),
+          const SizedBox(height: 32),
+          // Feature list — clean vertical lines
+          ..._features.map((f) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 2,
+                  height: 18,
+                  decoration: BoxDecoration(
+                    color: AppTone.brand.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(36),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const _BrandMark(size: 48, dark: true),
-                  const SizedBox(height: 48),
-                  Text(
-                    'Command center\nfor financed\ndevice control',
-                    style: GoogleFonts.inter(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 38,
-                      height: 1.05,
-                      letterSpacing: -1.0,
-                    ),
+                const SizedBox(width: 12),
+                Icon(f.$1, size: 15, color: AppTone.brand.withValues(alpha: 0.7)),
+                const SizedBox(width: 8),
+                Text(
+                  f.$2,
+                  style: const TextStyle(
+                    color: Color(0xFF6B8AAA),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
                   ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Dealer and reseller operations\nin one controlled workspace.',
-                    style: TextStyle(
-                      color: Color(0xFF94A3B8),
-                      fontSize: 15,
-                      height: 1.6,
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: const [
-                      _LoginSignal(
-                        icon: Icons.key_outlined,
-                        label: 'Activation keys',
-                      ),
-                      _LoginSignal(
-                        icon: Icons.phone_android,
-                        label: 'Device lock flow',
-                      ),
-                      _LoginSignal(
-                        icon: Icons.route_outlined,
-                        label: 'Field location',
-                      ),
-                      _LoginSignal(
-                        icon: Icons.shield_outlined,
-                        label: 'Enterprise grade',
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _LoginSignal extends StatelessWidget {
-  const _LoginSignal({required this.icon, required this.label});
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.08),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: const Color(0xFF34D399), size: 18),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
+          )),
         ],
       ),
     );
@@ -1068,37 +1256,435 @@ class _SixDigitCodeInputState extends State<_SixDigitCodeInput> {
   }
 }
 
-class _DemoAccountButton extends StatelessWidget {
-  const _DemoAccountButton({required this.label, required this.onPressed});
+// ─── Login-specific UI helpers ────────────────────────────────────────────
+
+class _ShimmerTopBar extends StatelessWidget {
+  const _ShimmerTopBar();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 3,
+      child: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF00A86B), Color(0xFF34D399), Color(0xFF059669)],
+          ),
+        ),
+      )
+          .animate(onPlay: (c) => c.repeat())
+          .shimmer(duration: 2200.ms, color: Colors.white.withValues(alpha: 0.55)),
+    );
+  }
+}
+
+class _DriftingBlob extends StatelessWidget {
+  const _DriftingBlob({required this.color, required this.size, this.delay = 0});
+  final Color color;
+  final double size;
+  final int delay;
+
+  @override
+  Widget build(BuildContext context) {
+    return _GlowBlob(color: color, size: size)
+        .animate(onPlay: (c) => c.repeat(reverse: true))
+        .moveY(
+          begin: 0,
+          end: 22,
+          duration: Duration(milliseconds: 4200 + delay),
+          curve: Curves.easeInOut,
+        )
+        .moveX(
+          begin: 0,
+          end: 14,
+          duration: Duration(milliseconds: 5500 + delay),
+          curve: Curves.easeInOut,
+        );
+  }
+}
+
+class _LightLoginInput extends StatefulWidget {
+  const _LightLoginInput({
+    required this.controller,
+    required this.label,
+    required this.icon,
+    this.obscure = false,
+    this.keyboardType,
+  });
+  final TextEditingController controller;
+  final String label;
+  final IconData icon;
+  final bool obscure;
+  final TextInputType? keyboardType;
+
+  @override
+  State<_LightLoginInput> createState() => _LightLoginInputState();
+}
+
+class _LightLoginInputState extends State<_LightLoginInput> {
+  final focus = FocusNode();
+  bool focused = false;
+  bool _obscured = true;
+
+  @override
+  void initState() {
+    super.initState();
+    focus.addListener(() => setState(() => focused = focus.hasFocus));
+  }
+
+  @override
+  void dispose() { focus.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: _fast,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: focused
+            ? [BoxShadow(
+                color: AppTone.brand.withValues(alpha: 0.12),
+                blurRadius: 12,
+                offset: const Offset(0, 3),
+              )]
+            : null,
+      ),
+      child: TextField(
+        controller: widget.controller,
+        focusNode: focus,
+        obscureText: widget.obscure && _obscured,
+        keyboardType: widget.keyboardType,
+        style: widget.obscure
+            ? GoogleFonts.jetBrainsMono(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 2.0,
+                color: AppTone.ink,
+              )
+            : GoogleFonts.inter(
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                color: AppTone.ink,
+              ),
+        decoration: InputDecoration(
+          labelText: widget.label,
+          labelStyle: TextStyle(
+            color: focused ? AppTone.brand : AppTone.muted,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+          prefixIcon: Icon(
+            widget.icon,
+            color: focused ? AppTone.brand : AppTone.muted,
+            size: 20,
+          ),
+          suffixIcon: widget.obscure
+              ? IconButton(
+                  icon: Icon(
+                    _obscured ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                    size: 18,
+                    color: AppTone.muted,
+                  ),
+                  onPressed: () => setState(() => _obscured = !_obscured),
+                )
+              : null,
+          filled: true,
+          fillColor: const Color(0xFFF3F4F6),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFFE5E7EB), width: 1),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFFE5E7EB), width: 1),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFF00A86B), width: 1.5),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LightDemoButton extends StatelessWidget {
+  const _LightDemoButton({required this.label, required this.onPressed});
   final String label;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    return TextButton.icon(
-      onPressed: onPressed,
-      icon: const Icon(Icons.person_outline, size: 18),
-      label: Text(label),
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF9FAFB),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Color(0xFF6B7280),
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
     );
   }
 }
 
-class _DotGridPainter extends CustomPainter {
+class _GlowBlob extends StatelessWidget {
+  const _GlowBlob({required this.color, required this.size});
+  final Color color;
+  final double size;
+
   @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.09)
-      ..style = PaintingStyle.fill;
-    const spacing = 32.0;
-    for (double x = spacing / 2; x < size.width; x += spacing) {
-      for (double y = spacing / 2; y < size.height; y += spacing) {
-        canvas.drawCircle(Offset(x, y), 1.5, paint);
-      }
-    }
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            colors: [color, Colors.transparent],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LoginInput extends StatefulWidget {
+  const _LoginInput({
+    required this.controller,
+    required this.label,
+    required this.icon,
+    this.obscure = false,
+    this.keyboardType,
+  });
+  final TextEditingController controller;
+  final String label;
+  final IconData icon;
+  final bool obscure;
+  final TextInputType? keyboardType;
+
+  @override
+  State<_LoginInput> createState() => _LoginInputState();
+}
+
+class _LoginInputState extends State<_LoginInput> {
+  final focus = FocusNode();
+  bool focused = false;
+  bool _obscured = true;
+
+  @override
+  void initState() {
+    super.initState();
+    focus.addListener(() => setState(() => focused = focus.hasFocus));
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  void dispose() {
+    focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: _fast,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: focused
+            ? [BoxShadow(
+                color: AppTone.brand.withValues(alpha: 0.15),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              )]
+            : null,
+      ),
+      child: TextField(
+        controller: widget.controller,
+        focusNode: focus,
+        obscureText: widget.obscure && _obscured,
+        keyboardType: widget.keyboardType,
+        style: widget.obscure
+            ? GoogleFonts.jetBrainsMono(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 2.0,
+                color: Colors.white,
+              )
+            : GoogleFonts.inter(
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                color: Colors.white,
+              ),
+        decoration: InputDecoration(
+          labelText: widget.label,
+          labelStyle: TextStyle(
+            color: focused ? AppTone.brand : const Color(0xFF4B6080),
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+          prefixIcon: Icon(
+            widget.icon,
+            color: focused ? AppTone.brand : const Color(0xFF4B6080),
+            size: 20,
+          ),
+          suffixIcon: widget.obscure
+              ? IconButton(
+                  icon: Icon(
+                    _obscured ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                    size: 18,
+                    color: const Color(0xFF4B6080),
+                  ),
+                  onPressed: () => setState(() => _obscured = !_obscured),
+                )
+              : null,
+          filled: true,
+          fillColor: const Color(0xFF0A1220),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFF1C2D45), width: 1),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFF1C2D45), width: 1),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFF00A86B), width: 1.5),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GradientLoginButton extends StatelessWidget {
+  const _GradientLoginButton({
+    required this.busy,
+    required this.showOtp,
+    required this.onPressed,
+  });
+  final bool busy;
+  final bool showOtp;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 52,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          gradient: onPressed != null
+              ? const LinearGradient(
+                  colors: [Color(0xFF00A86B), Color(0xFF059669)],
+                )
+              : null,
+          color: onPressed == null ? const Color(0xFFD1FAE5) : null,
+          boxShadow: onPressed != null
+              ? [BoxShadow(
+                  color: const Color(0xFF00A86B).withValues(alpha: 0.3),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
+                )]
+              : null,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onPressed,
+            borderRadius: BorderRadius.circular(12),
+            child: Center(
+              child: busy
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          showOtp ? Icons.verified_rounded : Icons.arrow_forward_rounded,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          showOtp ? 'Verify device' : 'Sign in securely',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.1,
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DarkDemoButton extends StatelessWidget {
+  const _DarkDemoButton({required this.label, required this.onPressed});
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0A1220),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFF1C2D45)),
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Color(0xFF4B6080),
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AppNotification {
+  _AppNotification({
+    required this.type,
+    required this.title,
+    required this.body,
+    this.targetTab,
+  }) : at = DateTime.now(), read = false;
+  final String type;
+  final String title;
+  final String body;
+  final int? targetTab; // tab index to navigate on tap
+  final DateTime at;
+  bool read;
 }
 
 class Workspace extends StatefulWidget {
@@ -1119,6 +1705,65 @@ class Workspace extends StatefulWidget {
 class _WorkspaceState extends State<Workspace> {
   int index = 0;
   bool _controlsVisible = true;
+  StreamSubscription<SseEvent>? _sseSub;
+  final List<_AppNotification> _notifications = [];
+
+  int get _unreadCount => _notifications.where((n) => !n.read).length;
+
+  void _pushNotification(_AppNotification n) {
+    setState(() { _notifications.insert(0, n); });
+  }
+
+  void _markAllRead() {
+    setState(() { for (final n in _notifications) n.read = true; });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sseSub?.cancel();
+    final stream = AppEventScope.of(context);
+    if (stream != null) {
+      _sseSub = stream.listen((event) {
+        if (!mounted) return;
+        // Reseller tabs: 0=Dashboard 1=Dealers 2=Keys 3=Analytics
+        // Dealer tabs:   0=Dashboard 1=Devices 2=Enroll 3=Keys 4=Tools
+        final reseller = widget.session.user.isReseller;
+        if (event.type == 'key_request_approved') {
+          final qty  = event.data['quantity'];
+          final tier = event.data['tier'] ?? 'standard';
+          final tierLabel = tier == 'vip' ? 'VIP'
+              : tier == 'premium' ? 'Premium' : 'Standard';
+          _pushNotification(_AppNotification(
+            type: 'key_request_approved',
+            title: 'Keys Approved',
+            body: 'Admin approved $qty $tierLabel key${qty == 1 ? '' : 's'}. Tap to view your stock.',
+            targetTab: reseller ? 2 : 3, // Keys tab
+          ));
+        } else if (event.type == 'enrollment_complete') {
+          _pushNotification(_AppNotification(
+            type: 'enrollment_complete',
+            title: 'Device Enrolled',
+            body: '${event.data['deviceName'] ?? 'Device'} enrolled successfully. Tap to view.',
+            targetTab: reseller ? null : 1, // Dealer → Devices tab
+          ));
+        } else if (event.type == 'device_locked') {
+          _pushNotification(_AppNotification(
+            type: 'device_locked',
+            title: 'Device Locked',
+            body: '${event.data['deviceName'] ?? 'A device'} was locked. Tap to view.',
+            targetTab: reseller ? null : 1, // Dealer → Devices tab
+          ));
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _sseSub?.cancel();
+    super.dispose();
+  }
 
   void _setIndex(int i) => setState(() {
         index = i;
@@ -1373,6 +2018,10 @@ class _WorkspaceState extends State<Workspace> {
                               user: widget.session.user,
                               api: widget.api,
                               onSettings: openSettings,
+                              notifications: _notifications,
+                              unreadCount: _unreadCount,
+                              onMarkAllRead: _markAllRead,
+                              onNavigateTo: _setIndex,
                             )
                                 .animate(target: _controlsVisible ? 1.0 : 0.0)
                                 .fade(duration: _medium)
@@ -1397,6 +2046,10 @@ class _WorkspaceState extends State<Workspace> {
                           user: widget.session.user,
                           api: widget.api,
                           onSettings: openSettings,
+                          notifications: _notifications,
+                          unreadCount: _unreadCount,
+                          onMarkAllRead: _markAllRead,
+                          onNavigateTo: _setIndex,
                         ),
                       ),
                     ],
@@ -1428,10 +2081,18 @@ class _FloatingWorkspaceControls extends StatelessWidget {
     required this.user,
     required this.api,
     required this.onSettings,
+    required this.notifications,
+    required this.unreadCount,
+    required this.onMarkAllRead,
+    required this.onNavigateTo,
   });
   final AppUser user;
   final ApiClient api;
   final VoidCallback onSettings;
+  final List<_AppNotification> notifications;
+  final int unreadCount;
+  final VoidCallback onMarkAllRead;
+  final void Function(int tab) onNavigateTo;
 
   @override
   Widget build(BuildContext context) {
@@ -1465,7 +2126,14 @@ class _FloatingWorkspaceControls extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _AlertBell(api: api, accent: accent),
+                _AlertBell(
+                  api: api,
+                  accent: accent,
+                  notifications: notifications,
+                  unreadCount: unreadCount,
+                  onMarkAllRead: onMarkAllRead,
+                  onNavigateTo: onNavigateTo,
+                ),
                 const SizedBox(width: 2),
                 _AvatarButton(user: user, onTap: onSettings),
               ],
@@ -1478,107 +2146,314 @@ class _FloatingWorkspaceControls extends StatelessWidget {
 }
 
 class _AlertBell extends StatelessWidget {
-  const _AlertBell({required this.api, required this.accent});
+  const _AlertBell({
+    required this.api,
+    required this.accent,
+    required this.notifications,
+    required this.unreadCount,
+    required this.onMarkAllRead,
+    required this.onNavigateTo,
+  });
   final ApiClient api;
   final Color accent;
+  final List<_AppNotification> notifications;
+  final int unreadCount;
+  final VoidCallback onMarkAllRead;
+  final void Function(int tab) onNavigateTo;
 
   @override
   Widget build(BuildContext context) {
     return Tooltip(
       message: 'Alert Center',
-      child: IconButton.filledTonal(
-        onPressed: () => showModalBottomSheet<void>(
-          context: context,
-          isScrollControlled: true,
-          showDragHandle: true,
-          builder: (_) => _AlertCenterSheet(api: api, accent: accent),
-        ),
-        icon: const Icon(Icons.notifications_active_outlined),
-        style: IconButton.styleFrom(
-          foregroundColor: accent,
-          backgroundColor: accent.withValues(alpha: 0.1),
-        ),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          IconButton.filledTonal(
+            onPressed: () {
+              onMarkAllRead();
+              showModalBottomSheet<void>(
+                context: context,
+                isScrollControlled: true,
+                showDragHandle: true,
+                builder: (_) => _AlertCenterSheet(
+                  api: api,
+                  accent: accent,
+                  notifications: notifications,
+                  onNavigateTo: (tab) { Navigator.pop(context); onNavigateTo(tab); },
+                ),
+              );
+            },
+            icon: const Icon(Icons.notifications_active_outlined),
+            style: IconButton.styleFrom(
+              foregroundColor: accent,
+              backgroundColor: accent.withValues(alpha: 0.1),
+            ),
+          ),
+          if (unreadCount > 0)
+            Positioned(
+              top: 2,
+              right: 2,
+              child: IgnorePointer(
+                child: Container(
+                  width: 16,
+                  height: 16,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFEF4444),
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    unreadCount > 9 ? '9+' : '$unreadCount',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
 }
 
+IconData _notifIcon(String type) {
+  switch (type) {
+    case 'key_request_approved': return Icons.key_rounded;
+    case 'enrollment_complete':  return Icons.phone_android_rounded;
+    case 'device_locked':        return Icons.lock_rounded;
+    default:                     return Icons.notifications_rounded;
+  }
+}
+
+Color _notifColor(String type) {
+  switch (type) {
+    case 'key_request_approved': return const Color(0xFF10B981);
+    case 'enrollment_complete':  return const Color(0xFF3B82F6);
+    case 'device_locked':        return const Color(0xFFF59E0B);
+    default:                     return const Color(0xFF6B7280);
+  }
+}
+
+String _timeAgo(DateTime at) {
+  final diff = DateTime.now().difference(at);
+  if (diff.inSeconds < 60) return 'just now';
+  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+  if (diff.inHours < 24) return '${diff.inHours}h ago';
+  return '${diff.inDays}d ago';
+}
+
 class _AlertCenterSheet extends StatelessWidget {
-  const _AlertCenterSheet({required this.api, required this.accent});
+  const _AlertCenterSheet({
+    required this.api,
+    required this.accent,
+    required this.notifications,
+    required this.onNavigateTo,
+  });
   final ApiClient api;
   final Color accent;
-
-  Future<List<Map<String, dynamic>>> loadAlerts() async {
-    final response = await api.get('/api/v1/alerts');
-    return asList(response.data, 'alerts');
-  }
+  final List<_AppNotification> notifications;
+  final void Function(int tab) onNavigateTo;
 
   @override
   Widget build(BuildContext context) {
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 4, 18, 18),
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
         child: SizedBox(
           height: MediaQuery.sizeOf(context).height * 0.78,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  Icon(Icons.notifications_active_outlined, color: accent),
-                  const SizedBox(width: 10),
-                  const Expanded(
-                    child: Text(
-                      'Alert Center',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
+              // ── Header ──────────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: accent.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
                       ),
+                      child: Icon(Icons.notifications_active_rounded, color: accent, size: 20),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: FutureBuilder<List<Map<String, dynamic>>>(
-                  future: loadAlerts(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState != ConnectionState.done) {
-                      return Shimmer.fromColors(
-                        baseColor: const Color(0xFFE5E7EB),
-                        highlightColor: Colors.white,
-                        child: Column(
-                          children: List.generate(
-                            4,
-                            (index) => const Padding(
-                              padding: EdgeInsets.only(bottom: 12),
-                              child: _SoftPanel(
-                                child: _SkeletonLine(widthFactor: 0.82),
-                              ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Alert Center',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.5,
+                              color: AppTone.ink,
                             ),
                           ),
-                        ),
-                      );
-                    }
-                    if (snapshot.hasError) {
-                      return _InlineNotice(
-                        message:
-                            'Alert Center is not available yet. ${readableError(snapshot.error)}',
-                        tone: AppTone.amber,
-                        icon: Icons.cloud_off_outlined,
-                      );
-                    }
-                    final alerts = snapshot.data ?? [];
-                    if (alerts.isEmpty) {
-                      return const Empty('No active alerts right now.');
-                    }
-                    return ListView(
-                      children: alerts
-                          .map((alert) => _AlertTile(alert: alert))
-                          .toList(),
-                    );
-                  },
+                          Text(
+                            notifications.isEmpty
+                                ? 'All clear'
+                                : '${notifications.length} notification${notifications.length == 1 ? '' : 's'}',
+                            style: TextStyle(fontSize: 12, color: AppTone.muted, fontWeight: FontWeight.w500),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
+              ),
+              const SizedBox(height: 4),
+              Divider(color: AppTone.muted.withValues(alpha: 0.12), height: 1),
+              const SizedBox(height: 12),
+
+              // ── List ─────────────────────────────────────────────────────
+              Expanded(
+                child: notifications.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.notifications_none_rounded,
+                                size: 56, color: AppTone.muted.withValues(alpha: 0.25)),
+                            const SizedBox(height: 16),
+                            Text(
+                              'No notifications yet',
+                              style: TextStyle(
+                                color: AppTone.ink,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 16,
+                                letterSpacing: -0.3,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Key approvals and device events\nwill appear here in real time.',
+                              style: TextStyle(color: AppTone.muted, fontSize: 13, height: 1.5),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      )
+                    : ListView.separated(
+                        itemCount: notifications.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        itemBuilder: (context, i) {
+                          final n = notifications[i];
+                          final color = _notifColor(n.type);
+                          final tappable = n.targetTab != null;
+                          return Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(16),
+                              onTap: tappable ? () => onNavigateTo(n.targetTab!) : null,
+                              child: Ink(
+                                decoration: BoxDecoration(
+                                  color: AppTone.surface,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: color.withValues(alpha: 0.22),
+                                    width: 1,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: color.withValues(alpha: 0.06),
+                                      blurRadius: 12,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      // Icon pill
+                                      Container(
+                                        width: 42,
+                                        height: 42,
+                                        decoration: BoxDecoration(
+                                          gradient: LinearGradient(
+                                            colors: [
+                                              color.withValues(alpha: 0.18),
+                                              color.withValues(alpha: 0.08),
+                                            ],
+                                            begin: Alignment.topLeft,
+                                            end: Alignment.bottomRight,
+                                          ),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Icon(_notifIcon(n.type), color: color, size: 20),
+                                      ),
+                                      const SizedBox(width: 14),
+                                      // Text
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              n.title,
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.w700,
+                                                fontSize: 14.5,
+                                                letterSpacing: -0.2,
+                                                color: AppTone.ink,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              n.body,
+                                              style: TextStyle(
+                                                color: AppTone.muted,
+                                                fontSize: 13,
+                                                height: 1.45,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Row(
+                                              children: [
+                                                Icon(Icons.schedule_rounded,
+                                                    size: 11, color: AppTone.muted.withValues(alpha: 0.5)),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  _timeAgo(n.at),
+                                                  style: TextStyle(
+                                                    color: AppTone.muted.withValues(alpha: 0.6),
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w600,
+                                                    letterSpacing: 0.1,
+                                                  ),
+                                                ),
+                                                if (tappable) ...[
+                                                  const Spacer(),
+                                                  Text(
+                                                    'View →',
+                                                    style: TextStyle(
+                                                      color: color,
+                                                      fontSize: 12,
+                                                      fontWeight: FontWeight.w700,
+                                                      letterSpacing: 0.2,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
               ),
             ],
           ),
@@ -1891,38 +2766,56 @@ class _NavButtonState extends State<_NavButton> {
         child: InkWell(
           onTap: widget.onTap,
           borderRadius: BorderRadius.circular(20),
-          child: AnimatedContainer(
-            duration: _fast,
-            curve: Curves.easeOutCubic,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: active
-                  ? widget.accent.withValues(alpha: 0.12)
-                  : hovered
-                  ? const Color(0xFFF3F4F6)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  widget.page.icon,
-                  size: 20,
-                  color: active ? widget.accent : AppTone.muted,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              AnimatedContainer(
+                duration: _fast,
+                curve: Curves.easeOutCubic,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: active
+                      ? widget.accent.withValues(alpha: 0.12)
+                      : hovered
+                      ? const Color(0xFFF3F4F6)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(14),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    widget.page.title,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: active ? widget.accent : AppTone.ink,
-                      fontWeight: active ? FontWeight.w900 : FontWeight.w700,
+                child: Row(
+                  children: [
+                    Icon(
+                      widget.page.icon,
+                      size: 20,
+                      color: active ? widget.accent : AppTone.muted,
                     ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        widget.page.title,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: active ? widget.accent : AppTone.ink,
+                          fontWeight: active ? FontWeight.w900 : FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Left-edge active indicator bar
+              Positioned(
+                left: 0, top: 8, bottom: 8,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOutCubic,
+                  width: active ? 3 : 0,
+                  decoration: BoxDecoration(
+                    color: widget.accent,
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1985,7 +2878,7 @@ class _UserPanel extends StatelessWidget {
   }
 }
 
-class DealerDashboard extends StatelessWidget {
+class DealerDashboard extends StatefulWidget {
   const DealerDashboard({
     super.key,
     required this.api,
@@ -1995,13 +2888,46 @@ class DealerDashboard extends StatelessWidget {
   final ValueChanged<int> onNavigate;
 
   @override
+  State<DealerDashboard> createState() => _DealerDashboardState();
+}
+
+class _DealerDashboardState extends State<DealerDashboard> {
+  Future<void> Function()? _reload;
+  StreamSubscription<SseEvent>? _sseSub;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sseSub?.cancel();
+    final stream = AppEventScope.of(context);
+    if (stream != null) {
+      _sseSub = stream.listen((event) {
+        if (!mounted) return;
+        const relevant = {
+          'device_locked', 'device_unlocked', 'enrollment_complete',
+          'grace_expired', 'payment_recorded',
+        };
+        if (relevant.contains(event.type)) {
+          _reload?.call();
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _sseSub?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return DataPage<Map<String, dynamic>>(
       title: 'Dealer dashboard',
       loader: () async {
-        final stats = asMap((await api.get('/api/v1/dealer/stats')).data);
-        final keys = asMap((await api.get('/api/v1/keys/my-keys')).data);
-        final devices = asMap((await api.get('/api/v1/dealer/devices')).data);
+        final stats = asMap((await widget.api.get('/api/v1/dealer/stats')).data);
+        final keys = asMap((await widget.api.get('/api/v1/keys/my-keys')).data);
+        final devices = asMap((await widget.api.get('/api/v1/dealer/devices')).data);
         return {
           'stats': stats,
           'keys': asList(keys, 'keys'),
@@ -2009,6 +2935,7 @@ class DealerDashboard extends StatelessWidget {
         };
       },
       builder: (context, data, reload) {
+        _reload = reload;
         final stats = asMap(data['stats']);
         final keys = (data['keys'] as List<Map<String, dynamic>>?) ?? [];
         final devices = (data['devices'] as List<Map<String, dynamic>>?) ?? [];
@@ -2080,7 +3007,7 @@ class DealerDashboard extends StatelessWidget {
             ),
             Section(
               title: 'Quick actions',
-              child: _DealerQuickActions(onNavigate: onNavigate, api: api),
+              child: _DealerQuickActions(onNavigate: widget.onNavigate, api: widget.api),
             ),
             Section(
               title: 'Dashboard alerts',
@@ -2203,11 +3130,10 @@ class _DealerWarningStrip extends StatelessWidget {
         ),
     ];
     if (warnings.isEmpty) {
-      return const _InlineNotice(
-        message:
-            'Workspace is clear. Keys and devices are in a healthy operating state.',
-        tone: AppTone.emerald,
-        icon: Icons.check_circle_outline,
+      return _WorkspaceClearPanel(
+        deviceCount: deviceCount,
+        assignedKeys: assignedKeys,
+        lockedDevices: lockedDevices,
       );
     }
     return Column(
@@ -2223,6 +3149,146 @@ class _DealerWarningStrip extends StatelessWidget {
   }
 }
 
+class _WorkspaceClearPanel extends StatelessWidget {
+  const _WorkspaceClearPanel({
+    required this.deviceCount,
+    required this.assignedKeys,
+    required this.lockedDevices,
+  });
+  final int deviceCount;
+  final int assignedKeys;
+  final int lockedDevices;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTone.brand.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTone.brand.withValues(alpha: 0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color: AppTone.brand.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.check_circle_rounded, color: AppTone.brand, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Workspace is clear',
+                      style: TextStyle(
+                        color: AppTone.brand,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 15,
+                      ),
+                    ),
+                    const Text(
+                      'Keys and devices are in a healthy operating state.',
+                      style: TextStyle(
+                        color: AppTone.brand,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              _ClearStat(
+                icon: Icons.phone_android_rounded,
+                label: 'Devices enrolled',
+                value: '$deviceCount',
+                color: AppTone.brand,
+              ),
+              const SizedBox(width: 10),
+              _ClearStat(
+                icon: Icons.vpn_key_rounded,
+                label: 'Keys ready',
+                value: '$assignedKeys',
+                color: AppTone.info,
+              ),
+              const SizedBox(width: 10),
+              _ClearStat(
+                icon: Icons.lock_open_rounded,
+                label: 'Locks active',
+                value: '$lockedDevices',
+                color: AppTone.amber,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ClearStat extends StatelessWidget {
+  const _ClearStat({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withValues(alpha: 0.15)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: color, size: 16),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(
+                color: color,
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+                height: 1.0,
+              ),
+            ),
+            Text(
+              label,
+              style: TextStyle(
+                color: color.withValues(alpha: 0.7),
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class DealerDevices extends StatelessWidget {
   const DealerDevices({super.key, required this.api});
   final ApiClient api;
@@ -2232,6 +3298,7 @@ class DealerDevices extends StatelessWidget {
     return DataPage<Map<String, dynamic>>(
       title: 'Devices',
       loader: () async => asMap((await api.get('/api/v1/dealer/devices')).data),
+      sseEvents: const ['device_locked', 'device_unlocked', 'enrollment_complete', 'grace_expired'],
       builder: (context, data, reload) {
         final devices = asList(data, 'devices');
         return Page(
@@ -2746,6 +3813,26 @@ class EnrollmentPage extends StatefulWidget {
 
 class _EnrollmentPageState extends State<EnrollmentPage> {
   late Future<int> _keyCountFuture = _loadKeyCount();
+  StreamSubscription<SseEvent>? _sseSub;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sseSub?.cancel();
+    final stream = AppEventScope.of(context);
+    if (stream == null) return;
+    _sseSub = stream.listen((event) {
+      if (mounted && const {'enrollment_complete', 'key_request_approved'}.contains(event.type)) {
+        setState(() => _keyCountFuture = _loadKeyCount());
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _sseSub?.cancel();
+    super.dispose();
+  }
 
   Future<int> _loadKeyCount() async {
     final res = await widget.api.get('/api/v1/keys/my-keys', query: {'status': 'assigned'});
@@ -2763,7 +3850,7 @@ class _EnrollmentPageState extends State<EnrollmentPage> {
         return Page(
           title: 'Enroll device',
           subtitle: 'Bind a new device to a customer',
-          reload: () => setState(() => _keyCountFuture = _loadKeyCount()),
+          reload: () async => setState(() => _keyCountFuture = _loadKeyCount()),
           children: [
             StatGrid(cards: [
               StatCard(
@@ -2799,54 +3886,288 @@ class _EnrollmentPageState extends State<EnrollmentPage> {
   }
 }
 
-class DealerKeys extends StatelessWidget {
+class DealerKeys extends StatefulWidget {
   const DealerKeys({super.key, required this.api});
   final ApiClient api;
 
   @override
+  State<DealerKeys> createState() => _DealerKeysState();
+}
+
+class _DealerKeysState extends State<DealerKeys> {
+  late Future<Map<String, dynamic>> _invFuture = _loadInventory();
+  late Future<List<Map<String, dynamic>>> _keysFuture = _loadKeys();
+  String _tierFilter = 'all';
+  StreamSubscription<SseEvent>? _sseSub;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sseSub?.cancel();
+    final stream = AppEventScope.of(context);
+    if (stream == null) return;
+    _sseSub = stream.listen((event) {
+      if (mounted && const {'key_request_approved', 'grace_expired'}.contains(event.type)) {
+        _reload();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _sseSub?.cancel();
+    super.dispose();
+  }
+
+  Future<Map<String, dynamic>> _loadInventory() async {
+    final res = await widget.api.get('/api/v1/dealer/keys/inventory');
+    return asMap(res.data);
+  }
+
+  Future<List<Map<String, dynamic>>> _loadKeys() async {
+    final res = await widget.api.get('/api/v1/keys/my-keys');
+    return asList(asMap(res.data), 'keys');
+  }
+
+  Future<void> _reload() async {
+    setState(() {
+      _invFuture = _loadInventory();
+      _keysFuture = _loadKeys();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return DataPage<Map<String, dynamic>>(
-      title: 'Dealer keys',
-      loader: () async => asMap((await api.get('/api/v1/keys/my-keys')).data),
-      builder: (context, data, reload) {
-        final keys = asList(data, 'keys');
+    return FutureBuilder<List<dynamic>>(
+      future: Future.wait([_invFuture, _keysFuture]),
+      builder: (context, snap) {
+        final loading = snap.connectionState == ConnectionState.waiting;
+        final inv = snap.hasData ? asMap(snap.data![0]) : <String, dynamic>{};
+        final keys = snap.hasData ? List<Map<String, dynamic>>.from(snap.data![1] as List) : <Map<String, dynamic>>[];
+
+        final totalAssigned = _tierInt(inv, 'standard', 'assigned') +
+            _tierInt(inv, 'premium', 'assigned') +
+            _tierInt(inv, 'vip', 'assigned');
+        final totalActivated = _tierInt(inv, 'standard', 'activated') +
+            _tierInt(inv, 'premium', 'activated') +
+            _tierInt(inv, 'vip', 'activated');
+
         return Page(
           title: 'Dealer keys',
-          subtitle:
-              '${countByStatus(keys, 'assigned')} ready for activation, ${countByStatus(keys, 'activated')} used by devices',
-          reload: reload,
+          subtitle: loading
+              ? 'Loading…'
+              : '$totalAssigned ready for activation, $totalActivated used by devices',
+          reload: _reload,
           children: [
-            StatGrid(
-              cards: [
-                StatCard(
-                  'Ready for activation',
-                  countByStatus(keys, 'assigned'),
-                  color: AppTone.brand,
-                  icon: Icons.vpn_key_outlined,
+            if (loading)
+              const Center(child: CircularProgressIndicator())
+            else ...[
+              // Tier cards row — NotificationListener prevents horizontal scroll
+              // events from bubbling to the page-level pull-to-refresh handler
+              NotificationListener<ScrollNotification>(
+                onNotification: (_) => true,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _KeyTierCard(
+                        tier: 'standard',
+                        assigned: _tierInt(inv, 'standard', 'assigned'),
+                        quota: _tierInt(inv, 'standard', 'quota'),
+                        selected: _tierFilter == 'standard',
+                        onTap: () => setState(() => _tierFilter = _tierFilter == 'standard' ? 'all' : 'standard'),
+                      ),
+                      const SizedBox(width: 12),
+                      _KeyTierCard(
+                        tier: 'premium',
+                        assigned: _tierInt(inv, 'premium', 'assigned'),
+                        quota: _tierInt(inv, 'premium', 'quota'),
+                        selected: _tierFilter == 'premium',
+                        onTap: () => setState(() => _tierFilter = _tierFilter == 'premium' ? 'all' : 'premium'),
+                      ),
+                      const SizedBox(width: 12),
+                      _KeyTierCard(
+                        tier: 'vip',
+                        assigned: _tierInt(inv, 'vip', 'assigned'),
+                        quota: _tierInt(inv, 'vip', 'quota'),
+                        selected: _tierFilter == 'vip',
+                        onTap: () => setState(() => _tierFilter = _tierFilter == 'vip' ? 'all' : 'vip'),
+                      ),
+                    ],
+                  ),
                 ),
-                StatCard(
-                  'Used by devices',
-                  countByStatus(keys, 'activated'),
-                  color: AppTone.emerald,
-                  icon: Icons.check_circle_outline,
+              ),
+              const SizedBox(height: 16),
+              Section(
+                title: 'Key inventory',
+                child: DealerKeyInventory(
+                  keys: _tierFilter == 'all'
+                      ? keys
+                      : keys.where((k) => text(k['tier']) == _tierFilter).toList(),
                 ),
-                StatCard(
-                  'Cancelled',
-                  countByStatus(keys, 'revoked'),
-                  color: AppTone.red,
-                  icon: Icons.block,
-                ),
-              ],
-            ),
-            Section(
-              title: 'Activation code inventory',
-              child: DealerKeyInventory(keys: keys),
-            ),
+              ),
+            ],
           ],
         );
       },
     );
   }
+
+  int _tierInt(Map<String, dynamic> inv, String tier, String field) {
+    final t = asMap(inv[tier]);
+    return int.tryParse(t[field]?.toString() ?? '0') ?? 0;
+  }
+}
+
+// ── Key Tier Visual Card ──────────────────────────────────────────────────────
+
+class _KeyTierCard extends StatelessWidget {
+  const _KeyTierCard({
+    required this.tier,
+    required this.assigned,
+    required this.quota,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String tier;
+  final int assigned;
+  final int quota;
+  final bool selected;
+  final VoidCallback onTap;
+
+  static const _meta = {
+    'standard': _TierMeta(
+      label: 'Standard',
+      colors: [Color(0xFF8E8E93), Color(0xFFAEAEB2)],
+      icon: Icons.vpn_key_outlined,
+      features: ['Device enrollment', 'EMI lock/unlock', 'Basic dashboard'],
+    ),
+    'premium': _TierMeta(
+      label: 'Premium',
+      colors: [Color(0xFF0A84FF), Color(0xFF30B0C7)],
+      icon: Icons.stars_outlined,
+      features: ['All Standard features', 'Fraud center', 'Credit score display'],
+    ),
+    'vip': _TierMeta(
+      label: 'VIP',
+      colors: [Color(0xFFBF5AF2), Color(0xFFFFD60A)],
+      icon: Icons.workspace_premium_outlined,
+      features: ['All Premium features', 'bKash payment link', 'Custom grace periods'],
+    ),
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final m = _meta[tier]!;
+    final progress = quota > 0 ? (assigned / quota).clamp(0.0, 1.0) : 0.0;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        width: 200,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: m.colors,
+          ),
+          borderRadius: BorderRadius.circular(20),
+          border: selected
+              ? Border.all(color: Colors.white, width: 2.5)
+              : null,
+          boxShadow: [
+            BoxShadow(
+              color: m.colors[0].withOpacity(0.35),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(m.icon, color: Colors.white, size: 20),
+                const SizedBox(width: 6),
+                Text(
+                  m.label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '$assigned',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 36,
+                fontWeight: FontWeight.w900,
+                height: 1.0,
+              ),
+            ),
+            const Text(
+              'available',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 4,
+                backgroundColor: Colors.white24,
+                valueColor: const AlwaysStoppedAnimation(Colors.white),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'of $quota quota',
+              style: const TextStyle(color: Colors.white60, fontSize: 10),
+            ),
+            const SizedBox(height: 10),
+            ...m.features.map((f) => Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Row(
+                children: [
+                  const Icon(Icons.check, color: Colors.white70, size: 11),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      f,
+                      style: const TextStyle(color: Colors.white70, fontSize: 10),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            )),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TierMeta {
+  const _TierMeta({
+    required this.label,
+    required this.colors,
+    required this.icon,
+    required this.features,
+  });
+  final String label;
+  final List<Color> colors;
+  final IconData icon;
+  final List<String> features;
 }
 
 class DealerKeyInventory extends StatefulWidget {
@@ -3429,6 +4750,101 @@ class _PadtSupportPanelState extends State<_PadtSupportPanel> {
 
 // ───────────────────────────────────────────────────────────────────────────
 
+class _ResellerTierCard extends StatelessWidget {
+  const _ResellerTierCard({
+    required this.tier,
+    required this.available,
+    required this.assigned,
+  });
+  final String tier;
+  final int available;
+  final int assigned;
+
+  static const _meta = _KeyTierCard._meta;
+
+  @override
+  Widget build(BuildContext context) {
+    final m = _meta[tier]!;
+    return Container(
+      width: 160,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: m.colors,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: m.colors[0].withOpacity(0.32),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(m.icon, color: Colors.white, size: 18),
+              const SizedBox(width: 6),
+              Text(
+                m.label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          TweenAnimationBuilder<int>(
+            tween: IntTween(begin: 0, end: available),
+            duration: const Duration(milliseconds: 900),
+            curve: Curves.easeOutCubic,
+            builder: (_, v, __) => Text(
+              '$v',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 34,
+                fontWeight: FontWeight.w900,
+                height: 1,
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'in stock',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.75),
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            height: 1,
+            color: Colors.white.withOpacity(0.25),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '$assigned sent to dealers',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.8),
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class ResellerDashboard extends StatelessWidget {
   const ResellerDashboard({super.key, required this.api});
   final ApiClient api;
@@ -3438,16 +4854,47 @@ class ResellerDashboard extends StatelessWidget {
     return DataPage<Map<String, dynamic>>(
       title: 'Reseller dashboard',
       loader: () async => asMap((await api.get('/api/v1/reseller/stats')).data),
+      sseEvents: const ['key_request_approved'],
       builder: (context, stats, reload) => Page(
         title: 'Reseller dashboard',
         subtitle: 'Dealer network and key inventory',
         reload: reload,
         children: [
+          Section(
+            title: 'Key stock by tier',
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (_) => true,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _ResellerTierCard(
+                      tier: 'standard',
+                      available: stats['standard_available'] as int? ?? 0,
+                      assigned: stats['standard_assigned'] as int? ?? 0,
+                    ),
+                    const SizedBox(width: 12),
+                    _ResellerTierCard(
+                      tier: 'premium',
+                      available: stats['premium_available'] as int? ?? 0,
+                      assigned: stats['premium_assigned'] as int? ?? 0,
+                    ),
+                    const SizedBox(width: 12),
+                    _ResellerTierCard(
+                      tier: 'vip',
+                      available: stats['vip_available'] as int? ?? 0,
+                      assigned: stats['vip_assigned'] as int? ?? 0,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
           StatGrid(
             cards: [
               StatCard('Dealers', stats['total_dealers'], icon: Icons.groups),
               StatCard(
-                'In reseller stock',
+                'Total in stock',
                 stats['available_keys'],
                 color: AppTone.violet,
               ),
@@ -3487,6 +4934,231 @@ class ResellerDashboard extends StatelessWidget {
   }
 }
 
+// ── Credit Summary Screen ────────────────────────────────────────────────────
+
+class CreditSummaryScreen extends StatefulWidget {
+  const CreditSummaryScreen({super.key, required this.api});
+  final ApiClient api;
+
+  @override
+  State<CreditSummaryScreen> createState() => _CreditSummaryScreenState();
+}
+
+class _CreditSummaryScreenState extends State<CreditSummaryScreen> {
+  bool _settling = false;
+
+  Future<List<Map<String, dynamic>>> _load() async {
+    final res = await widget.api.get('/api/v1/reseller/credit');
+    return List<Map<String, dynamic>>.from(
+      (res.data['entries'] as List?) ?? [],
+    );
+  }
+
+  Future<void> _settle(String entryId, Future<void> Function() reload) async {
+    setState(() => _settling = true);
+    try {
+      await widget.api.patch('/api/v1/reseller/credit/$entryId/settle');
+      await reload();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to settle — try again.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _settling = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DataPage<List<Map<String, dynamic>>>(
+      title: 'Credit summary',
+      loader: _load,
+      builder: (context, entries, reload) {
+        final pending = entries.where((e) => e['status'] == 'pending').toList();
+        final settled = entries.where((e) => e['status'] == 'settled').toList();
+
+        return Page(
+          title: 'Credit summary',
+          subtitle: '${pending.length} pending · ${settled.length} settled',
+          reload: reload,
+          children: [
+            if (entries.isEmpty)
+              const Empty('No credit entries yet. Entries appear when you send keys to dealers.')
+            else ...[
+              if (pending.isNotEmpty)
+                Section(
+                  title: 'Outstanding (${pending.length})',
+                  child: Column(
+                    children: pending.asMap().entries.map((e) {
+                      return _CreditEntryCard(
+                        entry: e.value,
+                        onSettle: _settling
+                            ? null
+                            : () => _settle(e.value['id'] as String, reload),
+                      ).animate(delay: (40 * e.key).ms).fadeIn(duration: 180.ms);
+                    }).toList(),
+                  ),
+                ),
+              if (settled.isNotEmpty)
+                Section(
+                  title: 'Settled (${settled.length})',
+                  child: Column(
+                    children: settled
+                        .map((e) => _CreditEntryCard(entry: e, onSettle: null))
+                        .toList(),
+                  ),
+                ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _CreditEntryCard extends StatelessWidget {
+  const _CreditEntryCard({required this.entry, required this.onSettle});
+  final Map<String, dynamic> entry;
+  final VoidCallback? onSettle;
+
+  @override
+  Widget build(BuildContext context) {
+    final dealerName = text(entry['dealer_name'], fallback: 'Dealer');
+    final qty = entry['keys_quantity'] as int? ?? 0;
+    final tier = text(entry['tier'], fallback: 'standard');
+    final status = text(entry['status'], fallback: 'pending');
+    final isPending = status == 'pending';
+    final createdAt = entry['created_at'] != null
+        ? formatDateTime(entry['created_at'])
+        : '—';
+    final dueDate = entry['due_date'] != null
+        ? formatDateTime(entry['due_date'])
+        : null;
+    final settledAt = entry['settled_at'] != null
+        ? formatDateTime(entry['settled_at'])
+        : null;
+
+    final tierColor = switch (tier) {
+      'premium' => const Color(0xFF0A84FF),
+      'vip' => const Color(0xFFBF5AF2),
+      _ => AppTone.muted,
+    };
+    final tierLabel = switch (tier) {
+      'premium' => 'Premium',
+      'vip' => 'VIP',
+      _ => 'Standard',
+    };
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTone.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isPending ? AppTone.warning.withValues(alpha: 0.4) : AppTone.line,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  dealerName,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: (isPending ? AppTone.warning : AppTone.emerald)
+                      .withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  isPending ? 'Pending' : 'Settled',
+                  style: TextStyle(
+                    color: isPending ? AppTone.warning : AppTone.emerald,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: tierColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  '$qty × $tierLabel',
+                  style: TextStyle(
+                    color: tierColor,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Sent $createdAt',
+                style: const TextStyle(color: AppTone.muted, fontSize: 12),
+              ),
+            ],
+          ),
+          if (dueDate != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Due $dueDate',
+              style: TextStyle(
+                color: isPending ? AppTone.warning : AppTone.muted,
+                fontSize: 12,
+                fontWeight: isPending ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ],
+          if (settledAt != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Settled $settledAt',
+              style: const TextStyle(color: AppTone.emerald, fontSize: 12),
+            ),
+          ],
+          if (onSettle != null) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: onSettle,
+                icon: const Icon(Icons.check_circle_outline, size: 16),
+                label: const Text('Mark as settled'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTone.emerald,
+                  side: BorderSide(
+                    color: AppTone.emerald.withValues(alpha: 0.5),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class ResellerDealers extends StatelessWidget {
   const ResellerDealers({super.key, required this.api});
   final ApiClient api;
@@ -3505,9 +5177,15 @@ class ResellerDealers extends StatelessWidget {
           reload: reload,
           actions: [
             FilledButton.icon(
-              onPressed: () => showDialog<void>(
+              onPressed: () => showModalBottomSheet<void>(
                 context: context,
-                builder: (_) => CreateDealerDialog(api: api),
+                isScrollControlled: true,
+                showDragHandle: true,
+                useSafeArea: true,
+                builder: (_) => SizedBox(
+                  height: MediaQuery.sizeOf(context).height * 0.90,
+                  child: _CreateDealerWizard(api: api, onCreated: reload),
+                ),
               ),
               icon: const Icon(Icons.person_add),
               label: const Text('Create dealer'),
@@ -3592,162 +5270,220 @@ class ResellerKeys extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DataPage<Map<String, dynamic>>(
-      title: 'Key inventory',
+      title: 'Key quota',
+      sseEvents: const ['key_request_approved'],
       loader: () async {
-        final inventory = asMap(
-          (await api.get('/api/v1/reseller/keys/inventory')).data,
-        );
-        final requests = asMap(
-          (await api.get('/api/v1/reseller/keys/requests')).data,
-        );
-        final quota = asMap((await api.get('/api/v1/reseller/quota')).data);
-        final dealers = asMap((await api.get('/api/v1/reseller/dealers')).data);
+        final results = await Future.wait([
+          api.get('/api/v1/reseller/quota'),
+          api.get('/api/v1/reseller/keys/requests'),
+          api.get('/api/v1/reseller/dealers'),
+          api.get('/api/v1/reseller/credit'),
+        ]);
+        final quota    = asMap(results[0].data);
+        final requests = asList(asMap(results[1].data), 'requests');
+        final dealers  = asList(asMap(results[2].data), 'dealers');
+        final movement = asList(asMap(results[3].data), 'entries');
         return {
-          'keys': asList(inventory, 'keys'),
-          'requests': asList(requests, 'requests'),
-          'quota': quota,
-          'dealers': asList(dealers, 'dealers'),
+          'quota':    quota,
+          'requests': requests,
+          'dealers':  dealers,
+          'movement': movement,
         };
       },
       builder: (context, data, reload) {
-        final keys = (data['keys'] as List<Map<String, dynamic>>?) ?? [];
-        final requests =
-            (data['requests'] as List<Map<String, dynamic>>?) ?? [];
-        final quota = asMap(data['quota']);
-        final dealers = (data['dealers'] as List<Map<String, dynamic>>?) ?? [];
-        final availableCount = countByStatus(keys, 'available');
-        final assignedCount = countByStatus(keys, 'assigned');
-        final activatedCount = countByStatus(keys, 'activated');
+        final quota    = asMap(data['quota']);
+        final requests = (data['requests'] as List<Map<String, dynamic>>?) ?? [];
+        final dealers  = (data['dealers']  as List<Map<String, dynamic>>?) ?? [];
+        final movement = (data['movement'] as List<Map<String, dynamic>>?) ?? [];
+
+        final qStandard = (quota['quota_standard'] as num?)?.toInt() ?? 0;
+        final qPremium  = (quota['quota_premium']  as num?)?.toInt() ?? 0;
+        final qVip      = (quota['quota_vip']      as num?)?.toInt() ?? 0;
+        final totalQuota = qStandard + qPremium + qVip;
+
         final pendingRequests = requests
-            .where(
-              (request) => text(request['status']).toLowerCase() == 'pending',
-            )
+            .where((r) => text(r['status']).toLowerCase() == 'pending')
             .length;
+
         return Page(
-          title: 'Key inventory',
-          subtitle:
-              'Quota ${quota['used_keys'] ?? 0}/${quota['monthly_quota'] ?? 100}',
+          title: 'Key quota',
+          subtitle: '$totalQuota activations available to send',
           reload: reload,
-          actions: [
-            FilledButton.icon(
-              onPressed: () => showDialog<void>(
-                context: context,
-                builder: (_) => RequestKeysDialog(
-                  api: api,
-                  quota: quota,
-                  onSubmitted: reload,
+          actions: const [],
+          children: [
+            // ── Tier quota cards ────────────────────────────────────────
+            Section(
+              title: 'Available quota by tier',
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (_) => true,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _ResellerTierCard(tier: 'standard', available: qStandard, assigned: 0),
+                      const SizedBox(width: 12),
+                      _ResellerTierCard(tier: 'premium',  available: qPremium,  assigned: 0),
+                      const SizedBox(width: 12),
+                      _ResellerTierCard(tier: 'vip',      available: qVip,      assigned: 0),
+                    ],
+                  ),
                 ),
               ),
-              icon: const Icon(Icons.add),
-              label: const Text('Request keys'),
             ),
-            OutlinedButton.icon(
-              onPressed: dealers.isEmpty
-                  ? null
-                  : () => showModalBottomSheet<void>(
-                      context: context,
-                      isScrollControlled: true,
-                      showDragHandle: true,
-                      useSafeArea: true,
-                      builder: (_) => SizedBox(
-                        height: MediaQuery.sizeOf(context).height * 0.86,
-                        child: _SendKeysWizard(
+
+            // ── Actions ─────────────────────────────────────────────────
+            Section(
+              title: 'Actions',
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.add_circle_outline),
+                      label: const Text('Request quota'),
+                      onPressed: () => showDialog<void>(
+                        context: context,
+                        builder: (_) => RequestKeysDialog(
                           api: api,
-                          dealers: dealers,
-                          availableCount: availableCount,
-                          onAssigned: reload,
+                          quota: quota,
+                          onSubmitted: reload,
                         ),
                       ),
                     ),
-              icon: const Icon(Icons.send_outlined),
-              label: const Text('Send to dealer'),
-            ),
-          ],
-          children: [
-            Section(
-              title: 'Dealer key handoff',
-              child: _ResellerKeyHandoffPanel(
-                dealers: dealers,
-                availableCount: availableCount,
-                assignedCount: assignedCount,
-                onRequestKeys: () => showDialog<void>(
-                  context: context,
-                  builder: (_) => RequestKeysDialog(
-                    api: api,
-                    quota: quota,
-                    onSubmitted: reload,
                   ),
-                ),
-                onSendKeys: dealers.isEmpty
-                    ? null
-                    : () => showModalBottomSheet<void>(
-                        context: context,
-                        isScrollControlled: true,
-                        showDragHandle: true,
-                        useSafeArea: true,
-                        builder: (_) => SizedBox(
-                          height: MediaQuery.sizeOf(context).height * 0.86,
-                          child: _SendKeysWizard(
-                            api: api,
-                            dealers: dealers,
-                            availableCount: availableCount,
-                            onAssigned: reload,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      icon: const Icon(Icons.send_outlined),
+                      label: const Text('Send to dealer'),
+                      onPressed: dealers.isEmpty || totalQuota == 0
+                          ? null
+                          : () => showModalBottomSheet<void>(
+                              context: context,
+                              isScrollControlled: true,
+                              showDragHandle: true,
+                              useSafeArea: true,
+                              builder: (_) => SizedBox(
+                                height: MediaQuery.sizeOf(context).height * 0.86,
+                                child: _SendKeysWizard(
+                                  api: api,
+                                  dealers: dealers,
+                                  tierQuota: {
+                                    'standard': qStandard,
+                                    'premium':  qPremium,
+                                    'vip':      qVip,
+                                  },
+                                  onAssigned: reload,
+                                ),
+                              ),
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // ── Stock movement ───────────────────────────────────────────
+            Section(
+              title: 'Stock movement',
+              child: movement.isEmpty
+                  ? const Empty('No transfers yet. Send quota to a dealer to see movement here.')
+                  : Column(
+                      children: movement.take(20).toList().asMap().entries.map((e) {
+                        final entry = e.value;
+                        final dealerName = text(entry['dealer_name'], fallback: 'Dealer');
+                        final qty        = entry['keys_quantity'] as int? ?? 0;
+                        final tier       = text(entry['tier'], fallback: 'standard');
+                        final status     = text(entry['status'], fallback: 'pending');
+                        final date       = formatDateTime(entry['created_at']);
+                        final tierColor  = switch (tier) {
+                          'premium' => const Color(0xFF0A84FF),
+                          'vip'     => const Color(0xFFBF5AF2),
+                          _         => AppTone.muted,
+                        };
+                        final tierLabel  = switch (tier) {
+                          'premium' => 'Premium',
+                          'vip'     => 'VIP',
+                          _         => 'Standard',
+                        };
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: AppTone.surface,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppTone.line),
                           ),
-                        ),
-                      ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 36, height: 36,
+                                decoration: BoxDecoration(
+                                  color: tierColor.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    '$qty',
+                                    style: TextStyle(
+                                      color: tierColor,
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '$qty $tierLabel → $dealerName',
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 14),
+                                    ),
+                                    Text(date,
+                                        style: const TextStyle(
+                                            color: AppTone.muted, fontSize: 12)),
+                                  ],
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: (status == 'settled'
+                                          ? AppTone.emerald
+                                          : AppTone.warning)
+                                      .withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  status == 'settled' ? 'Paid' : 'Pending',
+                                  style: TextStyle(
+                                    color: status == 'settled'
+                                        ? AppTone.emerald
+                                        : AppTone.warning,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ).animate(delay: (30 * e.key).ms).fadeIn(duration: 180.ms);
+                      }).toList(),
+                    ),
+            ),
+
+            // ── Pending requests ─────────────────────────────────────────
+            if (pendingRequests > 0)
+              Section(
+                title: 'Pending requests ($pendingRequests)',
+                child: KeyRequestList(requests: requests),
               ),
-            ),
-            StatGrid(
-              cards: [
-                StatCard(
-                  'In stock',
-                  availableCount,
-                  color: AppTone.violet,
-                  icon: Icons.inventory_2_outlined,
-                ),
-                StatCard(
-                  'Sent to dealers',
-                  assignedCount,
-                  color: AppTone.amber,
-                  icon: Icons.outgoing_mail,
-                ),
-                StatCard(
-                  'Used by devices',
-                  activatedCount,
-                  color: AppTone.emerald,
-                  icon: Icons.check_circle_outline,
-                ),
-                StatCard(
-                  'Pending requests',
-                  pendingRequests,
-                  color: AppTone.red,
-                  icon: Icons.pending_actions,
-                ),
-              ],
-            ),
-            Section(
-              title: 'Inventory pipeline',
-              child: InventoryPipeline(
-                requested: pendingRequests,
-                approved: requests
-                    .where(
-                      (request) =>
-                          text(request['status']).toLowerCase() == 'approved',
-                    )
-                    .length,
-                available: availableCount,
-                assigned: assignedCount,
-                activated: activatedCount,
-              ),
-            ),
-            Section(
-              title: 'Reseller stock movement',
-              child: KeyInventoryPanel(keys: keys, dealers: dealers),
-            ),
-            Section(
-              title: 'Requests',
-              child: KeyRequestList(requests: requests),
-            ),
           ],
         );
       },
@@ -4104,6 +5840,24 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   value: biometricEnabled && biometricAvailable,
                   onChanged: biometricAvailable ? toggleBiometric : null,
+                ),
+                const Divider(height: 22),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.devices_outlined, color: AppTone.muted),
+                  title: const Text('Trusted devices',
+                      style: TextStyle(fontWeight: FontWeight.w700)),
+                  subtitle: const Text('Devices that can log in without email verification.'),
+                  trailing: const Icon(Icons.chevron_right, color: AppTone.muted),
+                  onTap: () => showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: AppTone.surface,
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                    ),
+                    builder: (_) => _TrustedDevicesSheet(api: widget.api),
+                  ),
                 ),
                 const Divider(height: 22),
                 Input(current, 'Current password', obscure: true),
@@ -4590,6 +6344,123 @@ class _SettingsRow extends StatelessWidget {
 
 // ───────────────────────────────────────────────────────────────────────────
 
+// ── Trusted Devices Sheet ─────────────────────────────────────────────────────
+
+class _TrustedDevicesSheet extends StatefulWidget {
+  const _TrustedDevicesSheet({required this.api});
+  final ApiClient api;
+
+  @override
+  State<_TrustedDevicesSheet> createState() => _TrustedDevicesSheetState();
+}
+
+class _TrustedDevicesSheetState extends State<_TrustedDevicesSheet> {
+  late Future<List<Map<String, dynamic>>> _devicesFuture = _load();
+
+  Future<List<Map<String, dynamic>>> _load() async {
+    final res = await widget.api.get('/api/v1/auth/trusted-devices');
+    return List<Map<String, dynamic>>.from(asList(asMap(res.data), 'devices'));
+  }
+
+  Future<void> _remove(String id) async {
+    await widget.api.delete('/api/v1/auth/trusted-devices/$id');
+    setState(() => _devicesFuture = _load());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.5,
+      minChildSize: 0.3,
+      maxChildSize: 0.85,
+      expand: false,
+      builder: (context, scroll) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTone.subtle,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('Trusted Devices',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTone.ink)),
+              const SizedBox(height: 4),
+              const Text('Devices below can log in with only your password.',
+                  style: TextStyle(fontSize: 13, color: AppTone.muted)),
+              const SizedBox(height: 16),
+              Expanded(
+                child: FutureBuilder<List<Map<String, dynamic>>>(
+                  future: _devicesFuture,
+                  builder: (context, snap) {
+                    if (snap.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final devices = snap.data ?? [];
+                    if (devices.isEmpty) {
+                      return const Center(
+                        child: Text('No trusted devices yet.',
+                            style: TextStyle(color: AppTone.muted)),
+                      );
+                    }
+                    return ListView.separated(
+                      controller: scroll,
+                      itemCount: devices.length,
+                      separatorBuilder: (_, _i) => const Divider(height: 1),
+                      itemBuilder: (_, i) {
+                        final d = devices[i];
+                        final name = text(d['device_name']).isEmpty ? 'Unknown device' : text(d['device_name']);
+                        final lastUsed = text(d['last_used_at']);
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.phone_android_outlined, color: AppTone.muted),
+                          title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                          subtitle: lastUsed.isNotEmpty
+                              ? Text('Last used: ${lastUsed.substring(0, 10)}',
+                                  style: const TextStyle(fontSize: 12))
+                              : null,
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline, color: AppTone.danger),
+                            tooltip: 'Remove device',
+                            onPressed: () async {
+                              final confirm = await showDialog<bool>(
+                                context: context,
+                                builder: (_) => AlertDialog(
+                                  title: const Text('Remove device?'),
+                                  content: Text('$name will need email verification on next login.'),
+                                  actions: [
+                                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                                    TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Remove')),
+                                  ],
+                                ),
+                              );
+                              if (confirm == true) _remove(text(d['id']));
+                            },
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _ConnectionStatusCard extends StatelessWidget {
   const _ConnectionStatusCard();
 
@@ -4934,6 +6805,7 @@ class _RequestKeysDialogState extends State<RequestKeysDialog> {
   final justification = TextEditingController(
     text: 'Dealer inventory replenishment',
   );
+  String _tier = 'standard';
   String? error;
   bool busy = false;
 
@@ -4991,6 +6863,7 @@ class _RequestKeysDialogState extends State<RequestKeysDialog> {
         data: {
           'quantity': requestedQuantity,
           'justification': justification.text.trim(),
+          'tier': _tier,
         },
       );
       await widget.onSubmitted();
@@ -5009,7 +6882,7 @@ class _RequestKeysDialogState extends State<RequestKeysDialog> {
   Widget build(BuildContext context) => _DialogShell(
     icon: Icons.add_card_outlined,
     title: 'Request keys from admin',
-    subtitle: 'Approved keys land in reseller inventory.',
+    subtitle: 'Approved quota lands in your stock instantly.',
     actions: [
       TextButton(
         onPressed: busy ? null : () => Navigator.pop(context),
@@ -5021,66 +6894,125 @@ class _RequestKeysDialogState extends State<RequestKeysDialog> {
             ? const SizedBox(
                 width: 16,
                 height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
               )
             : const Icon(Icons.send_outlined),
-        label: Text(busy ? 'Submitting' : 'Submit request'),
+        label: Text(busy ? 'Submitting…' : 'Submit request'),
       ),
     ],
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _QuotaStrip(
-          monthlyQuota: monthlyQuota,
-          usedKeys: usedKeys,
-          remainingQuota: remainingQuota,
-          maxPerRequest: maxPerRequest,
-        ),
-        const SizedBox(height: 16),
-        QuantityStepper(
-          controller: quantity,
-          label: 'Request quantity',
-          min: 1,
-          max: maxPerRequest,
-          onChanged: () => setState(() => error = null),
-        ),
-        const SizedBox(height: 14),
-        TextField(
-          controller: justification,
-          maxLines: 3,
-          onChanged: (_) => setState(() => error = null),
-          decoration: const InputDecoration(
-            labelText: 'Justification',
-            alignLabelWithHint: true,
-            prefixIcon: Icon(Icons.notes_outlined),
+    child: ScrollbarTheme(
+      data: ScrollbarThemeData(
+        thumbVisibility: const WidgetStatePropertyAll(false),
+        trackVisibility: const WidgetStatePropertyAll(false),
+        thickness: const WidgetStatePropertyAll(0),
+      ),
+      child: ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+        child: SingleChildScrollView(
+        child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _QuotaStrip(
+            monthlyQuota: monthlyQuota,
+            usedKeys: usedKeys,
+            remainingQuota: remainingQuota,
+            maxPerRequest: maxPerRequest,
           ),
-        ),
-        const SizedBox(height: 14),
-        _RequestPreview(
-          quantity: requestedQuantity <= 0 ? 0 : requestedQuantity,
-          remainingAfter: (remainingQuota - requestedQuantity).clamp(
-            0,
-            remainingQuota,
+          const SizedBox(height: 18),
+          // ── Tier selection ───────────────────────────────────────────
+          const Text(
+            'Key tier',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: AppTone.ink,
+            ),
           ),
-        ),
-        AnimatedSize(
-          duration: _medium,
-          child: error == null
-              ? const SizedBox.shrink()
-              : Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: _InlineNotice(
-                    message: error!,
-                    tone: AppTone.red,
-                    icon: Icons.error_outline,
+          const SizedBox(height: 8),
+          _TierOption(
+            tier: 'standard',
+            count: 0,
+            quantity: requestedQuantity,
+            selected: _tier == 'standard',
+            onTap: () => setState(() => _tier = 'standard'),
+            alwaysEnabled: true,
+          ),
+          const SizedBox(height: 8),
+          _TierOption(
+            tier: 'premium',
+            count: 0,
+            quantity: requestedQuantity,
+            selected: _tier == 'premium',
+            onTap: () => setState(() => _tier = 'premium'),
+            alwaysEnabled: true,
+          ),
+          const SizedBox(height: 8),
+          _TierOption(
+            tier: 'vip',
+            count: 0,
+            quantity: requestedQuantity,
+            selected: _tier == 'vip',
+            onTap: () => setState(() => _tier = 'vip'),
+            alwaysEnabled: true,
+          ),
+          const SizedBox(height: 18),
+          // ── Quantity ─────────────────────────────────────────────────
+          QuantityStepper(
+            controller: quantity,
+            label: 'Quantity',
+            min: 1,
+            max: maxPerRequest,
+            onChanged: () => setState(() => error = null),
+          ),
+          const SizedBox(height: 14),
+          // ── Justification ─────────────────────────────────────────────
+          TextField(
+            controller: justification,
+            maxLines: 3,
+            onChanged: (_) => setState(() => error = null),
+            decoration: InputDecoration(
+              labelText: 'Justification for admin',
+              alignLabelWithHint: true,
+              prefixIcon: const Icon(Icons.notes_outlined),
+              filled: true,
+              fillColor: AppTone.surface,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppTone.line),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppTone.line),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppTone.accent, width: 1.5),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          _RequestPreview(
+            quantity: requestedQuantity <= 0 ? 0 : requestedQuantity,
+            remainingAfter: (remainingQuota - requestedQuantity).clamp(0, remainingQuota),
+          ),
+          AnimatedSize(
+            duration: _medium,
+            child: error == null
+                ? const SizedBox.shrink()
+                : Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: _InlineNotice(
+                      message: error!,
+                      tone: AppTone.red,
+                      icon: Icons.error_outline,
+                    ),
                   ),
-                ),
-        ),
-      ],
+          ),
+        ],
+      ),
+    ),
+    ),
     ),
   );
 }
@@ -5159,54 +7091,43 @@ class AssignKeysDialog extends StatefulWidget {
 }
 
 class _AssignKeysDialogState extends State<AssignKeysDialog> {
-  final quantity = TextEditingController(text: '1');
+  final _qty = TextEditingController(text: '1');
+  String _tier = 'standard';
   String? error;
   bool busy = false;
 
-  int get requestedQuantity => int.tryParse(quantity.text.trim()) ?? 0;
+  int get _quantity => int.tryParse(_qty.text.trim()) ?? 0;
 
   @override
   void dispose() {
-    quantity.dispose();
+    _qty.dispose();
     super.dispose();
   }
 
-  String? validate(int available) {
-    if (requestedQuantity <= 0) return 'Enter a valid quantity.';
-    if (requestedQuantity > available) {
-      return 'Only $available keys are available for assignment.';
-    }
-    return null;
+  Future<Map<String, int>> _loadQuota() async {
+    final q = asMap((await widget.api.get('/api/v1/reseller/quota')).data);
+    return {
+      'standard': (q['quota_standard'] as num?)?.toInt() ?? 0,
+      'premium':  (q['quota_premium']  as num?)?.toInt() ?? 0,
+      'vip':      (q['quota_vip']      as num?)?.toInt() ?? 0,
+    };
   }
 
-  Future<int> loadAvailableCount() async {
-    if (widget.availableCount != null) return widget.availableCount!;
-    final inventory = asMap(
-      (await widget.api.get('/api/v1/reseller/keys/inventory')).data,
-    );
-    return countByStatus(asList(inventory, 'keys'), 'available');
-  }
-
-  Future<void> submit(int available) async {
-    final validation = validate(available);
-    if (validation != null) {
-      setState(() => error = validation);
+  Future<void> _submit(Map<String, int> quota) async {
+    final avail = quota[_tier] ?? 0;
+    if (_quantity <= 0) { setState(() => error = 'Enter a valid quantity.'); return; }
+    if (_quantity > avail) {
+      setState(() => error = 'Only $avail $_tierLabel keys available.');
       return;
     }
-    setState(() {
-      busy = true;
-      error = null;
-    });
+    setState(() { busy = true; error = null; });
     try {
       await widget.api.post(
         '/api/v1/reseller/dealers/${widget.dealerId}/assign-keys',
-        data: {'quantity': requestedQuantity},
+        data: {'quantity': _quantity, 'tier': _tier},
       );
       await widget.onAssigned?.call();
-      if (mounted) {
-        Navigator.pop(context);
-        snack(context, '$requestedQuantity keys assigned');
-      }
+      if (mounted) { Navigator.pop(context); snack(context, '$_quantity $_tierLabel keys sent'); }
     } catch (e) {
       if (mounted) setState(() => error = readableError(e));
     } finally {
@@ -5214,65 +7135,60 @@ class _AssignKeysDialogState extends State<AssignKeysDialog> {
     }
   }
 
+  String get _tierLabel => _tier == 'vip' ? 'VIP' : _tier == 'premium' ? 'Premium' : 'Standard';
+
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<int>(
-      future: loadAvailableCount(),
+    return FutureBuilder<Map<String, int>>(
+      future: _loadQuota(),
       builder: (context, snapshot) {
-        final available = snapshot.data ?? widget.availableCount ?? 0;
+        final quota   = snapshot.data ?? const {'standard': 0, 'premium': 0, 'vip': 0};
+        final avail   = quota[_tier] ?? 0;
+        final loading = snapshot.connectionState != ConnectionState.done;
         return _DialogShell(
           icon: Icons.outgoing_mail,
           title: 'Assign keys',
-          subtitle: widget.dealerName == null
-              ? 'Send available keys to this dealer.'
-              : 'Send available keys to ${widget.dealerName}.',
+          subtitle: 'Send keys to ${widget.dealerName ?? 'this dealer'}.',
           actions: [
-            TextButton(
-              onPressed: busy ? null : () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
+            TextButton(onPressed: busy ? null : () => Navigator.pop(context), child: const Text('Cancel')),
             FilledButton.icon(
-              onPressed:
-                  busy || snapshot.connectionState != ConnectionState.done
-                  ? null
-                  : () => submit(available),
+              onPressed: busy || loading ? null : () => _submit(quota),
               icon: busy
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                   : const Icon(Icons.send_outlined),
-              label: Text(busy ? 'Assigning' : 'Assign keys'),
+              label: Text(busy ? 'Sending…' : 'Send keys'),
             ),
           ],
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _SoftPanel(
-                child: Row(
-                  children: [
-                    const Icon(Icons.inventory_2_outlined, color: AppTone.blue),
-                    const SizedBox(width: 10),
+              // ── Tier selector ──────────────────────────────────────────
+              const Text('Key tier', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  for (final t in ['standard', 'premium', 'vip']) ...[
                     Expanded(
-                      child: Text(
-                        '$available keys currently available for assignment.',
-                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      child: _TierOption(
+                        tier: t,
+                        count: quota[t] ?? 0,
+                        quantity: _quantity,
+                        selected: _tier == t,
+                        onTap: () => setState(() { _tier = t; error = null; }),
                       ),
                     ),
+                    if (t != 'vip') const SizedBox(width: 8),
                   ],
-                ),
+                ],
               ),
               const SizedBox(height: 14),
+              // ── Quantity ───────────────────────────────────────────────
               QuantityStepper(
-                controller: quantity,
-                label: 'Keys to assign',
+                controller: _qty,
+                label: 'Keys to send',
                 min: 1,
-                max: available <= 0 ? 1 : available,
+                max: avail <= 0 ? 1 : avail,
                 onChanged: () => setState(() => error = null),
               ),
               AnimatedSize(
@@ -5280,12 +7196,8 @@ class _AssignKeysDialogState extends State<AssignKeysDialog> {
                 child: error == null
                     ? const SizedBox.shrink()
                     : Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: _InlineNotice(
-                          message: error!,
-                          tone: AppTone.red,
-                          icon: Icons.error_outline,
-                        ),
+                        padding: const EdgeInsets.only(top: 10),
+                        child: _InlineNotice(message: error!, tone: AppTone.red, icon: Icons.error_outline),
                       ),
               ),
             ],
@@ -5302,12 +7214,12 @@ class _SendKeysWizard extends StatefulWidget {
   const _SendKeysWizard({
     required this.api,
     required this.dealers,
-    required this.availableCount,
+    required this.tierQuota,
     required this.onAssigned,
   });
   final ApiClient api;
   final List<Map<String, dynamic>> dealers;
-  final int availableCount;
+  final Map<String, int> tierQuota;
   final Future<void> Function() onAssigned;
 
   @override
@@ -5334,6 +7246,15 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
   bool _apiBusy = false;
   bool _apiSuccess = false;
   Object? _apiError;
+
+  String _selectedTier = 'standard';
+  int get _availableCount => _tierCount(_selectedTier);
+  int _tierCount(String t) => widget.tierQuota[t] ?? 0;
+  String get _tierLabel => switch (_selectedTier) {
+        'premium' => 'Premium',
+        'vip' => 'VIP',
+        _ => 'Standard',
+      };
 
   Map<String, dynamic>? get _selectedDealer {
     for (final d in widget.dealers) {
@@ -5390,7 +7311,7 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
     try {
       await widget.api.post(
         '/api/v1/reseller/dealers/$_selectedDealerId/assign-keys',
-        data: {'quantity': _quantity},
+        data: {'quantity': _quantity, 'tier': _selectedTier},
       );
       if (mounted) {
         setState(() {
@@ -5414,7 +7335,7 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
 
   void _checkBothDone() {
     if (_holdComplete && _apiSuccess) {
-      setState(() => _step = 4);
+      setState(() => _step = 5);
       widget.onAssigned();
     }
   }
@@ -5428,7 +7349,7 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
     return SafeArea(
       child: Column(
         children: [
-          _WizardStepIndicator(step: _step, total: 5),
+          _WizardStepIndicator(step: _step, total: 6),
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
@@ -5464,11 +7385,13 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
       case 1:
         return _buildStep1();
       case 2:
-        return _buildStep2();
+        return _buildStep3(); // tier first
       case 3:
-        return _buildStep3();
+        return _buildStep2(); // quantity second (max now uses selected tier)
       case 4:
         return _buildStep4();
+      case 5:
+        return _buildStep5();
       default:
         return const SizedBox.shrink();
     }
@@ -5503,15 +7426,30 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
             ),
             const Spacer(),
             FilledButton.icon(
-              onPressed: _quantity >= 1 && _quantity <= widget.availableCount
-                  ? () => setState(() => _step = 3)
+              onPressed: () => setState(() => _step = 3),
+              icon: const Icon(Icons.arrow_forward),
+              label: const Text('Set quantity'),
+            ),
+          ],
+        ),
+        3 => Row(
+          children: [
+            TextButton.icon(
+              onPressed: () => setState(() => _step = 2),
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Back'),
+            ),
+            const Spacer(),
+            FilledButton.icon(
+              onPressed: _quantity >= 1 && _quantity <= _availableCount
+                  ? () => setState(() => _step = 4)
                   : null,
               icon: const Icon(Icons.arrow_forward),
               label: const Text('Review'),
             ),
           ],
         ),
-        3 => Row(
+        4 => Row(
           children: [
             TextButton.icon(
               onPressed: _apiBusy
@@ -5520,7 +7458,7 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
                       _holdController.reset();
                       _holdController.removeStatusListener(_onHoldStatus);
                       setState(() {
-                        _step = 2;
+                        _step = 3;
                         _holdComplete = false;
                         _apiSuccess = false;
                         _apiError = null;
@@ -5531,7 +7469,7 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
             ),
           ],
         ),
-        4 => Row(
+        5 => Row(
           children: [
             Expanded(
               child: OutlinedButton(
@@ -5798,8 +7736,7 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
         ),
         const SizedBox(height: 16),
         _InlineNotice(
-          message:
-              '${widget.availableCount} keys available in reseller stock.',
+          message: '$_availableCount $_tierLabel keys available in quota.',
           tone: AppTone.info,
           icon: Icons.inventory_2_outlined,
         ),
@@ -5807,7 +7744,7 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
         _LargeQuantityStepper(
           controller: _quantityController,
           min: 1,
-          max: widget.availableCount <= 0 ? 1 : widget.availableCount,
+          max: _availableCount <= 0 ? 1 : _availableCount,
           onChanged: () => setState(() {}),
         ),
         const SizedBox(height: 16),
@@ -5815,7 +7752,7 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
           spacing: 8,
           runSpacing: 8,
           children: [5, 10, 25, 50, 100]
-              .where((v) => v <= widget.availableCount)
+              .where((v) => v <= _availableCount)
               .map(
                 (v) => ActionChip(
                   label: Text('$v'),
@@ -5855,9 +7792,66 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
     );
   }
 
-  // ── Step 3: Hold to Confirm ────────────────────────────────────────────────
+  // ── Step 3: Select Tier ────────────────────────────────────────────────────
 
   Widget _buildStep3() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Select key tier',
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Choose which type of keys to send',
+          style: TextStyle(color: AppTone.muted),
+        ),
+        const SizedBox(height: 20),
+        _TierOption(
+          tier: 'standard',
+          count: _tierCount('standard'),
+          quantity: _quantity,
+          selected: _selectedTier == 'standard',
+          onTap: () => setState(() => _selectedTier = 'standard'),
+        ),
+        const SizedBox(height: 10),
+        _TierOption(
+          tier: 'premium',
+          count: _tierCount('premium'),
+          quantity: _quantity,
+          selected: _selectedTier == 'premium',
+          onTap: () => setState(() => _selectedTier = 'premium'),
+        ),
+        const SizedBox(height: 10),
+        _TierOption(
+          tier: 'vip',
+          count: _tierCount('vip'),
+          quantity: _quantity,
+          selected: _selectedTier == 'vip',
+          onTap: () => setState(() => _selectedTier = 'vip'),
+        ),
+        const SizedBox(height: 16),
+        AnimatedSize(
+          duration: _fast,
+          child: _tierCount(_selectedTier) < _quantity
+              ? _InlineNotice(
+                  message:
+                      'Only ${_tierCount(_selectedTier)} $_tierLabel keys in '
+                      'stock. Reduce quantity or choose a different tier.',
+                  tone: AppTone.warning,
+                  icon: Icons.warning_amber_rounded,
+                )
+              : const SizedBox.shrink(),
+        ),
+        const SizedBox(height: 20),
+      ],
+    );
+  }
+
+  // ── Step 4: Hold to Confirm ────────────────────────────────────────────────
+
+  Widget _buildStep4() {
     final dealer = _selectedDealer!;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -5881,11 +7875,13 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
                 text(dealer['name'], fallback: 'Dealer'),
               ),
               const SizedBox(height: 6),
+              _InfoRow('Tier', _tierLabel),
+              const SizedBox(height: 6),
               _InfoRow('Keys', '$_quantity activation codes'),
               const SizedBox(height: 6),
               _InfoRow(
                 'Stock after',
-                '${widget.availableCount - _quantity} remaining',
+                '${_availableCount - _quantity} remaining',
               ),
             ],
           ),
@@ -5899,68 +7895,93 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
           icon: Icons.warning_amber_rounded,
         ),
         const SizedBox(height: 24),
-        AnimatedBuilder(
-          animation: _holdController,
-          builder: (context, _) {
-            return GestureDetector(
-              onLongPressStart: _apiBusy || _holdComplete
-                  ? null
-                  : _onHoldStart,
-              onLongPressEnd: (_) => _onHoldCancel(),
-              onLongPressCancel: _onHoldCancel,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: Stack(
-                  children: [
-                    Container(
-                      height: 60,
-                      color: AppTone.warning.withValues(alpha: 0.12),
+        Center(
+          child: AnimatedBuilder(
+            animation: _holdController,
+            builder: (context, _) {
+              final progress = _holdController.value;
+              final color = _apiBusy
+                  ? AppTone.brand
+                  : Color.lerp(AppTone.warning, AppTone.brand, progress)!;
+              return GestureDetector(
+                onLongPressStart: _apiBusy || _holdComplete ? null : _onHoldStart,
+                onLongPressEnd: (_) => _onHoldCancel(),
+                onLongPressCancel: _onHoldCancel,
+                child: SizedBox(
+                  width: 112,
+                  height: 112,
+                  child: CustomPaint(
+                    painter: _ArcHoldPainter(
+                      progress: progress,
+                      trackColor: AppTone.warning.withValues(alpha: 0.15),
+                      arcColor: color,
+                      strokeWidth: 5,
                     ),
-                    FractionallySizedBox(
-                      widthFactor: _holdController.value,
-                      child: Container(
-                        height: 60,
-                        color: AppTone.warning.withValues(alpha: 0.45),
-                      ),
-                    ),
-                    SizedBox(
-                      height: 60,
-                      child: Center(
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (_apiBusy)
-                              const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: AppTone.warning,
+                    child: Center(
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        width: progress > 0 ? 76 : 80,
+                        height: progress > 0 ? 76 : 80,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: color.withValues(alpha: 0.1),
+                          border: Border.all(
+                            color: color.withValues(alpha: 0.3),
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Center(
+                          child: _apiBusy
+                              ? SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.5,
+                                    color: color,
+                                  ),
+                                )
+                              : Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      progress >= 1
+                                          ? Icons.check_rounded
+                                          : Icons.send_rounded,
+                                      color: color,
+                                      size: 26,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      progress == 0 ? 'Hold' : '${(progress * 100).toInt()}%',
+                                      style: TextStyle(
+                                        color: color,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 11,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              )
-                            else
-                              const Icon(
-                                Icons.lock_outlined,
-                                color: AppTone.warning,
-                              ),
-                            const SizedBox(width: 8),
-                            Text(
-                              _apiBusy ? 'Sending…' : 'Hold to send keys',
-                              style: const TextStyle(
-                                color: AppTone.warning,
-                                fontWeight: FontWeight.w900,
-                                fontSize: 16,
-                              ),
-                            ),
-                          ],
                         ),
                       ),
                     ),
-                  ],
+                  ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Center(
+          child: Text(
+            'Hold to send',
+            style: TextStyle(
+              color: AppTone.muted,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.3,
+            ),
+          ),
         ),
         AnimatedSize(
           duration: _medium,
@@ -5980,9 +8001,9 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
     );
   }
 
-  // ── Step 4: Success ────────────────────────────────────────────────────────
+  // ── Step 5: Success ────────────────────────────────────────────────────────
 
-  Widget _buildStep4() {
+  Widget _buildStep5() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -6057,6 +8078,130 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
 }
 
 // ─── Wizard Helper Widgets ──────────────────────────────────────────────────
+
+class _TierOption extends StatelessWidget {
+  const _TierOption({
+    required this.tier,
+    required this.count,
+    required this.quantity,
+    required this.selected,
+    required this.onTap,
+    this.alwaysEnabled = false,
+  });
+  final String tier;
+  final int count;
+  final int quantity;
+  final bool selected;
+  final VoidCallback onTap;
+  final bool alwaysEnabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, icon, grad) = switch (tier) {
+      'premium' => (
+        'Premium',
+        Icons.star_rounded,
+        [const Color(0xFF1D4ED8), const Color(0xFF60A5FA)],
+      ),
+      'vip' => (
+        'VIP',
+        Icons.diamond_rounded,
+        [const Color(0xFF7C3AED), const Color(0xFFD97706)],
+      ),
+      _ => (
+        'Standard',
+        Icons.key_rounded,
+        [const Color(0xFF6B7280), const Color(0xFF9CA3AF)],
+      ),
+    };
+
+    final enough = alwaysEnabled || count >= quantity;
+    final disabled = !alwaysEnabled && count == 0;
+
+    return GestureDetector(
+      onTap: disabled ? null : onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: selected
+              ? LinearGradient(
+                  colors: grad
+                      .map((c) => c.withValues(alpha: 0.12))
+                      .toList(),
+                )
+              : null,
+          color: selected ? null : AppTone.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: selected ? grad[0] : AppTone.line,
+            width: selected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: disabled
+                      ? [AppTone.muted.withValues(alpha: 0.4),
+                         AppTone.muted.withValues(alpha: 0.2)]
+                      : grad,
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: Colors.white, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                      color: disabled ? AppTone.muted : AppTone.ink,
+                    ),
+                  ),
+                  Text(
+                    disabled
+                        ? 'Out of stock'
+                        : !enough
+                            ? '$count available — need $quantity'
+                            : '$count keys available',
+                    style: TextStyle(
+                      color: !enough && !disabled
+                          ? AppTone.warning
+                          : AppTone.muted,
+                      fontSize: 13,
+                      fontWeight: !enough && !disabled
+                          ? FontWeight.w600
+                          : FontWeight.normal,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (selected)
+              Icon(Icons.check_circle_rounded, color: grad[0])
+            else
+              Icon(
+                Icons.radio_button_unchecked,
+                color: disabled ? AppTone.muted.withValues(alpha: 0.4) : AppTone.line,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _WizardStepIndicator extends StatelessWidget {
   const _WizardStepIndicator({required this.step, required this.total});
@@ -6203,6 +8348,44 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
+class _ArcHoldPainter extends CustomPainter {
+  const _ArcHoldPainter({
+    required this.progress,
+    required this.trackColor,
+    required this.arcColor,
+    this.strokeWidth = 5,
+  });
+  final double progress;
+  final Color trackColor;
+  final Color arcColor;
+  final double strokeWidth;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (size.shortestSide / 2) - strokeWidth / 2;
+    final rect   = Rect.fromCircle(center: center, radius: radius);
+    final paint  = Paint()
+      ..style      = PaintingStyle.stroke
+      ..strokeCap  = StrokeCap.round
+      ..strokeWidth = strokeWidth;
+
+    // Track ring
+    paint.color = trackColor;
+    canvas.drawCircle(center, radius, paint);
+
+    // Arc sweep — clockwise from top (-π/2)
+    if (progress > 0) {
+      paint.color = arcColor;
+      canvas.drawArc(rect, -pi / 2, 2 * pi * progress, false, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ArcHoldPainter old) =>
+      old.progress != progress || old.arcColor != arcColor;
+}
+
 class _SuccessCirclePainter extends CustomPainter {
   const _SuccessCirclePainter({required this.progress});
   final double progress;
@@ -6277,63 +8460,778 @@ class _DealerPreview extends StatelessWidget {
   }
 }
 
-class CreateDealerDialog extends StatefulWidget {
-  const CreateDealerDialog({super.key, required this.api});
+// ── Create Dealer Wizard ─────────────────────────────────────────────────────
+
+// District → Division mapping for Bangladesh
+const _districtDivision = <String, String>{
+  'Dhaka': 'Dhaka', 'Gazipur': 'Dhaka', 'Narayanganj': 'Dhaka',
+  'Narsingdi': 'Dhaka', 'Manikganj': 'Dhaka', 'Munshiganj': 'Dhaka',
+  'Tangail': 'Dhaka', 'Kishoreganj': 'Dhaka', 'Rajbari': 'Dhaka',
+  'Faridpur': 'Dhaka', 'Madaripur': 'Dhaka', 'Shariatpur': 'Dhaka',
+  'Gopalganj': 'Dhaka',
+  'Chittagong': 'Chittagong', "Cox's Bazar": 'Chittagong',
+  'Noakhali': 'Chittagong', 'Feni': 'Chittagong', 'Lakshmipur': 'Chittagong',
+  'Chandpur': 'Chittagong', 'Comilla': 'Chittagong', 'Brahmanbaria': 'Chittagong',
+  'Bandarban': 'Chittagong', 'Rangamati': 'Chittagong', 'Khagrachhari': 'Chittagong',
+  'Rajshahi': 'Rajshahi', 'Bogura': 'Rajshahi', 'Joypurhat': 'Rajshahi',
+  'Naogaon': 'Rajshahi', 'Natore': 'Rajshahi', 'Chapai Nawabganj': 'Rajshahi',
+  'Pabna': 'Rajshahi', 'Sirajganj': 'Rajshahi',
+  'Khulna': 'Khulna', 'Jessore': 'Khulna', 'Satkhira': 'Khulna',
+  'Bagerhat': 'Khulna', 'Narail': 'Khulna', 'Magura': 'Khulna',
+  'Jhenaidah': 'Khulna', 'Kushtia': 'Khulna', 'Meherpur': 'Khulna',
+  'Chuadanga': 'Khulna',
+  'Barishal': 'Barishal', 'Patuakhali': 'Barishal', 'Bhola': 'Barishal',
+  'Pirojpur': 'Barishal', 'Jhalokati': 'Barishal', 'Barguna': 'Barishal',
+  'Sylhet': 'Sylhet', 'Habiganj': 'Sylhet', 'Moulvibazar': 'Sylhet',
+  'Sunamganj': 'Sylhet',
+  'Rangpur': 'Rangpur', 'Dinajpur': 'Rangpur', 'Gaibandha': 'Rangpur',
+  'Kurigram': 'Rangpur', 'Lalmonirhat': 'Rangpur', 'Nilphamari': 'Rangpur',
+  'Panchagarh': 'Rangpur', 'Thakurgaon': 'Rangpur',
+  'Mymensingh': 'Mymensingh', 'Jamalpur': 'Mymensingh',
+  'Netrokona': 'Mymensingh', 'Sherpur': 'Mymensingh',
+};
+
+class _CreateDealerWizard extends StatefulWidget {
+  const _CreateDealerWizard({required this.api, required this.onCreated});
   final ApiClient api;
+  final Future<void> Function() onCreated;
 
   @override
-  State<CreateDealerDialog> createState() => _CreateDealerDialogState();
+  State<_CreateDealerWizard> createState() => _CreateDealerWizardState();
 }
 
-class _CreateDealerDialogState extends State<CreateDealerDialog> {
-  final name = TextEditingController();
-  final email = TextEditingController();
-  final phone = TextEditingController();
-  final shop = TextEditingController();
+class _CreateDealerWizardState extends State<_CreateDealerWizard> {
+  int _step = 0;
 
-  Future<void> submit() async {
+  // Step 0 — Identity
+  final _nameCtrl     = TextEditingController();
+  final _phoneCtrl    = TextEditingController();
+  final _emailCtrl    = TextEditingController();
+
+  // Step 1 — Business
+  final _shopCtrl     = TextEditingController();
+  final _bizCtrl      = TextEditingController();
+
+  // Step 2 — Address (Google Maps style)
+  final _streetCtrl   = TextEditingController(); // house/road/area
+  final _thanaCtrl    = TextEditingController(); // upazila/thana
+  String? _district;
+  String? _division; // auto-populated from district
+
+  // Step 3 — Documents
+  final _licenseCtrl  = TextEditingController();
+  final _nidCtrl      = TextEditingController();
+
+  // Dealer photo
+  XFile? _photo;
+
+  // Step 3 — Password
+  final _pwCtrl       = TextEditingController();
+  final _pwConfCtrl   = TextEditingController();
+  bool _showPw        = false;
+  bool _showPwConf    = false;
+
+  // Step 4 — Submit
+  bool _busy          = false;
+  Object? _error;
+
+  String? _step0Error;
+  String? _step3Error;
+
+  @override
+  void dispose() {
+    for (final c in [_nameCtrl, _phoneCtrl, _emailCtrl, _shopCtrl, _bizCtrl,
+        _streetCtrl, _thanaCtrl, _licenseCtrl, _nidCtrl, _pwCtrl, _pwConfCtrl]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  bool _validateStep0() {
+    final emailRe = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
+    if (_nameCtrl.text.trim().isEmpty ||
+        _phoneCtrl.text.trim().isEmpty ||
+        !emailRe.hasMatch(_emailCtrl.text.trim())) {
+      setState(() => _step0Error = 'Name, valid email and phone are required');
+      return false;
+    }
+    setState(() => _step0Error = null);
+    return true;
+  }
+
+  bool _validateStep3() {
+    if (_pwCtrl.text.length < 8) {
+      setState(() => _step3Error = 'Password must be at least 8 characters');
+      return false;
+    }
+    if (_pwCtrl.text != _pwConfCtrl.text) {
+      setState(() => _step3Error = 'Passwords do not match');
+      return false;
+    }
+    setState(() => _step3Error = null);
+    return true;
+  }
+
+  Future<void> _submit() async {
+    setState(() { _busy = true; _error = null; });
     try {
+      String? photoUrl;
+      if (_photo != null) {
+        final bytes = await _photo!.readAsBytes();
+        final b64 = base64Encode(bytes);
+        final ext = _photo!.name.split('.').last.toLowerCase();
+        photoUrl = 'data:image/$ext;base64,$b64';
+      }
+
       await widget.api.post(
-        '/api/v1/auth/register/dealer',
+        '/api/v1/reseller/dealers',
         data: {
-          'name': name.text,
-          'email': email.text,
-          'phone': phone.text,
-          'shopName': shop.text,
-          'password': 'Demo@123456',
+          'name':         _nameCtrl.text.trim(),
+          'email':        _emailCtrl.text.trim(),
+          'phone':        _phoneCtrl.text.trim(),
+          'shopName':     _shopCtrl.text.trim(),
+          'businessName': _bizCtrl.text.trim(),
+          'address':      _streetCtrl.text.trim(),
+          'thana':        _thanaCtrl.text.trim(),
+          'district':     _district,
+          'division':     _division,
+          'tradeLicense': _licenseCtrl.text.trim(),
+          'nid':          _nidCtrl.text.trim(),
+          'photoUrl':     photoUrl,
+          'password':     _pwCtrl.text,
         },
       );
       if (mounted) {
-        Navigator.pop(context);
-        snack(context, 'Dealer created with temporary password Demo@123456');
+        setState(() => _step = 5);
+        widget.onCreated();
       }
     } catch (e) {
-      if (mounted) snack(context, readableError(e));
+      if (mounted) setState(() { _error = e; _busy = false; });
     }
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Create dealer'),
-    content: SizedBox(
-      width: 520,
-      child: Fields(
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
         children: [
-          Input(name, 'Name'),
-          Input(email, 'Email'),
-          Input(phone, 'Phone'),
-          Input(shop, 'Shop name'),
+          _WizardStepIndicator(step: _step.clamp(0, 5), total: 6),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+              child: AnimatedSwitcher(
+                duration: _medium,
+                transitionBuilder: (child, anim) => FadeTransition(
+                  opacity: anim,
+                  child: SlideTransition(
+                    position: Tween(
+                      begin: const Offset(0.04, 0),
+                      end: Offset.zero,
+                    ).animate(anim),
+                    child: child,
+                  ),
+                ),
+                child: KeyedSubtree(
+                  key: ValueKey(_step),
+                  child: _buildStep(),
+                ),
+              ),
+            ),
+          ),
+          _buildActions(),
         ],
       ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Cancel'),
+    );
+  }
+
+  Widget _buildStep() {
+    return switch (_step) {
+      0 => _stepIdentity(),
+      1 => _stepBusiness(),
+      2 => _stepAddress(),
+      3 => _stepDocuments(),
+      4 => _stepPassword(),
+      5 => _stepReview(),
+      _ => _stepDone(),
+    };
+  }
+
+  // ── Step 0: Identity ──────────────────────────────────────────────────────
+
+  Widget _stepIdentity() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const Text('Dealer identity',
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+      const SizedBox(height: 4),
+      const Text('Basic contact info and photo',
+          style: TextStyle(color: AppTone.muted)),
+      const SizedBox(height: 20),
+      // Photo picker
+      Center(
+        child: GestureDetector(
+          onTap: () async {
+            final picker = ImagePicker();
+            final picked = await picker.pickImage(
+              source: ImageSource.gallery,
+              maxWidth: 800,
+              imageQuality: 80,
+            );
+            if (picked != null) setState(() => _photo = picked);
+          },
+          child: Stack(
+            alignment: Alignment.bottomRight,
+            children: [
+              CircleAvatar(
+                radius: 44,
+                backgroundColor: AppTone.accentLight,
+                backgroundImage: _photo != null
+                    ? FileImage(File(_photo!.path))
+                    : null,
+                child: _photo == null
+                    ? const Icon(Icons.person, size: 40, color: AppTone.accent)
+                    : null,
+              ),
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: AppTone.accent,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                ),
+                child: const Icon(Icons.camera_alt, size: 14, color: Colors.white),
+              ),
+            ],
+          ),
+        ),
       ),
-      FilledButton(onPressed: submit, child: const Text('Create')),
+      const SizedBox(height: 6),
+      const Center(
+        child: Text('Tap to add photo',
+            style: TextStyle(color: AppTone.muted, fontSize: 12)),
+      ),
+      const SizedBox(height: 20),
+      _WizardField(label: 'Full name', controller: _nameCtrl,
+          hint: 'e.g. Karim Traders', icon: Icons.person_outline),
+      const SizedBox(height: 12),
+      _WizardField(label: 'Phone number', controller: _phoneCtrl,
+          hint: '01XXXXXXXXX', icon: Icons.phone_outlined,
+          keyboardType: TextInputType.phone),
+      const SizedBox(height: 12),
+      _WizardField(label: 'Email address', controller: _emailCtrl,
+          hint: 'dealer@example.com', icon: Icons.email_outlined,
+          keyboardType: TextInputType.emailAddress),
+      if (_step0Error != null) ...[
+        const SizedBox(height: 8),
+        Text(_step0Error!, style: const TextStyle(color: AppTone.danger, fontSize: 13)),
+      ],
+      const SizedBox(height: 20),
     ],
   );
+
+  // ── Step 1: Business ──────────────────────────────────────────────────────
+
+  Widget _stepBusiness() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const Text('Business details',
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+      const SizedBox(height: 4),
+      const Text('Shop and business info',
+          style: TextStyle(color: AppTone.muted)),
+      const SizedBox(height: 20),
+      _WizardField(label: 'Shop name', controller: _shopCtrl,
+          hint: 'e.g. Karim Mobile Shop', icon: Icons.storefront_outlined),
+      const SizedBox(height: 12),
+      _WizardField(label: 'Business name (optional)', controller: _bizCtrl,
+          hint: 'Registered business name', icon: Icons.business_outlined),
+      const SizedBox(height: 20),
+    ],
+  );
+
+  // ── Step 2: Address ───────────────────────────────────────────────────────
+
+  Widget _stepAddress() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const Text('Location',
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+      const SizedBox(height: 4),
+      const Text('Full address — will be used for map integration',
+          style: TextStyle(color: AppTone.muted)),
+      const SizedBox(height: 20),
+      _WizardField(
+        label: 'House / Road / Area',
+        controller: _streetCtrl,
+        hint: 'e.g. House 12, Road 5, Mirpur-10',
+        icon: Icons.signpost_outlined,
+        maxLines: 2,
+      ),
+      const SizedBox(height: 12),
+      _WizardField(
+        label: 'Thana / Upazila',
+        controller: _thanaCtrl,
+        hint: 'e.g. Mirpur, Gulshan, Dhanmondi',
+        icon: Icons.location_city_outlined,
+      ),
+      const SizedBox(height: 12),
+      _DistrictDropdown(
+        value: _district,
+        onChanged: (v) => setState(() {
+          _district = v;
+          _division = v != null ? _districtDivision[v] : null;
+        }),
+      ),
+      const SizedBox(height: 12),
+      // Division — auto-filled, read-only
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Division',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
+                  color: AppTone.ink)),
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: AppTone.page,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTone.line),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.map_outlined, size: 20, color: AppTone.muted),
+                const SizedBox(width: 12),
+                Text(
+                  _division ?? 'Auto-filled from district',
+                  style: TextStyle(
+                    color: _division != null ? AppTone.ink : AppTone.muted,
+                    fontSize: 16,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 12),
+      const _InlineNotice(
+        message: 'Map pin will be added in a future update. Address is saved for now.',
+        tone: AppTone.info,
+        icon: Icons.info_outline,
+      ),
+      const SizedBox(height: 20),
+    ],
+  );
+
+  // ── Step 3: Documents ─────────────────────────────────────────────────────
+
+  Widget _stepDocuments() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const Text('Identity documents',
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+      const SizedBox(height: 4),
+      const Text('NID and trade license',
+          style: TextStyle(color: AppTone.muted)),
+      const SizedBox(height: 20),
+      _WizardField(
+        label: 'NID number',
+        controller: _nidCtrl,
+        hint: 'National ID card number',
+        icon: Icons.credit_card_outlined,
+        keyboardType: TextInputType.number,
+      ),
+      const SizedBox(height: 12),
+      _WizardField(
+        label: 'Trade license number (optional)',
+        controller: _licenseCtrl,
+        hint: 'e.g. TL-2024-XXXXXX',
+        icon: Icons.badge_outlined,
+      ),
+      const SizedBox(height: 12),
+      const _InlineNotice(
+        message: 'Documents can be updated later from the dealer profile.',
+        tone: AppTone.info,
+        icon: Icons.info_outline,
+      ),
+      const SizedBox(height: 20),
+    ],
+  );
+
+  // ── Step 3: Password ──────────────────────────────────────────────────────
+
+  Widget _stepPassword() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const Text('Set access password',
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+      const SizedBox(height: 4),
+      const Text('Tell this password to the dealer in person',
+          style: TextStyle(color: AppTone.muted)),
+      const SizedBox(height: 20),
+      _WizardField(
+        label: 'Temporary password', controller: _pwCtrl,
+        hint: 'At least 8 characters', icon: Icons.lock_outline,
+        obscure: !_showPw,
+        suffixIcon: IconButton(
+          icon: Icon(_showPw ? Icons.visibility_off : Icons.visibility,
+              color: AppTone.muted),
+          onPressed: () => setState(() => _showPw = !_showPw),
+        ),
+      ),
+      const SizedBox(height: 12),
+      _WizardField(
+        label: 'Confirm password', controller: _pwConfCtrl,
+        hint: 'Repeat password', icon: Icons.lock_outline,
+        obscure: !_showPwConf,
+        suffixIcon: IconButton(
+          icon: Icon(_showPwConf ? Icons.visibility_off : Icons.visibility,
+              color: AppTone.muted),
+          onPressed: () => setState(() => _showPwConf = !_showPwConf),
+        ),
+      ),
+      if (_step3Error != null) ...[
+        const SizedBox(height: 8),
+        Text(_step3Error!, style: const TextStyle(color: AppTone.danger, fontSize: 13)),
+      ],
+      const SizedBox(height: 12),
+      const _InlineNotice(
+        message: 'The dealer will log in with their email and this password. '
+            'They can change it after first login.',
+        tone: AppTone.warning,
+        icon: Icons.warning_amber_rounded,
+      ),
+      const SizedBox(height: 20),
+    ],
+  );
+
+  // ── Step 4: Review ────────────────────────────────────────────────────────
+
+  Widget _stepReview() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const Text('Review & confirm',
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+      const SizedBox(height: 4),
+      const Text('Check everything before creating the account',
+          style: TextStyle(color: AppTone.muted)),
+      const SizedBox(height: 20),
+      Row(
+        children: [
+          CircleAvatar(
+            radius: 30,
+            backgroundColor: AppTone.accentLight,
+            backgroundImage: _photo != null ? FileImage(File(_photo!.path)) : null,
+            child: _photo == null
+                ? const Icon(Icons.person, color: AppTone.accent)
+                : null,
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(_nameCtrl.text.trim(),
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                Text(_emailCtrl.text.trim(),
+                    style: const TextStyle(color: AppTone.muted, fontSize: 13)),
+              ],
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 16),
+      _SoftPanel(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _ReviewSection('Identity', [
+              _InfoRow('Phone', _phoneCtrl.text.trim()),
+              _InfoRow('NID',   _nidCtrl.text.trim().isEmpty ? '—' : _nidCtrl.text.trim()),
+            ]),
+            const Divider(height: 24),
+            _ReviewSection('Business', [
+              _InfoRow('Shop',     _shopCtrl.text.trim().isEmpty ? '—' : _shopCtrl.text.trim()),
+              _InfoRow('Business', _bizCtrl.text.trim().isEmpty ? '—' : _bizCtrl.text.trim()),
+              _InfoRow('License',  _licenseCtrl.text.trim().isEmpty ? '—' : _licenseCtrl.text.trim()),
+            ]),
+            const Divider(height: 24),
+            _ReviewSection('Location', [
+              _InfoRow('Area',     _streetCtrl.text.trim().isEmpty ? '—' : _streetCtrl.text.trim()),
+              _InfoRow('Thana',    _thanaCtrl.text.trim().isEmpty ? '—' : _thanaCtrl.text.trim()),
+              _InfoRow('District', _district ?? '—'),
+              _InfoRow('Division', _division ?? '—'),
+            ]),
+          ],
+        ),
+      ),
+      if (_error != null) ...[
+        const SizedBox(height: 12),
+        _InlineNotice(
+          message: readableError(_error),
+          tone: AppTone.danger,
+          icon: Icons.error_outline,
+        ),
+      ],
+      const SizedBox(height: 20),
+    ],
+  );
+
+  // ── Step 5: Done ──────────────────────────────────────────────────────────
+
+  Widget _stepDone() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const SizedBox(height: 24),
+      Center(
+        child: TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0, end: 1),
+          duration: const Duration(milliseconds: 900),
+          curve: Curves.easeOutCubic,
+          builder: (context, value, child) => CustomPaint(
+            size: const Size(96, 96),
+            painter: _SuccessCirclePainter(progress: value),
+            child: child,
+          ),
+          child: SizedBox(
+            width: 96,
+            height: 96,
+            child: Center(
+              child: const Icon(Icons.check_rounded, color: AppTone.brand, size: 44)
+                  .animate(delay: 600.ms)
+                  .scale(begin: const Offset(0, 0), end: const Offset(1, 1),
+                      curve: Curves.elasticOut, duration: 500.ms)
+                  .fadeIn(duration: 200.ms),
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(height: 16),
+      Text(
+        '${_nameCtrl.text.trim()} is ready!',
+        textAlign: TextAlign.center,
+        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+      ).animate(delay: 400.ms).fadeIn().slideY(begin: 0.1, end: 0),
+      const SizedBox(height: 8),
+      Text(
+        'Dealer account created. Share the password with them in person.',
+        textAlign: TextAlign.center,
+        style: const TextStyle(color: AppTone.muted, fontSize: 14),
+      ).animate(delay: 550.ms).fadeIn(),
+      const SizedBox(height: 20),
+    ],
+  );
+
+  // ── Actions bar ───────────────────────────────────────────────────────────
+
+  Widget _buildActions() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+      child: switch (_step) {
+        0 => Row(children: [
+            const Spacer(),
+            FilledButton.icon(
+              onPressed: () { if (_validateStep0()) setState(() => _step = 1); },
+              icon: const Icon(Icons.arrow_forward),
+              label: const Text('Business info'),
+            ),
+          ]),
+        1 => Row(children: [
+            TextButton.icon(onPressed: () => setState(() => _step = 0),
+                icon: const Icon(Icons.arrow_back), label: const Text('Back')),
+            const Spacer(),
+            FilledButton.icon(
+              onPressed: () => setState(() => _step = 2),
+              icon: const Icon(Icons.arrow_forward),
+              label: const Text('Location'),
+            ),
+          ]),
+        2 => Row(children: [
+            TextButton.icon(onPressed: () => setState(() => _step = 1),
+                icon: const Icon(Icons.arrow_back), label: const Text('Back')),
+            const Spacer(),
+            FilledButton.icon(
+              onPressed: () => setState(() => _step = 3),
+              icon: const Icon(Icons.arrow_forward),
+              label: const Text('Documents'),
+            ),
+          ]),
+        3 => Row(children: [
+            TextButton.icon(onPressed: () => setState(() => _step = 2),
+                icon: const Icon(Icons.arrow_back), label: const Text('Back')),
+            const Spacer(),
+            FilledButton.icon(
+              onPressed: () => setState(() => _step = 4),
+              icon: const Icon(Icons.arrow_forward),
+              label: const Text('Set password'),
+            ),
+          ]),
+        4 => Row(children: [
+            TextButton.icon(onPressed: () => setState(() => _step = 3),
+                icon: const Icon(Icons.arrow_back), label: const Text('Back')),
+            const Spacer(),
+            FilledButton.icon(
+              onPressed: () { if (_validateStep3()) setState(() => _step = 5); },
+              icon: const Icon(Icons.arrow_forward),
+              label: const Text('Review'),
+            ),
+          ]),
+        5 => Row(children: [
+            TextButton.icon(
+              onPressed: _busy ? null : () => setState(() { _step = 4; _error = null; }),
+              icon: const Icon(Icons.arrow_back), label: const Text('Back'),
+            ),
+            const Spacer(),
+            FilledButton.icon(
+              onPressed: _busy ? null : _submit,
+              icon: _busy
+                  ? const SizedBox(width: 16, height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.person_add),
+              label: Text(_busy ? 'Creating…' : 'Create dealer'),
+            ),
+          ]),
+        _ => SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Done'),
+            ),
+          ),
+      },
+    );
+  }
+}
+
+// ── Supporting widgets ────────────────────────────────────────────────────────
+
+class _WizardField extends StatelessWidget {
+  const _WizardField({
+    required this.label,
+    required this.controller,
+    required this.hint,
+    required this.icon,
+    this.keyboardType,
+    this.obscure = false,
+    this.suffixIcon,
+    this.maxLines = 1,
+  });
+  final String label;
+  final TextEditingController controller;
+  final String hint;
+  final IconData icon;
+  final TextInputType? keyboardType;
+  final bool obscure;
+  final Widget? suffixIcon;
+  final int maxLines;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: const TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w600, color: AppTone.ink)),
+        const SizedBox(height: 6),
+        TextField(
+          controller: controller,
+          keyboardType: keyboardType,
+          obscureText: obscure,
+          maxLines: obscure ? 1 : maxLines,
+          decoration: InputDecoration(
+            hintText: hint,
+            prefixIcon: Icon(icon, size: 20),
+            suffixIcon: suffixIcon,
+            filled: true,
+            fillColor: AppTone.surface,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppTone.line),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppTone.line),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppTone.accent, width: 1.5),
+            ),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DistrictDropdown extends StatelessWidget {
+  const _DistrictDropdown({required this.value, required this.onChanged});
+  final String? value;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('District',
+            style: TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w600, color: AppTone.ink)),
+        const SizedBox(height: 6),
+        DropdownButtonFormField<String>(
+          value: value,
+          hint: const Text('Select district'),
+          decoration: InputDecoration(
+            prefixIcon: const Icon(Icons.map_outlined, size: 20),
+            filled: true,
+            fillColor: AppTone.surface,
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppTone.line)),
+            enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppTone.line)),
+            focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide:
+                    const BorderSide(color: AppTone.accent, width: 1.5)),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          ),
+          items: (_districtDivision.keys.toList()..sort())
+              .map((d) => DropdownMenuItem(value: d, child: Text(d)))
+              .toList(),
+          onChanged: onChanged,
+        ),
+      ],
+    );
+  }
+}
+
+class _ReviewSection extends StatelessWidget {
+  const _ReviewSection(this.title, this.rows);
+  final String title;
+  final List<Widget> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title,
+            style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: AppTone.muted,
+                letterSpacing: 0.5)),
+        const SizedBox(height: 8),
+        ...rows,
+      ],
+    );
+  }
 }
 
 class DataPage<T> extends StatefulWidget {
@@ -6343,12 +9241,15 @@ class DataPage<T> extends StatefulWidget {
     required this.loader,
     required this.builder,
     this.dealerId,
+    this.sseEvents = const [],
   });
   final String title;
   final Future<T> Function() loader;
   final Widget Function(BuildContext, T, Future<void> Function()) builder;
   /// When provided, a successful load syncs device/key data to LocalVault.
   final String? dealerId;
+  /// SSE event types that should trigger an automatic reload.
+  final List<String> sseEvents;
 
   @override
   State<DataPage<T>> createState() => _DataPageState<T>();
@@ -6356,11 +9257,44 @@ class DataPage<T> extends StatefulWidget {
 
 class _DataPageState<T> extends State<DataPage<T>> {
   late Future<T> future = widget.loader();
+  T? _lastData; // kept so UI stays visible during background refresh
+  StreamSubscription<SseEvent>? _sseSub;
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (widget.sseEvents.isEmpty) return;
+    _sseSub?.cancel();
+    final stream = AppEventScope.of(context);
+    if (stream == null) return;
+    final events = Set<String>.from(widget.sseEvents);
+    _sseSub = stream.listen((event) {
+      if (mounted && events.contains(event.type)) _silentReload();
+    });
+  }
+
+  @override
+  void dispose() {
+    _sseSub?.cancel();
+    super.dispose();
+  }
+
+  // Manual pull-to-refresh — shows loading spinner
   Future<void> reload() async {
     final next = widget.loader();
-    setState(() => future = next);
+    setState(() { future = next; });
     await next;
+  }
+
+  // SSE-triggered silent refresh — keeps current data visible, no spinner
+  Future<void> _silentReload() async {
+    final next = widget.loader();
+    try {
+      final result = await next;
+      if (mounted) setState(() { _lastData = result; future = Future.value(result); });
+    } catch (_) {
+      // silently ignore — current data stays shown
+    }
   }
 
   void _trySync(T data) {
@@ -6380,6 +9314,10 @@ class _DataPageState<T> extends State<DataPage<T>> {
       future: future,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
+          // If we have previous data (SSE silent refresh), keep showing it
+          if (_lastData != null) {
+            return widget.builder(context, _lastData as T, reload);
+          }
           return _LoadingPage(title: widget.title);
         }
         if (snapshot.hasError) {
@@ -6445,7 +9383,8 @@ class _DataPageState<T> extends State<DataPage<T>> {
             },
           );
         }
-        // Successful load — sync to vault in background
+        // Successful load — sync to vault and cache for silent refresh
+        _lastData = snapshot.data as T;
         _trySync(snapshot.data as T);
         return widget.builder(context, snapshot.data as T, reload);
       },
@@ -6503,23 +9442,64 @@ class Page extends StatefulWidget {
   State<Page> createState() => _PageState();
 }
 
-class _PageState extends State<Page> {
+class _PageState extends State<Page> with SingleTickerProviderStateMixin {
   bool _refreshing = false;
-  bool _atEnd = false;
+  double _pullOffset = 0.0;
+  late AnimationController _radarAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _radarAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..addListener(() {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _radarAnim.dispose();
+    super.dispose();
+  }
 
   Future<void> _onRefresh() async {
+    if (_refreshing || widget.reload == null) return;
     setState(() => _refreshing = true);
+    _radarAnim.repeat();
     try {
       await widget.reload!();
     } finally {
-      if (mounted) setState(() => _refreshing = false);
+      _radarAnim.stop();
+      _radarAnim.reset();
+      if (mounted) setState(() { _refreshing = false; _pullOffset = 0; });
     }
+  }
+
+  bool _handleScroll(ScrollNotification n) {
+    if (widget.reload == null || _refreshing) return false;
+    if (n is OverscrollNotification && n.metrics.extentBefore < 1.0 && n.overscroll < 0) {
+      setState(() {
+        _pullOffset = (_pullOffset + (-n.overscroll) * 0.55).clamp(0.0, 110.0);
+      });
+    } else if (n is ScrollUpdateNotification && (n.scrollDelta ?? 0) > 0) {
+      setState(() {
+        _pullOffset = (_pullOffset - n.scrollDelta! * 0.5).clamp(0.0, 110.0);
+      });
+    } else if (n is ScrollEndNotification) {
+      if (_pullOffset >= 80) {
+        _onRefresh();
+      } else {
+        setState(() => _pullOffset = 0);
+      }
+    }
+    return false;
   }
 
   @override
   Widget build(BuildContext context) {
     final pageChildren = <Widget>[
-      _RefreshBanner(visible: _refreshing),
       _ContentIntro(
         title: widget.title,
         subtitle: widget.subtitle,
@@ -6535,33 +9515,19 @@ class _PageState extends State<Page> {
           const SizedBox(height: 14),
         ],
       ),
-      _PageEndMark(visible: _atEnd),
     ];
 
     final scrollable = LayoutBuilder(
-      builder: (context, constraints) =>
-          NotificationListener<ScrollNotification>(
-        onNotification: (n) {
-          if (n is ScrollUpdateNotification) {
-            final atEnd = n.metrics.extentAfter < 1.0;
-            final pushingDown = (n.scrollDelta ?? 0) > 2.0;
-            if (atEnd && pushingDown && !_atEnd) {
-              setState(() => _atEnd = true);
-              Future.delayed(
-                const Duration(milliseconds: 1600),
-                () {
-                  if (mounted) setState(() => _atEnd = false);
-                },
-              );
-            }
-          }
-          return false;
-        },
+      builder: (context, constraints) => NotificationListener<ScrollNotification>(
+        onNotification: _handleScroll,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: EdgeInsets.fromLTRB(
             constraints.maxWidth > 980 ? 28 : 16,
-            constraints.maxWidth < 600 ? 72 : 18,
+            max(
+              constraints.maxWidth < 600 ? 72.0 : 18.0,
+              _refreshing ? 94.0 : _pullOffset.clamp(0.0, 94.0),
+            ),
             constraints.maxWidth > 980 ? 28 : 16,
             24,
           ),
@@ -6582,95 +9548,249 @@ class _PageState extends State<Page> {
 
     if (widget.reload == null) return scrollable;
 
-    return RefreshIndicator(
-      onRefresh: _onRefresh,
-      color: AppTone.brand,
-      backgroundColor: AppTone.surface,
-      strokeWidth: 2.5,
-      displacement: 72,
-      triggerMode: RefreshIndicatorTriggerMode.onEdge,
-      child: scrollable,
+    return Stack(
+      children: [
+        scrollable,
+        Positioned(
+          top: 0, left: 0, right: 0,
+          child: _RadarPullIndicator(
+            pullProgress: (_pullOffset / 80.0).clamp(0.0, 1.0),
+            refreshing: _refreshing,
+            animation: _radarAnim,
+          ),
+        ),
+      ],
     );
   }
 }
 
-// ─── Page animation helpers ────────────────────────────────────────────────
 
-/// Three staggered bouncing dots — shared by the refresh banner (top)
-/// and the end-of-scroll marker (bottom).
-class _BouncingDots extends StatelessWidget {
-  const _BouncingDots({this.padding = const EdgeInsets.symmetric(vertical: 20)});
-  final EdgeInsetsGeometry padding;
+
+// ─── Radar pull-to-refresh ─────────────────────────────────────────────────
+
+class _RadarPainter extends CustomPainter {
+  const _RadarPainter({
+    required this.sweepAngle,
+    required this.pullProgress,
+    required this.refreshing,
+  });
+  final double sweepAngle;
+  final double pullProgress;
+  final bool refreshing;
+
+  static const _brand = Color(0xFF00A86B);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = Offset(size.width / 2, size.height / 2);
+    final r = size.width / 2;
+
+    // Dark fill
+    canvas.drawCircle(c, r, Paint()
+      ..color = const Color(0xFF0A1628)
+      ..style = PaintingStyle.fill);
+
+    // Concentric grid rings
+    final ringP = Paint()
+      ..color = _brand.withValues(alpha: 0.12)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.7;
+    for (int i = 1; i <= 4; i++) {
+      canvas.drawCircle(c, r * i / 4, ringP);
+    }
+
+    // Cross lines
+    final lineP = Paint()
+      ..color = _brand.withValues(alpha: 0.08)
+      ..strokeWidth = 0.7;
+    canvas.drawLine(Offset(c.dx - r, c.dy), Offset(c.dx + r, c.dy), lineP);
+    canvas.drawLine(Offset(c.dx, c.dy - r), Offset(c.dx, c.dy + r), lineP);
+
+    if (pullProgress > 0.05 || refreshing) {
+      // Trailing sweep arc
+      const arcSpan = pi * 1.15;
+      final sweepRect = Rect.fromCircle(center: c, radius: r);
+      final arcP = Paint()
+        ..shader = SweepGradient(
+          center: Alignment.center,
+          startAngle: sweepAngle - arcSpan,
+          endAngle: sweepAngle,
+          colors: [
+            Colors.transparent,
+            _brand.withValues(alpha: 0.0),
+            _brand.withValues(alpha: 0.18),
+            _brand.withValues(alpha: 0.45),
+          ],
+          stops: const [0.0, 0.35, 0.7, 1.0],
+        ).createShader(sweepRect)
+        ..style = PaintingStyle.fill;
+      canvas.drawArc(sweepRect, sweepAngle - arcSpan, arcSpan, true, arcP);
+
+      // Sweep arm
+      canvas.drawLine(
+        c,
+        Offset(c.dx + cos(sweepAngle) * r, c.dy + sin(sweepAngle) * r),
+        Paint()
+          ..color = _brand.withValues(alpha: 0.9)
+          ..strokeWidth = 1.5
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+
+    // Center dot
+    canvas.drawCircle(c, 2.5, Paint()..color = _brand);
+
+    // Outer ring border
+    canvas.drawCircle(c, r - 0.5, Paint()
+      ..color = _brand.withValues(alpha: 0.25)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2);
+  }
+
+  @override
+  bool shouldRepaint(_RadarPainter old) =>
+      old.sweepAngle != sweepAngle ||
+      old.pullProgress != pullProgress ||
+      old.refreshing != refreshing;
+}
+
+class _RadarPullIndicator extends StatelessWidget {
+  const _RadarPullIndicator({
+    required this.pullProgress,
+    required this.refreshing,
+    required this.animation,
+  });
+  final double pullProgress;
+  final bool refreshing;
+  final Animation<double> animation;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: padding,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: List.generate(3, (i) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 5),
-            child: Container(
-              width: 5,
-              height: 5,
-              decoration: BoxDecoration(
-                color: AppTone.line,
-                borderRadius: BorderRadius.circular(999),
+    if (pullProgress <= 0 && !refreshing) return const SizedBox.shrink();
+    final scale = refreshing
+        ? 1.0
+        : Curves.easeOutBack.transform(pullProgress.clamp(0.0, 1.0));
+    final opacity = (refreshing ? 1.0 : pullProgress).clamp(0.0, 1.0);
+    final sweepAngle = animation.value * 2 * pi - pi / 2;
+
+    return Align(
+      alignment: Alignment.topCenter,
+      child: Opacity(
+        opacity: opacity,
+        child: Transform.scale(
+          scale: scale,
+          child: Container(
+            width: 76,
+            height: 76,
+            margin: const EdgeInsets.only(top: 10),
+            child: CustomPaint(
+              painter: _RadarPainter(
+                sweepAngle: sweepAngle,
+                pullProgress: pullProgress,
+                refreshing: refreshing,
               ),
-            )
-                .animate(
-                  delay: (i * 110).ms,
-                  onPlay: (c) => c.repeat(reverse: true),
-                )
-                .moveY(
-                  begin: 0,
-                  end: -5,
-                  duration: 480.ms,
-                  curve: Curves.easeInOut,
-                ),
-          );
-        }),
+            ),
+          ),
+        ),
       ),
     );
   }
 }
 
-class _RefreshBanner extends StatelessWidget {
-  const _RefreshBanner({required this.visible});
-  final bool visible;
+// ─── Pulsing rings (login hero) ─────────────────────────────────────────────
+
+class _PulsingRingsPainter extends CustomPainter {
+  const _PulsingRingsPainter(this.t);
+  final double t;
+  static const _brand = Color(0xFF00A86B);
 
   @override
-  Widget build(BuildContext context) {
-    return AnimatedSize(
-      duration: _medium,
-      curve: Curves.easeOutCubic,
-      child: visible
-          ? const _BouncingDots(
-              padding: EdgeInsets.only(bottom: 14),
-            )
-              .animate()
-              .fadeIn(duration: _fast)
-              .slideY(begin: -0.4, end: 0, duration: _fast)
-          : const SizedBox.shrink(),
-    );
+  void paint(Canvas canvas, Size size) {
+    final c = Offset(size.width / 2, size.height / 2);
+    final maxR = size.width / 2;
+
+    // 5 expanding rings, staggered
+    for (int i = 0; i < 5; i++) {
+      final phase = (t + i * 0.2) % 1.0;
+      final r = maxR * (0.15 + phase * 0.85);
+      final opacity = (1 - phase) * (1 - phase) * 0.38;
+      canvas.drawCircle(c, r, Paint()
+        ..color = _brand.withValues(alpha: opacity)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0 + (1 - phase) * 1.2);
+    }
+
+    // Inner glow
+    canvas.drawCircle(c, maxR * 0.28, Paint()
+      ..shader = RadialGradient(
+        colors: [
+          _brand.withValues(alpha: 0.22),
+          _brand.withValues(alpha: 0.0),
+        ],
+      ).createShader(Rect.fromCircle(center: c, radius: maxR * 0.28)));
+
+    // Center circle (hosts icon)
+    canvas.drawCircle(c, maxR * 0.13, Paint()
+      ..color = _brand.withValues(alpha: 0.13));
+    canvas.drawCircle(c, maxR * 0.13, Paint()
+      ..color = _brand.withValues(alpha: 0.55)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5);
   }
+
+  @override
+  bool shouldRepaint(_PulsingRingsPainter old) => old.t != t;
 }
 
-class _PageEndMark extends StatelessWidget {
-  const _PageEndMark({required this.visible});
-  final bool visible;
+class _PulsingRingsWidget extends StatefulWidget {
+  const _PulsingRingsWidget({this.size = 220});
+  final double size;
+
+  @override
+  State<_PulsingRingsWidget> createState() => _PulsingRingsWidgetState();
+}
+
+class _PulsingRingsWidgetState extends State<_PulsingRingsWidget>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 3),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedSize(
-      duration: _medium,
-      curve: Curves.easeOutCubic,
-      child: visible
-          ? const _BouncingDots()
-              .animate()
-              .fadeIn(duration: _fast)
-          : const SizedBox.shrink(),
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (_, __) => SizedBox(
+        width: widget.size,
+        height: widget.size,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            CustomPaint(
+              size: Size(widget.size, widget.size),
+              painter: _PulsingRingsPainter(_ctrl.value),
+            ),
+            Icon(
+              Icons.security_rounded,
+              size: widget.size * 0.18,
+              color: AppTone.brand.withValues(alpha: 0.9),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -6869,12 +9989,17 @@ class _MetricCardState extends State<_MetricCard> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
-                      '${widget.card.value ?? 0}',
-                      style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w900,
-                        color: color == AppTone.ink ? AppTone.ink : color,
+                    TweenAnimationBuilder<int>(
+                      tween: IntTween(begin: 0, end: widget.card.value ?? 0),
+                      duration: const Duration(milliseconds: 900),
+                      curve: Curves.easeOutCubic,
+                      builder: (_, val, __) => Text(
+                        '$val',
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w900,
+                          color: color == AppTone.ink ? AppTone.ink : color,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 5),
@@ -7292,23 +10417,50 @@ class StatusPill extends StatelessWidget {
   final String label;
   final Color color;
 
+  bool get _isActive => label.toLowerCase() == 'active';
+
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final pill = Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(999),
       ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: color,
-          fontSize: 12,
-          fontWeight: FontWeight.w900,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_isActive) ...[
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: color,
+              ),
+            )
+                .animate(onPlay: (c) => c.repeat(reverse: false))
+                .scale(
+                  begin: const Offset(1, 1),
+                  end: const Offset(1.5, 1.5),
+                  duration: 900.ms,
+                  curve: Curves.easeOut,
+                )
+                .fadeOut(begin: 1.0, duration: 900.ms),
+            const SizedBox(width: 5),
+          ],
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
       ),
     );
+    return pill;
   }
 }
 
@@ -8167,6 +11319,7 @@ class _GoogleDriveStatusTileState extends State<_GoogleDriveStatusTile> {
   bool _loading = true;
   bool _isBound = false;
   String _email = '';
+  bool _syncing = false;
 
   @override
   void initState() {
@@ -8177,20 +11330,29 @@ class _GoogleDriveStatusTileState extends State<_GoogleDriveStatusTile> {
   Future<void> _check() async {
     final bound = await GoogleVault.isBound();
     final email = await GoogleVault.boundEmail() ?? '';
-    if (mounted) {
-      setState(() {
-        _isBound = bound;
-        _email = email;
-        _loading = false;
-      });
+    if (mounted) setState(() { _isBound = bound; _email = email; _loading = false; });
+  }
+
+  Future<void> _syncNow() async {
+    setState(() => _syncing = true);
+    try {
+      final snapshot = await LocalVault.read();
+      if (snapshot != null && !snapshot.isEmpty) {
+        await GoogleVault.syncVaultBackup(snapshot.toJson());
+        if (mounted) snack(context, 'Vault synced to Google Drive');
+      } else {
+        if (mounted) snack(context, 'Nothing to sync yet');
+      }
+    } catch (e) {
+      if (mounted) snack(context, 'Sync failed: ${readableError(e)}');
+    } finally {
+      if (mounted) setState(() => _syncing = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const SkeletonBox(width: double.infinity, height: 44);
-    }
+    if (_loading) return const SkeletonBox(width: double.infinity, height: 44);
 
     return Row(
       children: [
@@ -8203,19 +11365,23 @@ class _GoogleDriveStatusTileState extends State<_GoogleDriveStatusTile> {
         Expanded(
           child: Text(
             _isBound ? _email : 'Not connected',
-            style: TextStyle(
-              color: _isBound ? AppTone.ink : AppTone.muted,
-              fontSize: 13,
-            ),
+            style: TextStyle(color: _isBound ? AppTone.ink : AppTone.muted, fontSize: 13),
             overflow: TextOverflow.ellipsis,
           ),
         ),
+        if (_isBound)
+          IconButton(
+            icon: _syncing
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.sync_rounded, size: 18),
+            tooltip: 'Sync now',
+            onPressed: _syncing ? null : _syncNow,
+            color: AppTone.brand,
+          ),
         TextButton(
           onPressed: () => Navigator.push(
             context,
-            MaterialPageRoute(
-              builder: (_) => const GoogleDriveOnboardingScreen(),
-            ),
+            MaterialPageRoute(builder: (_) => const GoogleDriveOnboardingScreen()),
           ).then((_) => _check()),
           child: const Text('Configure'),
         ),

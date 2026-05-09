@@ -3,9 +3,15 @@ import 'package:dealer_app/app/emi_locker_app.dart';
 import 'package:dealer_app/core/biometric_service.dart';
 
 class BiometricLockScreen extends StatefulWidget {
-  const BiometricLockScreen({super.key, required this.onAuthenticated});
+  const BiometricLockScreen({
+    super.key,
+    required this.onAuthenticated,
+    this.onUsePassword,
+  });
 
   final VoidCallback onAuthenticated;
+  /// Called when user chooses to fall back to full email+password login.
+  final VoidCallback? onUsePassword;
 
   @override
   State<BiometricLockScreen> createState() => _BiometricLockScreenState();
@@ -25,50 +31,41 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
     setState(() { _busy = true; _errorMsg = ''; });
     try {
       final success = await BiometricService().authenticate(
-        reason: 'Authenticate to open EMI Locker',
+        reason: 'Verify your identity to continue',
       );
       if (success && mounted) {
         widget.onAuthenticated();
       } else if (mounted) {
-        setState(() {
-          _busy = false;
-          _errorMsg = 'Authentication failed. Please try again.';
-        });
+        setState(() { _busy = false; _errorMsg = 'Authentication failed. Try again.'; });
       }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-          _errorMsg = readableError(e);
-        });
-      }
+      if (mounted) setState(() { _busy = false; _errorMsg = readableError(e); });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTone.ink,
+      backgroundColor: const Color(0xFF0D1117),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(32),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Brand mark
               Container(
                 width: 80,
                 height: 80,
                 decoration: BoxDecoration(
-                  color: AppTone.brand.withOpacity(0.15),
+                  color: AppTone.brand.withValues(alpha: 0.15),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.lock_outline_rounded,
-                    color: AppTone.brand, size: 40),
+                child: const Icon(Icons.fingerprint_rounded,
+                    color: AppTone.brand, size: 44),
               ),
               const SizedBox(height: 24),
               const Text(
-                'EMI Locker',
+                'Welcome back',
                 style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.w800,
@@ -78,7 +75,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Authenticate to continue',
+                'Verify your identity to continue',
                 style: TextStyle(color: Colors.white54, fontSize: 14),
               ),
               const SizedBox(height: 40),
@@ -90,20 +87,17 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: AppTone.danger.withOpacity(0.15),
+                      color: AppTone.danger.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                          color: AppTone.danger.withOpacity(0.3)),
+                      border: Border.all(color: AppTone.danger.withValues(alpha: 0.3)),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.error_outline,
-                            color: AppTone.danger, size: 16),
+                        const Icon(Icons.error_outline, color: AppTone.danger, size: 16),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(_errorMsg,
-                              style: const TextStyle(
-                                  color: Colors.white70, fontSize: 13)),
+                              style: const TextStyle(color: Colors.white70, fontSize: 13)),
                         ),
                       ],
                     ),
@@ -119,6 +113,14 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
                     backgroundColor: AppTone.brand,
                   ),
                 ),
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: widget.onUsePassword,
+                  child: const Text(
+                    'Use password instead',
+                    style: TextStyle(color: Colors.white38, fontSize: 13),
+                  ),
+                ),
               ],
             ],
           ),
@@ -130,9 +132,15 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
 
 /// Wraps any widget with a biometric gate that activates on app resume.
 class AppBiometricGate extends StatefulWidget {
-  const AppBiometricGate({super.key, required this.child});
+  const AppBiometricGate({
+    super.key,
+    required this.child,
+    this.onUsePassword,
+  });
 
   final Widget child;
+  /// Called when user taps "Use password instead" — parent clears session.
+  final VoidCallback? onUsePassword;
 
   @override
   State<AppBiometricGate> createState() => _AppBiometricGateState();
@@ -158,12 +166,7 @@ class _AppBiometricGateState extends State<AppBiometricGate>
 
   Future<void> _checkBiometric() async {
     final enabled = await BiometricService().isBiometricEnabled();
-    if (mounted) {
-      setState(() {
-        _biometricEnabled = enabled;
-        _locked = enabled;
-      });
-    }
+    if (mounted) setState(() { _biometricEnabled = enabled; _locked = enabled; });
   }
 
   @override
@@ -178,6 +181,7 @@ class _AppBiometricGateState extends State<AppBiometricGate>
     if (_locked) {
       return BiometricLockScreen(
         onAuthenticated: () => setState(() => _locked = false),
+        onUsePassword: widget.onUsePassword,
       );
     }
     return widget.child;

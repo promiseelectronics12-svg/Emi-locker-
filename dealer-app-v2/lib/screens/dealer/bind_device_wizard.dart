@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pointycastle/export.dart' hide State, Padding;
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:dealer_app/app/emi_locker_app.dart';
 
 class BindDeviceWizard extends StatefulWidget {
@@ -13,7 +14,12 @@ class BindDeviceWizard extends StatefulWidget {
 }
 
 class _BindDeviceWizardState extends State<BindDeviceWizard> {
-  int _step = 1;
+  int _step = 0;
+
+  // Step 0 — Tier selection
+  String _selectedTier = 'standard';
+  Map<String, dynamic> _inventory = {};
+  bool _invLoading = true;
 
   // Step 1 — Customer
   final _nidController = TextEditingController();
@@ -28,13 +34,46 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   final _imei1Controller = TextEditingController();
   final _imei2Controller = TextEditingController();
 
-  // Step 4 — Token
+  // Step 4 — QR provisioning
+  String? _qrValue;
+  bool _qrBusy = false;
+
+  // Step 5 — Show 6-digit code
   String? _enrollmentId;
+  String? _enrollmentToken;   // plaintext code returned by server, shown to dealer
   bool _enrollBusy = false;
-  final _tokenController = TextEditingController();
-  bool _verifyBusy = false;
   String? _error;
   bool _done = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInventory();
+  }
+
+  Future<void> _loadInventory() async {
+    try {
+      final res = await widget.api.get('/api/v1/dealer/keys/inventory');
+      final inv = asMap(res.data);
+      if (!mounted) return;
+      // Auto-select if only one tier has available keys
+      final tiersWithKeys = ['standard', 'premium', 'vip']
+          .where((t) => (int.tryParse(asMap(inv[t])['assigned']?.toString() ?? '0') ?? 0) > 0)
+          .toList();
+      setState(() {
+        _inventory = inv;
+        _invLoading = false;
+        if (tiersWithKeys.length == 1) {
+          _selectedTier = tiersWithKeys.first;
+          _step = 1; // auto-skip tier selection
+        } else if (tiersWithKeys.isNotEmpty) {
+          _selectedTier = tiersWithKeys.first;
+        }
+      });
+    } catch (_) {
+      if (mounted) setState(() => _invLoading = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -45,7 +84,6 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
     _modelController.dispose();
     _imei1Controller.dispose();
     _imei2Controller.dispose();
-    _tokenController.dispose();
     super.dispose();
   }
 
@@ -106,7 +144,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   }
 
   void _back() {
-    if (_step == 1) {
+    if (_step <= 1) {
       Navigator.pop(context);
     } else {
       setState(() => _step--);
@@ -126,13 +164,18 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         'brand': _brandController.text.trim(),
         'model': _modelController.text.trim(),
         'imei1': _imei1Controller.text.trim(),
+        'tier': _selectedTier,
       };
       final imei2 = _imei2Controller.text.trim();
       if (imei2.isNotEmpty) body['imei2'] = imei2;
 
       final res = await widget.api.post('/api/v1/dealer/enrollments', data: body);
       if (mounted) {
-        setState(() => _enrollmentId = text(asMap(res.data)['enrollment_id']));
+        final d = asMap(res.data);
+        setState(() {
+          _enrollmentId    = text(d['enrollment_id']);
+          _enrollmentToken = text(d['token']);
+        });
       }
     } catch (e) {
       if (mounted) setState(() => _error = readableError(e));
@@ -141,27 +184,17 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
     }
   }
 
-  Future<void> _verifyToken() async {
-    final token = _tokenController.text.trim();
-    if (token.length != 6) {
-      setState(() => _error = 'Enter the 6-digit code shown on the customer\'s device.');
-      return;
-    }
-    setState(() {
-      _verifyBusy = true;
-      _error = null;
-    });
+  Future<void> _fetchQr() async {
+    setState(() { _qrBusy = true; _qrValue = null; });
     try {
-      await widget.api.post(
-        '/api/v1/dealer/enrollments/$_enrollmentId/verify-token',
-        data: {'token': token},
-      );
-      HapticFeedback.lightImpact();
-      if (mounted) setState(() => _done = true);
-    } catch (e) {
-      if (mounted) setState(() => _error = readableError(e));
+      final res = await widget.api.post('/api/v1/dealer/enrollment-qr');
+      final d = asMap(res.data);
+      if (mounted) setState(() => _qrValue = text(d['qr_value']));
+    } catch (_) {
+      // QR unavailable — dealer can skip and use 6-digit code only
+      if (mounted) setState(() => _qrValue = '');
     } finally {
-      if (mounted) setState(() => _verifyBusy = false);
+      if (mounted) setState(() => _qrBusy = false);
     }
   }
 
@@ -173,14 +206,17 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
     _modelController.clear();
     _imei1Controller.clear();
     _imei2Controller.clear();
-    _tokenController.clear();
     setState(() {
-      _step = 1;
+      _step = 0;
+      _selectedTier = 'standard';
       _creditProfile = null;
+      _qrValue = null;
       _enrollmentId = null;
+      _enrollmentToken = null;
       _error = null;
       _done = false;
     });
+    _loadInventory();
   }
 
   String _maskNid(String nid) {
@@ -212,7 +248,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       body: SafeArea(
         child: Column(
           children: [
-            _StepDots(current: _step, total: 4),
+            _StepDots(current: _step, total: 6),
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
@@ -227,12 +263,102 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
 
   Widget _buildStep() {
     switch (_step) {
+      case 0: return _buildStep0();
       case 1: return _buildStep1();
       case 2: return _buildStep2();
       case 3: return _buildStep3();
-      case 4: return _buildStep4();
+      case 4: return _buildStep4Qr();
+      case 5: return _buildStep5Code();
       default: return const SizedBox.shrink();
     }
+  }
+
+  // ── Step 0: Tier selection ─────────────────────────────────────────────────
+
+  Widget _buildStep0() {
+    if (_invLoading) {
+      return const Center(child: Padding(
+        padding: EdgeInsets.all(48),
+        child: CircularProgressIndicator(),
+      ));
+    }
+
+    const tiers = ['standard', 'premium', 'vip'];
+    const meta = {
+      'standard': ('Standard', [Color(0xFF8E8E93), Color(0xFFAEAEB2)], Icons.vpn_key_outlined),
+      'premium':  ('Premium',  [Color(0xFF0A84FF), Color(0xFF30B0C7)], Icons.stars_outlined),
+      'vip':      ('VIP',      [Color(0xFFBF5AF2), Color(0xFFFFD60A)], Icons.workspace_premium_outlined),
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _WizardHeader(
+          step: 1,
+          title: 'Select key type',
+          subtitle: 'Choose which key tier to use for this enrollment.',
+        ),
+        const SizedBox(height: 20),
+        ...tiers.map((tier) {
+          final (label, colors, icon) = meta[tier]!;
+          final invT = asMap(_inventory[tier]);
+          final available = int.tryParse(invT['assigned']?.toString() ?? '0') ?? 0;
+          final quota = int.tryParse(invT['quota']?.toString() ?? '0') ?? 0;
+          final hasKeys = available > 0;
+          final selected = _selectedTier == tier;
+
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: GestureDetector(
+              onTap: hasKeys ? () => setState(() => _selectedTier = tier) : null,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: hasKeys
+                      ? LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: colors)
+                      : null,
+                  color: hasKeys ? null : AppTone.page,
+                  borderRadius: BorderRadius.circular(16),
+                  border: selected ? Border.all(color: AppTone.brand, width: 2.5) : Border.all(color: AppTone.line),
+                ),
+                child: Row(
+                  children: [
+                    Icon(icon, color: hasKeys ? Colors.white : AppTone.muted, size: 28),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(label,
+                            style: TextStyle(
+                              color: hasKeys ? Colors.white : AppTone.muted,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                            )),
+                          Text(hasKeys ? '$available of $quota available' : 'No keys available',
+                            style: TextStyle(
+                              color: hasKeys ? Colors.white70 : AppTone.muted,
+                              fontSize: 12,
+                            )),
+                        ],
+                      ),
+                    ),
+                    if (selected)
+                      const Icon(Icons.check_circle, color: Colors.white, size: 22),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }),
+        const SizedBox(height: 8),
+        FilledButton(
+          onPressed: _selectedTier.isEmpty ? null : () => setState(() => _step = 1),
+          child: const Text('Continue'),
+        ),
+      ],
+    );
   }
 
   // ── Step 1: Customer ──────────────────────────────────────────────────────
@@ -395,117 +521,186 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         FilledButton(
           onPressed: () {
             setState(() => _step = 4);
+            // Fire both in parallel — QR for Device Owner setup, token for 6-digit binding
+            _fetchQr();
             _createEnrollment();
           },
-          child: const Text('Confirm and send to device'),
+          child: const Text('Confirm and generate codes'),
         ),
       ],
     );
   }
 
-  // ── Step 4: Token confirm ─────────────────────────────────────────────────
+  // ── Step 4: QR provisioning ───────────────────────────────────────────────
 
-  Widget _buildStep4() {
+  Widget _buildStep4Qr() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _WizardHeader(
+          step: 4,
+          title: 'Device Owner setup',
+          subtitle: 'For a brand new phone — scan this QR during Android setup.',
+        ),
+        const SizedBox(height: 20),
+        if (_qrBusy)
+          const Center(child: Padding(
+            padding: EdgeInsets.all(40),
+            child: CircularProgressIndicator(),
+          ))
+        else if (_qrValue != null && _qrValue!.isNotEmpty) ...[
+          // QR code
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppTone.line),
+              ),
+              child: QrImageView(
+                data: _qrValue!,
+                version: QrVersions.auto,
+                size: 220,
+                backgroundColor: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppTone.page,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('For brand new phones:',
+                    style: TextStyle(fontWeight: FontWeight.w700, color: AppTone.ink, fontSize: 13)),
+                SizedBox(height: 8),
+                _Step('1', 'Power on the new phone'),
+                _Step('2', 'On the Welcome screen — tap 6 times quickly'),
+                _Step('3', 'Camera appears — scan this QR code'),
+                _Step('4', 'Phone sets up automatically with Device Owner'),
+                _Step('5', 'SIM Toolkit installs by itself'),
+              ],
+            ),
+          ),
+        ] else ...[
+          // QR not available — graceful fallback
+          InlineNotice(
+            message: 'QR setup not available. Use the 6-digit code on the next screen instead.',
+            tone: AppTone.warning,
+            icon: Icons.warning_amber_rounded,
+          ),
+        ],
+        const SizedBox(height: 24),
+        FilledButton(
+          onPressed: () => setState(() => _step = 5),
+          child: const Text('Next — Enter code on device'),
+        ),
+        const SizedBox(height: 8),
+        TextButton(
+          onPressed: () => setState(() => _step = 5),
+          child: const Text('Skip — phone is already set up'),
+        ),
+      ],
+    );
+  }
+
+  // ── Step 5: Show 6-digit code to dealer ──────────────────────────────────
+
+  Widget _buildStep5Code() {
     if (_done) return _buildSuccess();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: 4,
-          title: 'Confirm device',
-          subtitle: 'A code has been sent to the customer\'s device.',
+          step: 5,
+          title: 'Enter code on device',
+          subtitle: 'Type this code into the SIM Toolkit app on the customer\'s phone.',
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 24),
         if (_enrollBusy) ...[
           const Center(child: CircularProgressIndicator()),
           const SizedBox(height: 16),
-          const Text(
-            'Sending token to device…',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: AppTone.muted),
-          ),
-        ] else if (_enrollmentId != null) ...[
+          const Text('Generating code…', textAlign: TextAlign.center,
+              style: TextStyle(color: AppTone.muted)),
+        ] else if (_enrollmentToken != null) ...[
+          // Code display — large, easy to read at a glance
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
             decoration: BoxDecoration(
               color: AppTone.brand.withValues(alpha: 0.06),
-              border: Border.all(color: AppTone.brand.withValues(alpha: 0.3)),
-              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTone.brand.withValues(alpha: 0.4), width: 1.5),
+              borderRadius: BorderRadius.circular(16),
             ),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                Row(children: [
-                  Icon(Icons.notifications_active_outlined, color: AppTone.brand, size: 18),
-                  SizedBox(width: 8),
-                  Text('Token sent', style: TextStyle(fontWeight: FontWeight.w700, color: AppTone.brand)),
-                ]),
-                SizedBox(height: 8),
+              children: [
+                const Text('Activation code',
+                    style: TextStyle(color: AppTone.muted, fontSize: 13, fontWeight: FontWeight.w500)),
+                const SizedBox(height: 12),
                 Text(
-                  'Ask the customer to open the notification on their device. '
-                  'A 6-digit code will appear briefly on screen.',
-                  style: TextStyle(color: AppTone.ink, fontSize: 13),
+                  // Format as "847 291" — easier to read in two groups
+                  '${_enrollmentToken!.substring(0, 3)}  ${_enrollmentToken!.substring(3)}',
+                  style: const TextStyle(
+                    fontSize: 44,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 6,
+                    color: AppTone.brand,
+                    fontFamily: 'monospace',
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Valid for 10 minutes',
+                  style: TextStyle(color: AppTone.muted, fontSize: 12),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 20),
-          const Text(
-            'Enter the code you see on their device:',
-            style: TextStyle(fontWeight: FontWeight.w600, color: AppTone.ink),
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _tokenController,
-            keyboardType: TextInputType.number,
-            maxLength: 6,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 8,
-              color: AppTone.ink,
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppTone.page,
+              borderRadius: BorderRadius.circular(12),
             ),
-            decoration: InputDecoration(
-              counterText: '',
-              hintText: '_ _ _ _ _ _',
-              hintStyle: TextStyle(
-                color: AppTone.muted.withValues(alpha: 0.5),
-                letterSpacing: 6,
-                fontSize: 24,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: AppTone.muted.withValues(alpha: 0.3)),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppTone.brand, width: 2),
-              ),
+            child: const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('What to do now:',
+                    style: TextStyle(fontWeight: FontWeight.w700, color: AppTone.ink, fontSize: 13)),
+                SizedBox(height: 8),
+                _Step('1', 'Pick up the customer\'s phone'),
+                _Step('2', 'Open the SIM Toolkit app'),
+                _Step('3', 'Tap "Enter activation code"'),
+                _Step('4', 'Type the code above'),
+                _Step('5', 'The app will confirm binding automatically'),
+              ],
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           if (_error != null) ...[
             InlineNotice(message: _error!, tone: AppTone.danger, icon: Icons.error_outline),
             const SizedBox(height: 12),
           ],
           FilledButton(
-            onPressed: _verifyBusy ? null : _verifyToken,
-            child: _verifyBusy
-                ? const SizedBox(
-                    width: 18, height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                  )
-                : const Text('Confirm'),
+            onPressed: () => setState(() => _done = true),
+            child: const Text('Binding complete — Done'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            onPressed: () { setState(() { _enrollmentId = null; _enrollmentToken = null; }); _createEnrollment(); },
+            child: const Text('Generate new code'),
           ),
         ] else if (_error != null) ...[
           InlineNotice(message: _error!, tone: AppTone.danger, icon: Icons.error_outline),
           const SizedBox(height: 16),
-          OutlinedButton(
-            onPressed: _createEnrollment,
-            child: const Text('Retry'),
-          ),
+          OutlinedButton(onPressed: _createEnrollment, child: const Text('Retry')),
         ],
       ],
     );
@@ -560,6 +755,33 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
 }
 
 // ── Supporting widgets ────────────────────────────────────────────────────
+
+class _Step extends StatelessWidget {
+  const _Step(this.number, this.text);
+  final String number;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 20, height: 20,
+            alignment: Alignment.center,
+            margin: const EdgeInsets.only(right: 10, top: 1),
+            decoration: const BoxDecoration(color: AppTone.brand, shape: BoxShape.circle),
+            child: Text(number,
+                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+          ),
+          Expanded(child: Text(text, style: const TextStyle(color: AppTone.ink, fontSize: 13))),
+        ],
+      ),
+    );
+  }
+}
 
 class _StepDots extends StatelessWidget {
   const _StepDots({required this.current, required this.total});

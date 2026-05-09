@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:dealer_app/app/emi_locker_app.dart';
+import 'package:dealer_app/core/sse_service.dart';
 import 'unlock_flow_screen.dart';
 
 class LockDetailScreen extends StatefulWidget {
@@ -25,6 +26,7 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
   Map<String, dynamic>? _detail;
   Timer? _ticker;
   Duration _graceRemaining = Duration.zero;
+  StreamSubscription<SseEvent>? _sseSub;
 
   @override
   void initState() {
@@ -33,7 +35,25 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sseSub?.cancel();
+    final stream = AppEventScope.of(context);
+    if (stream != null) {
+      _sseSub = stream.listen((event) {
+        if (!mounted) return;
+        final eventDeviceId = event.data['deviceId']?.toString() ?? event.data['id']?.toString();
+        if (eventDeviceId == widget.deviceId &&
+            (event.type == 'device_locked' || event.type == 'device_unlocked' || event.type == 'grace_expired')) {
+          _load();
+        }
+      });
+    }
+  }
+
+  @override
   void dispose() {
+    _sseSub?.cancel();
     _ticker?.cancel();
     super.dispose();
   }

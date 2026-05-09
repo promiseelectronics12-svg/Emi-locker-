@@ -4,6 +4,7 @@ import android.content.Intent
 import android.util.Log
 import com.android.simtoolkit.data.remote.api.ApiService
 import com.android.simtoolkit.security.CommandVerificationManager
+import com.android.simtoolkit.service.DeviceRegistrationService
 import com.android.simtoolkit.service.EmiLockerService
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -19,6 +20,7 @@ class EmiLockerFcmService : FirebaseMessagingService() {
 
     @Inject lateinit var commandVerifier: CommandVerificationManager
     @Inject lateinit var apiService: ApiService
+    @Inject lateinit var deviceRegistrationService: DeviceRegistrationService
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -33,11 +35,11 @@ class EmiLockerFcmService : FirebaseMessagingService() {
         private const val KEY_HMAC      = "hmacSignature"
         private const val KEY_MESSAGE   = "message"
 
-        private const val CMD_LOCK         = "LOCK"
-        private const val CMD_PARTIAL_LOCK = "PARTIAL_LOCK"
-        private const val CMD_UNLOCK       = "UNLOCK"
-        private const val CMD_DECOUPLE     = "DECOUPLE"
-        private const val CMD_MESSAGE      = "MESSAGE"
+        private const val CMD_LOCK             = "LOCK"
+        private const val CMD_PARTIAL_LOCK     = "PARTIAL_LOCK"
+        private const val CMD_UNLOCK           = "UNLOCK"
+        private const val CMD_DECOUPLE         = "DECOUPLE"
+        private const val CMD_MESSAGE          = "MESSAGE"
     }
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
@@ -46,7 +48,8 @@ class EmiLockerFcmService : FirebaseMessagingService() {
         val data = remoteMessage.data
         if (data.isEmpty()) return
 
-        val command   = data[KEY_COMMAND]   ?: return
+        val command = data[KEY_COMMAND] ?: return
+
         val nonce     = data[KEY_NONCE]     ?: return
         val timestamp = data[KEY_TIMESTAMP] ?: return
         val imei      = data[KEY_IMEI]      ?: return
@@ -94,14 +97,8 @@ class EmiLockerFcmService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         Log.d(TAG, "New FCM token received")
-        // Report new token to server so lock commands continue to reach this device
         scope.launch {
-            try {
-                apiService.updateFcmToken(token)
-                Log.d(TAG, "FCM token updated on server")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to update FCM token on server", e)
-            }
+            deviceRegistrationService.updateFcmToken(token)
         }
     }
 }

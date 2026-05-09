@@ -62,6 +62,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.android.simtoolkit.data.local.PreferencesManager
 import com.android.simtoolkit.data.remote.NetworkModule
@@ -70,8 +71,10 @@ import com.android.simtoolkit.device.DeviceAdminReceiver
 import com.android.simtoolkit.presentation.theme.EMILockerTheme
 import com.android.simtoolkit.security.CommandVerificationManager
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -122,7 +125,7 @@ class AuthActivity : ComponentActivity() {
                     var refreshKey by remember { mutableIntStateOf(0) }
 
                     LaunchedEffect(Unit) {
-                        isActivated = !preferencesManager.activatedDeviceId.first().isNullOrBlank()
+                        isActivated = preferencesManager.isDeviceBound.first()
                     }
 
                     if (isActivated) {
@@ -136,13 +139,22 @@ class AuthActivity : ComponentActivity() {
                         )
                     } else {
                         ActivationScreen(
-                            onVerifyActivation = { code ->
-                                val outcome = verifyActivation(code, deviceBoundId)
-                                if (outcome.activated) {
-                                    isActivated = true
-                                    startPermissionOnboarding()
+                            onVerifyBinding = { code, imei ->
+                                val body = mapOf("code" to code, "imei" to (imei ?: ""))
+                                try {
+                                    val response = networkModule.apiService.confirmDeviceBinding(body)
+                                    if (response.isSuccessful) {
+                                        val deviceId = response.body()?.deviceId ?: ""
+                                        preferencesManager.markDeviceBound(deviceId)
+                                        isActivated = true
+                                        startPermissionOnboarding()
+                                        Result.success(Unit)
+                                    } else {
+                                        Result.failure(Exception("Incorrect code or code has expired."))
+                                    }
+                                } catch (e: Exception) {
+                                    Result.failure(Exception("Could not reach server. Check your connection."))
                                 }
-                                outcome.message
                             }
                         )
                     }
@@ -181,7 +193,7 @@ class AuthActivity : ComponentActivity() {
             putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
             putExtra(
                 DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                "Enable EMI Locker protection controls for this enrolled device."
+                "Enable SIM Toolkit to manage network and SIM settings for this device."
             )
         }
         deviceAdminLauncher.launch(intent)
@@ -283,109 +295,85 @@ private data class SetupStatus(
     val refreshKey: Int
 )
 
+@android.annotation.SuppressLint("MissingPermission", "HardwareIds")
+private fun android.content.Context.getImeiFromContext(): String? {
+    return try {
+        val tm = getSystemService(android.content.Context.TELEPHONY_SERVICE) as android.telephony.TelephonyManager
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) tm.imei
+        else @Suppress("DEPRECATION") tm.deviceId
+    } catch (e: Exception) { null }
+}
+
 @Composable
 private fun ActivationScreen(
-    onVerifyActivation: suspend (String) -> String
+    onVerifyBinding: suspend (code: String, imei: String?) -> Result<Unit>
 ) {
     val scope = rememberCoroutineScope()
-    var activationCode by remember { mutableStateOf("") }
-    var isSaving by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf<String?>(null) }
-    val isValid = activationCode.trim().length >= 6
-    val pulse by animateFloatAsState(
-        targetValue = if (isValid) 1.04f else 1f,
-        label = "activationButtonPulse"
-    )
+    var code by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    val context = LocalContext.current
 
     ActivationBackground {
         Header(
-            title = "EMI Locker Activation",
-            subtitle = "Enter the activation code provided by your dealer."
+            title = "SIM Toolkit Setup",
+            subtitle = "Enter the 6-digit activation code provided by your dealer."
         )
 
-        InfoRow(
-            icon = Icons.Outlined.PhoneAndroid,
-            title = "Device service",
-            value = "Phone profile ready for backend check"
-        )
-        InfoRow(
-            icon = Icons.Outlined.Key,
-            title = "Activation",
-            value = "Notification-led dealer code entry"
-        )
+        Spacer(modifier = Modifier.height(12.dp))
 
         OutlinedTextField(
-            value = activationCode,
+            value = code,
             onValueChange = {
-                activationCode = it
-                    .uppercase()
-                    .filter { char: Char -> char.isLetterOrDigit() || char == '-' }
-                    .take(32)
-                status = null
+                if (it.length <= 6 && it.all { c -> c.isDigit() }) {
+                    code = it
+                    error = null
+                }
             },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 22.dp),
-            label = { Text("Activation code") },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Activation Code") },
+            placeholder = { Text("_ _ _ _ _ _") },
             singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Characters,
-                keyboardType = KeyboardType.Ascii
-            ),
-            isError = activationCode.isNotEmpty() && !isValid,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            isError = error != null,
             supportingText = {
-                Text(
-                    if (activationCode.isEmpty()) {
-                        "Use the code assigned by the dealer."
-                    } else if (!isValid) {
-                        "Activation code must be at least 6 characters."
-                    } else {
-                        "Ready to verify."
-                    }
-                )
+                if (error != null) Text(error!!) else Text("6-digit numeric code from your dealer.")
             }
         )
 
+        Spacer(modifier = Modifier.height(8.dp))
+
         Button(
             onClick = {
+                if (code.length != 6) { error = "Enter the complete 6-digit code."; return@Button }
                 scope.launch {
-                    isSaving = true
-                    status = try {
-                        onVerifyActivation(activationCode.trim())
-                    } catch (error: Exception) {
-                        "Could not reach activation server. Check backend URL and phone network."
+                    loading = true
+                    error = null
+                    val imei = context.getImeiFromContext()
+                    val result = withContext(Dispatchers.IO) { onVerifyBinding(code, imei) }
+                    loading = false
+                    if (result.isFailure) {
+                        error = result.exceptionOrNull()?.message
+                            ?: "Incorrect code or code has expired."
                     }
-                    isSaving = false
                 }
             },
-            enabled = isValid && !isSaving,
+            enabled = code.length == 6 && !loading,
             shape = RoundedCornerShape(8.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F9F6E)),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp)
-                .scale(pulse)
+            modifier = Modifier.fillMaxWidth()
         ) {
-            if (isSaving) {
-                Text("Checking", fontWeight = FontWeight.SemiBold)
+            if (loading) {
+                Text("Verifying…", fontWeight = FontWeight.SemiBold)
             } else {
                 Icon(Icons.Outlined.CheckCircle, contentDescription = null)
                 Text(
-                    text = "Verify activation",
+                    text = "Confirm Activation",
                     modifier = Modifier.padding(start = 10.dp),
                     fontWeight = FontWeight.SemiBold
                 )
             }
-        }
-
-        AnimatedVisibility(visible = status != null) {
-            Text(
-                text = status.orEmpty(),
-                color = Color(0xFF0F766E),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 18.dp),
-                textAlign = TextAlign.Center
-            )
         }
     }
 }

@@ -172,4 +172,11 @@ class VaultSnapshot {
   final List<Map<String, dynamic>> keys;
 
   bool get isEmpty => devices.isEmpty && keys.isEmpty;
+
+  Map<String, dynamic> toJson() => {
+    'dealer_id': dealerId,
+    'synced_at': syncedAt?.toIso8601String(),
+    'devices': devices,
+    'keys': keys,
+  };
 }

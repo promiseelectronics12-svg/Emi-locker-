@@ -119,6 +119,10 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, DealerContactActivity::class.java))
         }
 
+        binding.btnActivateDevice?.setOnClickListener {
+            startActivity(Intent(this, ActivationScreen::class.java))
+        }
+
         binding.btnViewAgreement.setOnClickListener {
             val agreementId = viewModel.uiState.value.emiSummary.let { summary ->
                 viewModel.getAgreementId()

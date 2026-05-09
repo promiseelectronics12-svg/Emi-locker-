@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../../config/database');
 const { createAuditLog } = require('../../utils/audit');
+const { emitKeyRequested } = require('../sse/sseService');
 const {
   generateKeyString,
   signKey,
@@ -30,6 +31,8 @@ async function requestKeys(req, res) {
   try {
     const quantity = normalizeQuantity(req.body.quantity);
     const { justification } = req.body;
+    const tier = ['standard', 'premium', 'vip'].includes(req.body.tier)
+      ? req.body.tier : 'standard';
     const resellerId = req.user.id;
 
     if (!quantity || !justification) {
@@ -58,10 +61,10 @@ async function requestKeys(req, res) {
     }
 
     const requestResult = await db.query(
-      `INSERT INTO key_requests (reseller_id, quantity, justification, status, created_at, updated_at)
-       VALUES ($1, $2, $3, 'pending', NOW(), NOW())
-       RETURNING id, quantity, status, created_at`,
-      [resellerId, quantity, justification]
+      `INSERT INTO key_requests (reseller_id, quantity, justification, tier, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, 'pending', NOW(), NOW())
+       RETURNING id, quantity, tier, status, created_at`,
+      [resellerId, quantity, justification, tier]
     );
 
     await createAuditLog(resellerId, 'KEY_REQUEST', {
@@ -69,6 +72,18 @@ async function requestKeys(req, res) {
       quantity,
       justification
     });
+
+    // Notify all connected admins via SSE
+    const resellerRow = await db.query(
+      'SELECT name FROM resellers WHERE id = $1', [resellerId]
+    );
+    emitKeyRequested(
+      resellerId,
+      resellerRow.rows[0]?.name || 'Reseller',
+      requestResult.rows[0].id,
+      quantity,
+      tier
+    );
 
     return res.status(201).json({
       message: 'Key request submitted',
@@ -229,6 +244,9 @@ async function assignKeys(req, res) {
     const quantity = normalizeQuantity(req.body.quantity);
     const dealerId = req.body.dealerId || req.body.dealer_id;
     const resellerId = req.user.id;
+    const tier = ['standard', 'premium', 'vip'].includes(req.body.tier)
+      ? req.body.tier
+      : 'standard';
 
     if (!quantity || !dealerId) {
       return res.status(400).json({ error: 'Quantity and dealerId are required' });
@@ -249,36 +267,51 @@ async function assignKeys(req, res) {
 
     const targetDealerId = dealerResult.rows[0].user_id || dealerResult.rows[0].id;
 
-    const availableKeys = await client.query(
-      `SELECT id, key_string FROM activation_keys
-       WHERE reseller_id = $1 AND dealer_id IS NULL AND status = $2
-       ORDER BY created_at ASC
-       LIMIT $3
-       FOR UPDATE SKIP LOCKED`,
-      [resellerId, KEY_STATUSES.AVAILABLE, quantity]
+    // On-demand model: check reseller quota, generate fresh keys, decrement quota.
+    const quotaCol = `quota_${tier}`;
+    const quotaResult = await client.query(
+      `SELECT COALESCE(${quotaCol}, 0) AS available FROM resellers WHERE id = $1 FOR UPDATE`,
+      [resellerId]
     );
+    const available = parseInt(quotaResult.rows[0]?.available ?? '0');
 
-    if (availableKeys.rows.length < quantity) {
+    if (available < quantity) {
       await client.query('ROLLBACK');
       return res.status(400).json({
-        error: `Only ${availableKeys.rows.length} keys available for assignment`
+        error: `Only ${available} ${tier} keys available for assignment`
       });
     }
 
+    // Generate fresh keys and assign directly to dealer.
     const keyIds = [];
-    for (const row of availableKeys.rows) {
+    for (let i = 0; i < quantity; i++) {
+      const keyString = await generateKeyString(client);
       const nonce = crypto.randomBytes(16).toString('hex');
-      const { signature, timestamp } = signKey(row.key_string, targetDealerId, nonce);
+      const { signature, timestamp } = signKey(keyString, targetDealerId, nonce);
 
-      await client.query(
-        `UPDATE activation_keys
-         SET dealer_id = $1, status = $2, assigned_at = NOW(),
-             hmac_signature = $3, nonce = $4, sig_timestamp = $5, updated_at = NOW()
-         WHERE id = $6`,
-        [targetDealerId, KEY_STATUSES.ASSIGNED, signature, nonce, timestamp, row.id]
+      const insertResult = await client.query(
+        `INSERT INTO activation_keys
+           (key_string, reseller_id, dealer_id, status, tier, hmac_signature, nonce, sig_timestamp, assigned_at, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW(), NOW())
+         RETURNING id`,
+        [keyString, resellerId, targetDealerId, KEY_STATUSES.ASSIGNED, tier, signature, nonce, timestamp]
       );
-      keyIds.push(row.id);
+      keyIds.push(insertResult.rows[0].id);
     }
+
+    // Decrement reseller quota.
+    await client.query(
+      `UPDATE resellers SET ${quotaCol} = ${quotaCol} - $1, updated_at = NOW() WHERE id = $2`,
+      [quantity, resellerId]
+    );
+
+    // Create credit ledger entry.
+    await client.query(
+      `INSERT INTO dealer_credit_ledger
+         (reseller_id, dealer_id, keys_quantity, tier, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, NOW(), NOW())`,
+      [resellerId, targetDealerId, quantity, tier]
+    );
 
     await client.query('COMMIT');
 
@@ -286,11 +319,12 @@ async function assignKeys(req, res) {
       resellerId,
       dealerId: targetDealerId,
       quantity,
+      tier,
       keyIds
     });
 
     return res.json({
-      message: `${quantity} keys assigned to dealer`,
+      message: `${quantity} ${tier} keys assigned to dealer`,
       assignedCount: quantity
     });
   } catch (error) {
@@ -480,7 +514,7 @@ async function getResellerKeys(req, res) {
     }
 
     const result = await db.query(
-      `SELECT ak.id, ak.key_string, ak.status, ak.dealer_id, d.name as dealer_name,
+      `SELECT ak.id, ak.key_string, ak.status, ak.tier, ak.dealer_id, d.name as dealer_name,
               ak.assigned_at, ak.activated_at, ak.created_at
        FROM activation_keys ak
        LEFT JOIN dealers d ON ak.dealer_id = d.user_id OR ak.dealer_id = d.id
@@ -496,6 +530,51 @@ async function getResellerKeys(req, res) {
   }
 }
 
+async function getDealerInventory(req, res) {
+  try {
+    const dealerId = req.user.id;
+
+    // Count keys by tier and status
+    const keysResult = await db.query(
+      `SELECT tier,
+              COUNT(*) FILTER (WHERE status = 'assigned')  AS assigned,
+              COUNT(*) FILTER (WHERE status = 'activated') AS activated,
+              COUNT(*) FILTER (WHERE status = 'revoked')   AS revoked
+       FROM activation_keys
+       WHERE dealer_id = $1
+       GROUP BY tier`,
+      [dealerId]
+    );
+
+    // Get dealer quotas
+    const dealerResult = await db.query(
+      `SELECT quota_standard, quota_premium, quota_vip
+       FROM dealers WHERE user_id = $1`,
+      [dealerId]
+    );
+
+    const quotas = dealerResult.rows[0] || { quota_standard: 500, quota_premium: 200, quota_vip: 50 };
+    const byTier = { standard: {}, premium: {}, vip: {} };
+
+    for (const row of keysResult.rows) {
+      byTier[row.tier] = {
+        assigned: parseInt(row.assigned, 10),
+        activated: parseInt(row.activated, 10),
+        revoked: parseInt(row.revoked, 10)
+      };
+    }
+
+    return res.json({
+      standard: { assigned: 0, activated: 0, revoked: 0, quota: quotas.quota_standard, ...byTier.standard },
+      premium:  { assigned: 0, activated: 0, revoked: 0, quota: quotas.quota_premium,  ...byTier.premium  },
+      vip:      { assigned: 0, activated: 0, revoked: 0, quota: quotas.quota_vip,      ...byTier.vip      }
+    });
+  } catch (error) {
+    console.error('Get dealer inventory error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
 module.exports = {
   requestKeys,
   approveKeyRequest,
@@ -503,5 +582,6 @@ module.exports = {
   assignKeys,
   consumeKey,
   getDealerKeys,
-  getResellerKeys
+  getResellerKeys,
+  getDealerInventory
 };

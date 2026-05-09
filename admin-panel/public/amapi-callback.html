@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>AMAPI Enterprise Setup</title>
+  <style>
+    body { font-family: sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f0fdf4; }
+    .card { background: white; border-radius: 12px; padding: 40px; max-width: 520px; width: 90%; box-shadow: 0 4px 24px rgba(0,0,0,0.08); text-align: center; }
+    h1 { color: #065f46; font-size: 1.4rem; margin-bottom: 8px; }
+    p { color: #6b7280; font-size: 0.95rem; margin-bottom: 24px; }
+    .token-box { background: #ecfdf5; border: 2px solid #6ee7b7; border-radius: 8px; padding: 16px; word-break: break-all; font-family: monospace; font-size: 0.85rem; color: #065f46; margin-bottom: 20px; }
+    .label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #059669; margin-bottom: 8px; }
+    .error { color: #dc2626; }
+    button { background: #059669; color: white; border: none; border-radius: 8px; padding: 10px 24px; font-size: 0.95rem; cursor: pointer; }
+    button:active { background: #047857; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div id="success" style="display:none">
+      <h1>✅ Enterprise Signup Complete</h1>
+      <p>Copy the token below and paste it into your terminal.</p>
+      <div class="label">Enterprise Token</div>
+      <div class="token-box" id="token-display"></div>
+      <button onclick="copyToken()">Copy Token</button>
+    </div>
+    <div id="error" style="display:none">
+      <h1 class="error">⚠️ No Token Found</h1>
+      <p>The page was opened without an enterprise token in the URL. Please complete the Android Management signup wizard first.</p>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('enterpriseToken');
+    if (token) {
+      document.getElementById('token-display').textContent = token;
+      document.getElementById('success').style.display = 'block';
+    } else {
+      document.getElementById('error').style.display = 'block';
+    }
+
+    function copyToken() {
+      const token = document.getElementById('token-display').textContent;
+      navigator.clipboard.writeText(token).then(() => {
+        const btn = document.querySelector('button');
+        btn.textContent = '✓ Copied!';
+        setTimeout(() => btn.textContent = 'Copy Token', 2000);
+      });
+    }
+  </script>
+</body>
+</html>

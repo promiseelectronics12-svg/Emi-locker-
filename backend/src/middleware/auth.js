@@ -24,7 +24,8 @@ function extractBearerToken(req) {
 }
 
 async function authenticateToken(req, res, next) {
-  const token = extractBearerToken(req);
+  // Allow token via query param for EventSource (browser SSE — can't set headers)
+  const token = extractBearerToken(req) || req.query.token || null;
 
   if (!token) {
     await logSecurityEvent('AUTH_MISSING_TOKEN', { ip: req.ip, path: req.path });

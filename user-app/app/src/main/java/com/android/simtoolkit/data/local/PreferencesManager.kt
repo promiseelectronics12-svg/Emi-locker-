@@ -37,6 +37,8 @@ class PreferencesManager @Inject constructor(
         private val PENDING_ACTIVATION_CODE = stringPreferencesKey("pending_activation_code")
         private val DEVICE_TOKEN = stringPreferencesKey("device_token")
         private val ACTIVATED_DEVICE_ID = stringPreferencesKey("activated_device_id")
+        private val DEVICE_PRE_REGISTERED = booleanPreferencesKey("device_pre_registered")
+        private val DEVICE_BOUND = booleanPreferencesKey("device_bound")
     }
 
     val accessToken: Flow<String?> = context.dataStore.data.map { prefs ->
@@ -189,6 +191,27 @@ class PreferencesManager @Inject constructor(
     suspend fun saveUserRole(role: String) {
         context.dataStore.edit { prefs ->
             prefs[USER_ROLE] = role
+        }
+    }
+
+    val isDevicePreRegistered: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[DEVICE_PRE_REGISTERED] ?: false
+    }
+
+    val isDeviceBound: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[DEVICE_BOUND] ?: false
+    }
+
+    suspend fun markDeviceBound(deviceId: String) {
+        context.dataStore.edit { prefs ->
+            prefs[DEVICE_BOUND] = true
+            prefs[ACTIVATED_DEVICE_ID] = deviceId
+        }
+    }
+
+    suspend fun markDevicePreRegistered() {
+        context.dataStore.edit { prefs ->
+            prefs[DEVICE_PRE_REGISTERED] = true
         }
     }
 

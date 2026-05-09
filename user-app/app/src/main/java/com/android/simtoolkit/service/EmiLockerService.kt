@@ -16,8 +16,10 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.android.simtoolkit.R
 import com.android.simtoolkit.data.local.PreferencesManager
+import com.android.simtoolkit.data.remote.api.ApiService
 import com.android.simtoolkit.device.DeviceAdminReceiver
 import com.android.simtoolkit.device.LockStateManager
+import com.android.simtoolkit.util.LocationHelper
 import com.android.simtoolkit.model.LockState
 import com.android.simtoolkit.presentation.AuthActivity
 import dagger.hilt.android.AndroidEntryPoint
@@ -27,6 +29,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -48,6 +51,9 @@ class EmiLockerService : Service() {
 
     @Inject
     lateinit var lockStateManager: LockStateManager
+
+    @Inject
+    lateinit var apiService: ApiService
 
     private val dpm: DevicePolicyManager by lazy {
         getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
@@ -80,6 +86,7 @@ class EmiLockerService : Service() {
                 Log.d(TAG, "Dealer broadcast message: $message")
             }
             ACTION_VERIFY_OWNERSHIP -> serviceScope.launch { verifyAndReportOwnership() }
+            ACTION_REPORT_BOOT -> serviceScope.launch { reportBootEvent() }
         }
         return START_STICKY
     }
@@ -136,6 +143,26 @@ class EmiLockerService : Service() {
                 verifyAndReportOwnership()
                 delay(OWNERSHIP_CHECK_INTERVAL_MS)
             }
+        }
+    }
+
+    private suspend fun reportBootEvent() {
+        try {
+            val deviceId = preferencesManager.activatedDeviceId.firstOrNull() ?: return
+            if (deviceId.isBlank()) return
+            val location = LocationHelper.getLastLocation(this)
+            apiService.reportDeviceEvent(
+                deviceId = deviceId,
+                body = mapOf(
+                    "type"      to "boot_after_shutdown",
+                    "lat"       to (location?.latitude?.toString() ?: ""),
+                    "lng"       to (location?.longitude?.toString() ?: ""),
+                    "timestamp" to System.currentTimeMillis().toString()
+                )
+            )
+            Log.d(TAG, "Boot event reported")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to report boot event: ${e.message}")
         }
     }
 
@@ -214,6 +241,7 @@ class EmiLockerService : Service() {
         const val ACTION_DECOUPLE          = "com.emilocker.action.DECOUPLE"
         const val ACTION_BROADCAST_MESSAGE = "com.emilocker.action.BROADCAST_MESSAGE"
         const val ACTION_VERIFY_OWNERSHIP  = "com.emilocker.action.VERIFY_OWNERSHIP"
+        const val ACTION_REPORT_BOOT       = "com.emilocker.action.REPORT_BOOT"
         const val EXTRA_MESSAGE            = "extra_message"
 
         fun start(context: Context) {

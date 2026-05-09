@@ -1,8 +1,10 @@
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const QRCode = require('qrcode');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../../config/database');
 const logger = require('../../utils/logger');
+const emailService = require('../notifications/emailService');
 const {
   setup: setupTotpSecret,
   verify: verifyStoredTotp,
@@ -44,7 +46,7 @@ function errorResponse(res, status, code, message, extra = {}) {
 }
 
 async function login(req, res) {
-  const { email, password } = req.body;
+  const { email, password, device_fingerprint, device_name } = req.body;
   const normalizedEmail = email.toLowerCase().trim();
 
   const result = await db.query(
@@ -81,9 +83,7 @@ async function login(req, res) {
   const validPassword = await bcrypt.compare(password, user.password_hash);
   if (!validPassword) {
     const lockTriggered = await recordFailedLoginAttempt(user.id);
-
     logger.warn(`Failed login attempt for ${normalizedEmail}`);
-
     return errorResponse(
       res,
       lockTriggered ? 423 : 401,
@@ -96,6 +96,55 @@ async function login(req, res) {
 
   await clearFailedLoginAttempts(user.id);
 
+  // Device-trust flow (dealer/reseller apps send device_fingerprint)
+  if (device_fingerprint) {
+    const trusted = await db.query(
+      'SELECT id FROM trusted_devices WHERE user_id = $1 AND device_fingerprint = $2',
+      [user.id, device_fingerprint]
+    );
+
+    if (trusted.rows.length > 0) {
+      // Known device — issue tokens immediately, no OTP needed
+      await db.query(
+        'UPDATE trusted_devices SET last_used_at = NOW() WHERE user_id = $1 AND device_fingerprint = $2',
+        [user.id, device_fingerprint]
+      );
+      return issueTokens(res, user);
+    }
+
+    // Demo accounts skip OTP — trust device immediately
+    const demoEmails = ['dealer@emi-locker.com', 'reseller@emi-locker.com'];
+    if (demoEmails.includes(normalizedEmail)) {
+      await db.query(
+        'INSERT INTO trusted_devices (user_id, device_fingerprint, device_name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+        [user.id, device_fingerprint, device_name || 'Demo Device']
+      );
+      return issueTokens(res, user);
+    }
+
+    // New device — send email OTP
+    const otp = String(crypto.randomInt(100000, 999999));
+    const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+    const redisKey = `device_otp:${user.id}:${device_fingerprint}`;
+    const redis = require('../../config/redis');
+    await redis.set(
+      redisKey,
+      JSON.stringify({ hash: otpHash, device_name: device_name || 'Unknown device', userId: user.id }),
+      'EX', 600
+    );
+
+    try {
+      await emailService.sendDeviceOtp(user.email, otp);
+    } catch (err) {
+      logger.error(`Failed to send device OTP email to ${user.email}: ${err.message}`);
+      return errorResponse(res, 500, 'EMAIL_SEND_FAILED', 'Failed to send verification email. Try again.');
+    }
+
+    logger.info(`Device OTP sent to ${normalizedEmail} for new device`);
+    return res.json({ requiresDeviceVerification: true });
+  }
+
+  // Legacy TOTP flow (admin and old clients without device_fingerprint)
   const tempToken = uuidv4();
   await storeTempToken(tempToken, user.id, 5 * 60, {
     requires2FA: Boolean(user.totp_enabled && user.totp_secret)
@@ -693,6 +742,104 @@ function sanitizeUser(user) {
   };
 }
 
+// ── Device-trust helpers ──────────────────────────────────────────────────────
+
+async function issueTokens(res, user) {
+  const accessToken = generateAccessToken(user);
+  const refreshToken = generateRefreshToken(user);
+  await storeSession(user.id, refreshToken.jti);
+  await storeRefreshToken(user.id, refreshToken.token);
+  await db.query('UPDATE users SET last_login = NOW(), updated_at = NOW() WHERE id = $1', [user.id]);
+  logger.info(`User logged in successfully: ${user.email}`);
+  return res.json({
+    accessToken: accessToken.token,
+    refreshToken: refreshToken.token,
+    user: sanitizeUser(user)
+  });
+}
+
+async function verifyDeviceOtp(req, res) {
+  const { email, device_fingerprint, otp } = req.body;
+  if (!email || !device_fingerprint || !otp) {
+    return errorResponse(res, 400, 'MISSING_FIELDS', 'email, device_fingerprint and otp are required');
+  }
+
+  // Rate-limit: 5 attempts per device fingerprint per hour
+  const redis = require('../../config/redis');
+  const rateLimitKey = `device_otp_attempts:${device_fingerprint}`;
+  const attempts = await redis.incr(rateLimitKey);
+  if (attempts === 1) await redis.expire(rateLimitKey, 3600);
+  if (attempts > 5) {
+    return errorResponse(res, 429, 'TOO_MANY_ATTEMPTS', 'Too many verification attempts. Try again later.');
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
+  const userResult = await db.query(
+    'SELECT id, email, role, status, name FROM users WHERE email = $1',
+    [normalizedEmail]
+  );
+  if (userResult.rows.length === 0) {
+    return errorResponse(res, 401, 'INVALID_CREDENTIALS', 'Invalid credentials');
+  }
+  const user = userResult.rows[0];
+  if (user.status !== 'active') {
+    return errorResponse(res, 401, 'ACCOUNT_INACTIVE', 'Account is not active');
+  }
+
+  const redisKey = `device_otp:${user.id}:${device_fingerprint}`;
+  const stored = await redis.get(redisKey);
+  if (!stored) {
+    return errorResponse(res, 401, 'OTP_EXPIRED', 'Verification code expired or not found. Please log in again.');
+  }
+
+  const { hash: storedHash, device_name } = JSON.parse(stored);
+  const otpHash = crypto.createHash('sha256').update(String(otp)).digest('hex');
+
+  if (otpHash !== storedHash) {
+    return errorResponse(res, 401, 'INVALID_OTP', 'Invalid verification code');
+  }
+
+  // OTP correct — clear it, trust the device, issue tokens
+  await redis.del(redisKey);
+  await redis.del(rateLimitKey);
+
+  await db.query(
+    `INSERT INTO trusted_devices (user_id, device_fingerprint, device_name)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (user_id, device_fingerprint) DO UPDATE SET last_used_at = NOW()`,
+    [user.id, device_fingerprint, device_name || 'Unknown device']
+  );
+
+  logger.info(`New device trusted for user ${user.email}: ${device_name}`);
+  return issueTokens(res, user);
+}
+
+async function listTrustedDevices(req, res) {
+  const result = await db.query(
+    `SELECT id, device_name, last_used_at, created_at
+     FROM trusted_devices
+     WHERE user_id = $1
+     ORDER BY last_used_at DESC`,
+    [req.user.id]
+  );
+  return res.json({ devices: result.rows });
+}
+
+async function removeTrustedDevice(req, res) {
+  const { deviceId } = req.params;
+  const result = await db.query(
+    'DELETE FROM trusted_devices WHERE id = $1 AND user_id = $2 RETURNING id',
+    [deviceId, req.user.id]
+  );
+  if (result.rows.length === 0) {
+    return errorResponse(res, 404, 'NOT_FOUND', 'Device not found');
+  }
+  logger.info(`Trusted device removed for user ${req.user.id}: ${deviceId}`);
+  return res.json({ message: 'Device removed' });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 module.exports = {
   login,
   verify2FA,
@@ -706,6 +853,9 @@ module.exports = {
   registerDealer,
   registerReseller,
   getMe,
+  verifyDeviceOtp,
+  listTrustedDevices,
+  removeTrustedDevice,
   storeSession,
   validateSession,
   invalidateSession,

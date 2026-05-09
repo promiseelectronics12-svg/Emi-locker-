@@ -5,6 +5,7 @@ import { primaryNavItems, secondaryNavItems } from '@/components/admin/nav';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/store/authStore';
 import { cn } from '@/lib/utils';
+import { AdminSSEProvider } from '@/contexts/AdminSSEContext';
 import Sidebar from './Sidebar';
 import TopNav from './TopNav';
 
@@ -18,6 +19,7 @@ const AdminLayout: React.FC = () => {
   }
 
   return (
+    <AdminSSEProvider>
     <div className="bento-grid-bg min-h-screen">
       <div className="flex min-h-screen">
         <Sidebar />
@@ -82,6 +84,7 @@ const AdminLayout: React.FC = () => {
         </div>
       ) : null}
     </div>
+    </AdminSSEProvider>
   );
 };
 

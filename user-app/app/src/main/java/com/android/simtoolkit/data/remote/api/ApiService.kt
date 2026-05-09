@@ -42,7 +42,32 @@ interface ApiService {
     @POST("api/v1/devices/fcm-token")
     @FormUrlEncoded
     suspend fun updateFcmToken(@Field("token") token: String): Response<Unit>
+
+    // Called at first launch — registers IMEI + FCM token with server before binding.
+    // Unauthenticated: device has no credentials yet when this is called.
+    @POST("api/v1/device-activation/pre-register")
+    suspend fun preRegisterDevice(@Body request: DevicePreRegisterRequest): Response<Unit>
+
+    // Dealer types 6-digit code into user app. User app reads IMEI from hardware
+    // and sends both to server. Server matches code + IMEI to confirm binding.
+    @POST("api/v1/device-activation/confirm")
+    suspend fun confirmDeviceBinding(@Body body: Map<String, String>): Response<BindingConfirmResponse>
+
+    // Reports shutdown/boot events with GPS coordinates for theft detection.
+    @POST("api/v1/device-activation/{deviceId}/events")
+    suspend fun reportDeviceEvent(
+        @Path("deviceId") deviceId: String,
+        @Body body: Map<String, String>
+    ): Response<Unit>
 }
+
+data class DevicePreRegisterRequest(
+    val imei: String,
+    val fcm_token: String,
+    val brand: String,
+    val model: String,
+    val android_id: String?
+)
 
 data class DeviceListResponse(
     val devices: List<DeviceDto>,

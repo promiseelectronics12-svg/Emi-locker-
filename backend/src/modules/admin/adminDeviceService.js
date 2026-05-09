@@ -1,5 +1,6 @@
 const db = require('../../config/database');
 const logger = require('../../utils/logger');
+const { emitKeyRequestApproved } = require('../sse/sseService');
 
 class AdminDeviceService {
   mapDevice(row) {
@@ -744,7 +745,7 @@ class AdminDeviceService {
     }
   }
 
-  async approveKeyRequest(requestId, approvedQuantity, adminId, ipAddress) {
+  async approveKeyRequest(requestId, approvedQuantity, adminId, ipAddress, _tierIgnored = 'standard') {
     const client = await db.connect();
     try {
       await client.query('BEGIN');
@@ -760,6 +761,9 @@ class AdminDeviceService {
       }
 
       const request = requestResult.rows[0];
+      // Tier comes from the reseller's request — admin cannot override it
+      const tier = ['standard', 'premium', 'vip'].includes(request.tier)
+        ? request.tier : 'standard';
 
       const resellerResult = await client.query(
         `SELECT COALESCE(monthly_key_quota, monthly_quota, 100) as monthly_key_quota
@@ -799,48 +803,34 @@ class AdminDeviceService {
         [approvedQuantity, adminId, requestId]
       );
 
-      const keyService = require('../keys/keyService');
-      const generatedKeys = [];
-      for (let i = 0; i < approvedQuantity; i++) {
-        const keyString = await keyService.generateKeyString(client);
-        generatedKeys.push(keyString);
-      }
-
-      for (const keyString of generatedKeys) {
-        const nonce = require('crypto').randomBytes(16).toString('hex');
-        const { signature, timestamp } = keyService.signKey(keyString, request.reseller_id, nonce);
-        await client.query(
-          `INSERT INTO activation_keys (
-             key_string, reseller_id, request_id, status, hmac_signature, nonce, sig_timestamp, created_at, updated_at
-           )
-           VALUES ($1, $2, $3, 'available', $4, $5, $6, NOW(), NOW())`,
-          [keyString, request.reseller_id, requestId, signature, nonce, timestamp]
-        );
-      }
-
+      // On-demand model: increment reseller quota instead of generating key rows.
+      // Keys are generated fresh when the reseller assigns them to a dealer.
+      const quotaCol = `quota_${tier}`;
       await client.query(
         `UPDATE resellers
-         SET used_keys = COALESCE(used_keys, 0) + $1,
-             updated_at = NOW()
-         WHERE id = $2`,
-        [approvedQuantity, request.reseller_id]
+         SET ${quotaCol} = COALESCE(${quotaCol}, 0) + $1,
+             used_keys   = COALESCE(used_keys, 0) + $2,
+             updated_at  = NOW()
+         WHERE id = $3`,
+        [approvedQuantity, approvedQuantity, request.reseller_id]
       );
 
       await client.query(
         `INSERT INTO audit_log (actor, action, target_type, target_id, metadata, ip_address, created_at)
          VALUES ($1, 'KEY_REQUEST_APPROVED', 'key_request', $2, $3, $4, NOW())`,
-        [adminId, requestId, JSON.stringify({ requestId, approvedQuantity, keyCount: generatedKeys.length }), ipAddress]
+        [adminId, requestId, JSON.stringify({ requestId, approvedQuantity, tier }), ipAddress]
       );
 
       await client.query('COMMIT');
 
-      logger.info(`Admin ${adminId} approved key request ${requestId} with ${approvedQuantity} keys`);
+      logger.info(`Admin ${adminId} approved key request ${requestId}: +${approvedQuantity} ${tier} quota`);
+      emitKeyRequestApproved(request.reseller_id, approvedQuantity, tier);
 
       return {
         success: true,
         requestId,
         approvedQuantity,
-        generatedKeys
+        generatedKeys: []
       };
     } catch (error) {
       await client.query('ROLLBACK');

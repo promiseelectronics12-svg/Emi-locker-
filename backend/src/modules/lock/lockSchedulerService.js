@@ -192,6 +192,11 @@ class LockSchedulerService {
       [lockLevel, reason, deviceId]
     );
 
+    try {
+      const sseService = require('../sse/sseService');
+      sseService.emitDeviceLocked({ id: deviceId, imei, device_name: device.amapi_device_name, lock_level: lockLevel, lock_reason: reason, dealer_id: device.dealer_id });
+    } catch (_) {}
+
     logger.info('Auto-lock applied', { deviceId, lockLevel, reason });
   }
 

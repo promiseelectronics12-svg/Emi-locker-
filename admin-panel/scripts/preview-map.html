@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Bangladesh Map Preview</title>
+  <style>
+    body { background: #0f172a; margin: 0; padding: 20px; display: flex; justify-content: center; }
+    svg { max-height: 95vh; }
+    .district { cursor: pointer; transition: transform 0.2s ease, filter 0.2s ease; }
+    .district:hover { filter: brightness(1.3) drop-shadow(0 0 8px rgba(16,185,129,0.6)); }
+  </style>
+</head>
+<body>
+  <svg id="map" viewBox="0 0 400 560" width="500"></svg>
+  <script type="module">
+    // Load the generated paths
+    const resp = await fetch('../src/components/admin/districtPaths.ts');
+    const text = await resp.text();
+    
+    // Parse the TS file to extract paths (simple regex)
+    const paths = {};
+    const re = /"([^"]+)":\s*"([^"]+)"/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      paths[m[1]] = m[2];
+    }
+
+    const svg = document.getElementById('map');
+    
+    // Ocean bg
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    bg.setAttribute('width', '400');
+    bg.setAttribute('height', '560');
+    bg.setAttribute('fill', '#ecfdf5');
+    bg.setAttribute('rx', '12');
+    svg.appendChild(bg);
+
+    // Colors
+    const colors = ['#f0fdf4','#bbf7d0','#6ee7b7','#34d399','#10b981','#059669'];
+    
+    let i = 0;
+    for (const [name, d] of Object.entries(paths)) {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', d);
+      path.setAttribute('fill', colors[i % colors.length]);
+      path.setAttribute('stroke', '#6ee7b7');
+      path.setAttribute('stroke-width', '0.5');
+      path.setAttribute('stroke-linejoin', 'round');
+      path.classList.add('district');
+      path.addEventListener('mouseenter', () => {
+        document.title = name;
+        path.style.transform = 'scale(1.03)';
+      });
+      path.addEventListener('mouseleave', () => {
+        path.style.transform = 'scale(1)';
+      });
+      svg.appendChild(path);
+      i++;
+    }
+    
+    document.title = `Bangladesh Map - ${Object.keys(paths).length} districts`;
+  </script>
+</body>
+</html>

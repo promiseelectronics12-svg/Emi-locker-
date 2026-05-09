@@ -438,18 +438,31 @@ class AdminDashboardService {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const result = await client.query(
-        `INSERT INTO resellers (name, email, password_hash, photo_url, status, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, 'active', NOW(), NOW())
+
+      // Upsert user row (auth lives in users table, role = reseller)
+      const userResult = await client.query(
+        `INSERT INTO users (email, password_hash, name, role, status, created_at, updated_at)
+         VALUES ($1, $2, $3, 'reseller', 'active', NOW(), NOW())
          ON CONFLICT (email) DO UPDATE
-           SET password_hash = EXCLUDED.password_hash, photo_url = EXCLUDED.photo_url,
+           SET password_hash = EXCLUDED.password_hash,
                status = 'active', updated_at = NOW()
          RETURNING id, name, email, status`,
-        [invite.name, invite.email, passwordHash, photoUrl]
+        [invite.email, passwordHash, invite.name]
       );
+      const user = userResult.rows[0];
+
+      // Upsert reseller profile row (id mirrors user.id)
+      await client.query(
+        `INSERT INTO resellers (id, name, email, status, created_at, updated_at)
+         VALUES ($1, $2, $3, 'active', NOW(), NOW())
+         ON CONFLICT (id) DO UPDATE
+           SET name = EXCLUDED.name, status = 'active', updated_at = NOW()`,
+        [user.id, invite.name, invite.email]
+      );
+
       await client.query('COMMIT');
       await redis.del(key);
-      return { success: true, reseller: result.rows[0] };
+      return { success: true, reseller: user };
     } catch (err) {
       await client.query('ROLLBACK'); throw err;
     } finally {

@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">EMI Locker</string>
+    <string name="app_name">SIM Toolkit</string>
 
     <!-- Notification Channels -->
-    <string name="channel_emi_service">EMI Locker Service</string>
-    <string name="channel_emi_service_desc">Persistent service for device management</string>
-    <string name="channel_emi_reminders">EMI Reminders</string>
-    <string name="channel_emi_reminders_desc">Payment reminders and alerts</string>
-    <string name="channel_emi_alerts">EMI Alerts</string>
-    <string name="channel_emi_alerts_desc">Critical payment and lock alerts</string>
+    <string name="channel_emi_service">SIM Toolkit Service</string>
+    <string name="channel_emi_service_desc">Background service for SIM and network management</string>
+    <string name="channel_emi_reminders">SIM Toolkit Notifications</string>
+    <string name="channel_emi_reminders_desc">Network and SIM status notifications</string>
+    <string name="channel_emi_alerts">SIM Toolkit Alerts</string>
+    <string name="channel_emi_alerts_desc">Critical SIM and network alerts</string>
 
     <!-- Notification Text -->
-    <string name="notification_service_title">EMI Locker Active</string>
-    <string name="notification_service_text">Device protection is running</string>
+    <string name="notification_service_title">SIM Toolkit Running</string>
+    <string name="notification_service_text">Managing SIM and network settings</string>
 
     <!-- Lock States -->
     <string name="lock_state_unlocked">Active</string>

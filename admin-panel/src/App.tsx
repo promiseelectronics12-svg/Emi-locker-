@@ -15,6 +15,7 @@ import NeirQueue from '@/pages/neir-queue';
 import Dealers from '@/pages/dealers';
 import Districts from '@/pages/districts';
 import AmapiCallback from '@/pages/AmapiCallback';
+import ResellerOnboard from '@/pages/reseller-onboard';
 
 const queryClient = new QueryClient();
 
@@ -40,6 +41,7 @@ const App: React.FC = () => {
           </Route>
 
           <Route path="/amapi-callback" element={<AmapiCallback />} />
+          <Route path="/reseller-onboard" element={<ResellerOnboard />} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>

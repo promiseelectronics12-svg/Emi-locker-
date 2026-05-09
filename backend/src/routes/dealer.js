@@ -8,6 +8,8 @@ const { requireRole } = require('../middleware/rbac');
 const { validateRequest } = require('../middleware/validateRequest');
 const { buildErrorResponse } = require('../middleware/errorHandler');
 const smsService = require('../modules/notifications/sms.service');
+const { getDealerInventory } = require('../modules/keys/keyController');
+const amapiService = require('../modules/devices/amapiService');
 
 const router = express.Router();
 
@@ -101,6 +103,8 @@ router.get('/stats', asyncHandler(async (req, res) => {
 
   return res.json({ ...stats.rows[0], ...keys.rows[0] });
 }));
+
+router.get('/keys/inventory', asyncHandler(getDealerInventory));
 
 router.get('/analytics', asyncHandler(async (req, res) => {
   const dealer = await getDealerProfile(req.user.id);
@@ -643,6 +647,11 @@ router.post('/devices/:deviceId/unlock',
         fcmSent = true;
       } catch (_) {}
 
+      try {
+        const sseService = require('../modules/sse/sseService');
+        sseService.emitDeviceUnlocked({ id: device.id, device_name: device.device_name || device.amapi_device_name, dealer_id: dealer.id }, graceHours);
+      } catch (_) {}
+
       return res.json({
         method:      'online',
         grace_hours: graceHours,
@@ -953,6 +962,33 @@ router.get('/padt/pending', asyncHandler(async (req, res) => {
   }
 
   return res.json({ pending: rows });
+}));
+
+// ─── AMAPI Enrollment QR ───────────────────────────────────────────────────
+// Returns a QR value string that encodes the Android Enterprise enrollment
+// token. Dealer displays this on screen; customer scans it during Android
+// setup wizard to grant Device Owner automatically.
+router.post('/enrollment-qr', asyncHandler(async (req, res) => {
+  const enterpriseId = process.env.AMAPI_ENTERPRISE_ID;
+  if (!enterpriseId) {
+    return res.status(503).json({ error: 'AMAPI enterprise not configured' });
+  }
+
+  try {
+    const token = await amapiService.createEnrollmentToken(enterpriseId, {
+      duration: '86400s', // 24 hours — plenty of time for dealer to use
+    });
+
+    // AMAPI response includes a qrCode field: a JSON string ready to encode
+    const qrValue = token.qrCode || token.value || null;
+    if (!qrValue) {
+      return res.status(502).json({ error: 'AMAPI did not return QR data' });
+    }
+
+    return res.json({ qr_value: qrValue, token_name: token.name });
+  } catch (err) {
+    return res.status(502).json({ error: 'Could not generate enrollment QR', detail: err.message });
+  }
 }));
 
 module.exports = router;

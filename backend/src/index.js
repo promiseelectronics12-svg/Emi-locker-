@@ -55,7 +55,7 @@ app.use(cors({
   },
   credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use(morgan('combined', { 
   stream: { 
     write: (message) => logger.info(message.trim()) 

@@ -19,7 +19,10 @@ const {
   register,
   registerDealer,
   registerReseller,
-  getMe
+  getMe,
+  verifyDeviceOtp,
+  listTrustedDevices,
+  removeTrustedDevice
 } = authController;
 
 const verify2FAValidationRules = [
@@ -109,6 +112,47 @@ router.post(
 );
 
 router.get('/me', authenticateToken, getMe);
+
+// Device-trust endpoints
+router.post(
+  '/verify-device-otp',
+  body('email').isEmail().normalizeEmail(),
+  body('device_fingerprint').notEmpty(),
+  body('otp').isLength({ min: 6, max: 6 }).isNumeric(),
+  validateRequest,
+  verifyDeviceOtp
+);
+
+router.get('/trusted-devices', authenticateToken, listTrustedDevices);
+router.delete('/trusted-devices/:deviceId', authenticateToken, removeTrustedDevice);
+
+// ── Reseller invite (public — no auth required) ──────────────────────────
+const adminService = require('../modules/admin/adminService');
+const bcrypt = require('bcryptjs');
+
+router.get('/reseller-invite/verify',
+  body('token').optional(),
+  async (req, res) => {
+    const token = req.query.token;
+    if (!token) return res.status(400).json({ error: 'Token required' });
+    const invite = await adminService.verifyResellerInviteToken(token);
+    if (!invite) return res.status(404).json({ success: false, error: 'Invalid or expired invite token' });
+    res.json({ success: true, data: { email: invite.email, name: invite.name } });
+  }
+);
+
+router.post('/reseller-invite/complete',
+  body('token').isString().isLength({ min: 32 }),
+  body('password').isString().isLength({ min: 8 }),
+  validateRequest,
+  async (req, res) => {
+    const { token, password, photoUrl } = req.body;
+    const passwordHash = await bcrypt.hash(password, 12);
+    const result = await adminService.consumeResellerInviteToken(token, passwordHash, photoUrl || null);
+    if (!result.success) return res.status(400).json({ success: false, error: result.error });
+    res.json({ success: true, message: 'Reseller account created', data: result.reseller });
+  }
+);
 
 module.exports = router;
 module.exports.passwordValidationRules = passwordValidationRules;

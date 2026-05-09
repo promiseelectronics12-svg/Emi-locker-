@@ -17,15 +17,35 @@ router.get('/stats', asyncHandler(async (req, res) => {
     'SELECT COUNT(*)::int as total_dealers FROM dealers WHERE reseller_id = $1',
     [resellerId]
   );
-  const keys = await db.query(
-    `SELECT
-       COUNT(*) FILTER (WHERE status = 'available')::int as available_keys,
-       COUNT(*) FILTER (WHERE status = 'assigned')::int as assigned_keys,
-       COUNT(*) FILTER (WHERE status = 'activated')::int as activated_keys
-     FROM activation_keys
-     WHERE reseller_id = $1`,
-    [resellerId]
-  );
+  // Available counts come from reseller quota columns (on-demand model).
+  // Assigned/activated counts come from key rows already generated.
+  const [quotaRes, keyRes] = await Promise.all([
+    db.query(
+      `SELECT COALESCE(quota_standard, 0) AS standard_available,
+              COALESCE(quota_premium,  0) AS premium_available,
+              COALESCE(quota_vip,      0) AS vip_available
+       FROM resellers WHERE id = $1`,
+      [resellerId]
+    ),
+    db.query(
+      `SELECT
+         COUNT(*)::int                                                              AS available_keys,
+         COUNT(*) FILTER (WHERE status = 'assigned')::int                          AS assigned_keys,
+         COUNT(*) FILTER (WHERE status = 'activated')::int                         AS activated_keys,
+         COUNT(*) FILTER (WHERE status = 'assigned' AND tier = 'standard')::int    AS standard_assigned,
+         COUNT(*) FILTER (WHERE status = 'assigned' AND tier = 'premium')::int     AS premium_assigned,
+         COUNT(*) FILTER (WHERE status = 'assigned' AND tier = 'vip')::int         AS vip_assigned
+       FROM activation_keys
+       WHERE reseller_id = $1`,
+      [resellerId]
+    ),
+  ]);
+  const keys = { rows: [{ ...quotaRes.rows[0], ...keyRes.rows[0] }] };
+  // available_keys = sum of per-tier quota
+  keys.rows[0].available_keys =
+    (keys.rows[0].standard_available || 0) +
+    (keys.rows[0].premium_available  || 0) +
+    (keys.rows[0].vip_available      || 0);
   const requests = await db.query(
     `SELECT COUNT(*) FILTER (WHERE status = 'pending')::int as pending_requests
      FROM key_requests
@@ -38,6 +58,59 @@ router.get('/stats', asyncHandler(async (req, res) => {
     ...keys.rows[0],
     ...requests.rows[0]
   });
+}));
+
+router.post('/dealers', asyncHandler(async (req, res) => {
+  const { name, email, phone, shopName, businessName, address, district, division, thana, tradeLicense, nid, photoUrl, password } = req.body;
+  const resellerId = req.user.id;
+
+  if (!name || !email || !phone || !password) {
+    return res.status(400).json({ error: 'Name, email, phone and password are required' });
+  }
+
+  const bcrypt = require('bcryptjs');
+  const { getClient } = db;
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
+
+    const existing = await client.query(
+      'SELECT id FROM users WHERE email = $1 OR phone = $2',
+      [email.toLowerCase().trim(), phone.trim()]
+    );
+    if (existing.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Email or phone already registered' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const userResult = await client.query(
+      `INSERT INTO users (email, password_hash, name, phone, role, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, 'dealer', 'active', NOW(), NOW())
+       RETURNING id`,
+      [email.toLowerCase().trim(), passwordHash, name.trim(), phone.trim()]
+    );
+    const userId = userResult.rows[0].id;
+
+    await client.query(
+      `INSERT INTO dealers
+         (user_id, reseller_id, name, email, phone, shop_name, business_name,
+          address, district, division, thana, trade_license, nid, photo_url,
+          status, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'active',NOW(),NOW())`,
+      [userId, resellerId, name.trim(), email.toLowerCase().trim(), phone.trim(),
+       shopName || null, businessName || null, address || null, district || null,
+       division || null, thana || null, tradeLicense || null, nid || null, photoUrl || null]
+    );
+
+    await client.query('COMMIT');
+    return res.status(201).json({ success: true, message: 'Dealer created' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }));
 
 router.get('/dealers', asyncHandler(async (req, res) => {
@@ -223,14 +296,47 @@ router.post('/profiles/register-seed', asyncHandler(async (req, res) => {
 
 router.get('/quota', asyncHandler(async (req, res) => {
   const result = await db.query(
-    `SELECT COALESCE(monthly_key_quota, monthly_quota, 100) as monthly_quota,
-            COALESCE(used_keys, 0) as used_keys
+    `SELECT COALESCE(monthly_key_quota, monthly_quota, 100) AS monthly_quota,
+            COALESCE(used_keys, 0)     AS used_keys,
+            COALESCE(quota_standard, 0) AS quota_standard,
+            COALESCE(quota_premium,  0) AS quota_premium,
+            COALESCE(quota_vip,      0) AS quota_vip
      FROM resellers
      WHERE id = $1`,
     [req.user.id]
   );
   if (result.rows.length === 0) return res.status(404).json({ error: 'Reseller not found' });
   return res.json(result.rows[0]);
+}));
+
+// ── Credit ledger ────────────────────────────────────────────────────────────
+
+router.get('/credit', asyncHandler(async (req, res) => {
+  const result = await db.query(
+    `SELECT dcl.id, dcl.dealer_id, d.name AS dealer_name, d.phone AS dealer_phone,
+            dcl.keys_quantity, dcl.tier, dcl.notes, dcl.due_date,
+            dcl.settled_at, dcl.status, dcl.created_at
+     FROM dealer_credit_ledger dcl
+     LEFT JOIN dealers d ON d.id = dcl.dealer_id OR d.user_id = dcl.dealer_id
+     WHERE dcl.reseller_id = $1
+     ORDER BY dcl.status ASC, dcl.created_at DESC`,
+    [req.user.id]
+  );
+  return res.json({ entries: result.rows, total: result.rows.length });
+}));
+
+router.patch('/credit/:id/settle', asyncHandler(async (req, res) => {
+  const result = await db.query(
+    `UPDATE dealer_credit_ledger
+     SET status = 'settled', settled_at = NOW(), updated_at = NOW()
+     WHERE id = $1 AND reseller_id = $2 AND status = 'pending'
+     RETURNING *`,
+    [req.params.id, req.user.id]
+  );
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: 'Entry not found or already settled' });
+  }
+  return res.json({ success: true, entry: result.rows[0] });
 }));
 
 module.exports = router;

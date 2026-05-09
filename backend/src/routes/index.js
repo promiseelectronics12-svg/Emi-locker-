@@ -10,6 +10,7 @@ router.use('/decoupling', require('../modules/decoupling/decouplingRoutes'));
 router.use('/users', require('./users'));
 router.use('/payments', require('./payments'));
 router.use('/dealer', require('./dealer'));
+router.use('/dealer/enrollments', require('../modules/enrollment/enrollmentRoutes'));
 router.use('/reseller', require('./reseller'));
 router.use('/dealers', require('./dealers'));
 router.use('/admin', adminRoutes);
@@ -21,5 +22,6 @@ router.use('/location', require('../modules/location/locationRoutes'));
 router.use('/fraud', require('../modules/fraud/fraudRoutes'));
 router.use('/evidence', require('./evidence'));
 router.use('/credit', require('../modules/credit/creditRoutes'));
+router.use('/events', require('../modules/sse/sseRoutes'));
 
 module.exports = router;

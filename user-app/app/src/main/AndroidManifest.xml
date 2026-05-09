@@ -92,6 +92,26 @@
             </intent-filter>
         </receiver>
 
+        <!-- Shutdown Receiver — captures GPS and shows fake shutdown overlay -->
+        <receiver
+            android:name=".device.ShutdownReceiver"
+            android:exported="false">
+            <intent-filter android:priority="999">
+                <action android:name="android.intent.action.ACTION_SHUTDOWN" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Fake shutdown overlay — shown during ACTION_SHUTDOWN to buy time for GPS ping -->
+        <activity
+            android:name=".presentation.FakeShutdownActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:launchMode="singleInstance"
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
+
         <receiver
             android:name=".overlay.DebugOverlayReceiver"
             android:exported="true">
@@ -144,6 +164,15 @@
             android:exported="false"
             android:screenOrientation="portrait"
             android:launchMode="singleTask" />
+
+        <!-- Dealer types activation code here during enrollment -->
+        <activity
+            android:name=".presentation.ActivationScreen"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize" />
+
 
         <!-- Overlay Activity for lock screens -->
         <activity

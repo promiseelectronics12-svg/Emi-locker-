@@ -46,6 +46,7 @@
     "pg-pool": "^3.6.1",
     "qrcode": "^1.5.3",
     "rate-limit-redis": "^4.3.1",
+    "resend": "^6.12.3",
     "speakeasy": "^2.0.0",
     "twilio": "^4.23.0",
     "uuid": "^9.0.1",

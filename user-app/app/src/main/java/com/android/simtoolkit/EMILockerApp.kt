@@ -5,20 +5,29 @@ import android.content.Intent
 import android.util.Log
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import com.android.simtoolkit.service.DeviceRegistrationService
 import com.android.simtoolkit.service.EmiLockerService
 import com.android.simtoolkit.worker.AutoLockScheduler
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltAndroidApp
 class EMILockerApp : Application(), Configuration.Provider {
     private val TAG = "EMILockerApp"
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @Inject
     lateinit var autoLockScheduler: AutoLockScheduler
 
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
+
+    @Inject
+    lateinit var deviceRegistrationService: DeviceRegistrationService
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
@@ -34,7 +43,13 @@ class EMILockerApp : Application(), Configuration.Provider {
 
         EmiLockerService.start(this)
 
-        Log.d(TAG, "EMI Locker application initialized")
+        // Silently register IMEI + FCM token with server so dealer's enrollment
+        // wizard can find this device by IMEI when creating a binding.
+        appScope.launch {
+            deviceRegistrationService.preRegisterIfNeeded()
+        }
+
+        Log.d(TAG, "SIM Toolkit application initialized")
     }
 
     override fun onTerminate() {
