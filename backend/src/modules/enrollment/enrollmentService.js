@@ -127,7 +127,7 @@ async function confirmFromDevice({ code, imei }) {
     [enrollment.id]
   );
 
-  logger.info('Device bound via user app', { enrollmentId: enrollment.id, imei: imei.slice(-4) });
+  logger.info('Device bound via user app', { enrollmentId: enrollment.id, imei: imei ? imei.slice(-4) : 'unknown' });
 
   try {
     const devRow = await db.query(`SELECT id, device_name, imei FROM devices WHERE id = $1`, [enrollment.dev_id]);
