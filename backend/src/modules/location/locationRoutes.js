@@ -122,7 +122,7 @@ function verifyDeviceOwnership(req, res, next) {
      LEFT JOIN dealers dl ON dl.id = d.dealer_id
      LEFT JOIN resellers r ON r.id = d.reseller_id
      WHERE d.id = $1
-       AND (dl.user_id = $2 OR d.owner_id = $2 OR r.user_id = $2)`,
+       AND (dl.user_id = $2 OR d.owner_id = $2 OR r.id = $2)`,
     [deviceId, userId]
   ).then(result => {
     if (result.rows.length === 0) {

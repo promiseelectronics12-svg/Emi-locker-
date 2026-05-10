@@ -46,9 +46,9 @@ async function checkAndIncrementDealerMessageRateLimit(deviceId) {
       resetAt: new Date(result[3]),
     };
   } catch (error) {
-    console.error('Redis error in checkAndIncrementDealerMessageRateLimit - rejecting request:', error.message);
+    console.error('Redis error in checkAndIncrementDealerMessageRateLimit - allowing request (fail open):', error.message);
     return {
-      allowed: false,
+      allowed: true,
       currentCount: 0,
       limit: DEALER_MESSAGE_LIMIT,
       resetAt: new Date(now + DEALER_MESSAGE_WINDOW_SECONDS * 1000),
