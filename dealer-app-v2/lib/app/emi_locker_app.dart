@@ -444,6 +444,12 @@ class ApiClient {
     Map<String, dynamic>? query,
   }) => dio.post<dynamic>(_path(path), data: data, queryParameters: query);
 
+  Future<Response<dynamic>> put(
+    String path, {
+    dynamic data,
+    Map<String, dynamic>? query,
+  }) => dio.put<dynamic>(_path(path), data: data, queryParameters: query);
+
   Future<Response<dynamic>> patch(String path, {dynamic data}) =>
       dio.patch<dynamic>(_path(path), data: data);
 
