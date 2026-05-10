@@ -88,6 +88,9 @@ class AuthActivity : ComponentActivity() {
     @Inject
     lateinit var networkModule: NetworkModule
 
+    @Inject
+    lateinit var deviceRegistrationService: com.android.simtoolkit.service.DeviceRegistrationService
+
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
@@ -102,6 +105,11 @@ class AuthActivity : ComponentActivity() {
         }
 
     private val overlaySettingsLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            openAccessibilityIfNeeded()
+        }
+
+    private val accessibilitySettingsLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             openBatteryOptimizationIfNeeded()
         }
@@ -208,6 +216,22 @@ class AuthActivity : ComponentActivity() {
         overlaySettingsLauncher.launch(intent)
     }
 
+    private fun isAccessibilityEnabled(): Boolean {
+        val enabled = Settings.Secure.getString(
+            contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ) ?: ""
+        return enabled.contains(packageName, ignoreCase = true)
+    }
+
+    private fun openAccessibilityIfNeeded() {
+        if (isAccessibilityEnabled()) {
+            openBatteryOptimizationIfNeeded()
+            return
+        }
+        accessibilitySettingsLauncher.launch(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+    }
+
     private fun openBatteryOptimizationIfNeeded() {
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         if (powerManager.isIgnoringBatteryOptimizations(packageName)) return
@@ -238,32 +262,17 @@ class AuthActivity : ComponentActivity() {
             location = hasForegroundLocationPermission(),
             deviceAdmin = dpm.isAdminActive(adminComponent),
             overlay = Settings.canDrawOverlays(this),
+            accessibility = isAccessibilityEnabled(),
             battery = powerManager.isIgnoringBatteryOptimizations(packageName),
             backend = true,
             refreshKey = refreshKey
         )
     }
 
-    private fun readImei(): String? {
-        return try {
-            val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-            val admin = ComponentName(this, com.android.simtoolkit.device.DeviceAdminReceiver::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && dpm.isDeviceOwnerApp(packageName)) {
-                dpm.getImei(admin, 0)
-            } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                @Suppress("MissingPermission", "HardwareIds", "DEPRECATION")
-                val tm = getSystemService(Context.TELEPHONY_SERVICE) as android.telephony.TelephonyManager
-                tm.deviceId
-            } else null
-        } catch (_: Exception) { null }
-    }
-
     private suspend fun verifyActivation(code: String, @Suppress("UNUSED_PARAMETER") deviceBoundId: String): ActivationOutcome {
-        val imei = readImei()
-        val body = mutableMapOf("code" to code)
-        if (!imei.isNullOrBlank()) body["imei"] = imei
-
-        val response = networkModule.apiService.confirmDeviceBinding(body)
+        // Device is not Device Owner at enrollment time — IMEI unavailable.
+        // Backend matches by code hash only (fallback path).
+        val response = networkModule.apiService.confirmDeviceBinding(mapOf("code" to code))
         if (!response.isSuccessful) {
             return ActivationOutcome(false, "Code is incorrect or has expired. Ask your dealer to try again.")
         }
@@ -271,6 +280,7 @@ class AuthActivity : ComponentActivity() {
         val result = response.body()
         if (result?.success == true && !result.deviceId.isNullOrBlank()) {
             preferencesManager.markDeviceBound(result.deviceId)
+            deviceRegistrationService.registerFcmForDevice(result.deviceId)
             return ActivationOutcome(true, "Device bound. Starting setup.")
         }
 
@@ -288,6 +298,7 @@ private data class SetupStatus(
     val location: Boolean,
     val deviceAdmin: Boolean,
     val overlay: Boolean,
+    val accessibility: Boolean,
     val battery: Boolean,
     val backend: Boolean,
     val refreshKey: Int
@@ -381,6 +392,7 @@ private fun SetupScreen(
         SetupRow("Location permission", status.location)
         SetupRow("Device admin", status.deviceAdmin)
         SetupRow("Overlay permission", status.overlay)
+        SetupRow("Accessibility service", status.accessibility)
         SetupRow("Battery optimization", status.battery)
 
         Spacer(modifier = Modifier.height(12.dp))

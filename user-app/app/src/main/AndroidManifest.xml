@@ -114,6 +114,21 @@
             android:turnScreenOn="true"
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
 
+        <!-- Diagnostic receiver — responds to ADB broadcast commands -->
+        <receiver
+            android:name=".diagnostic.DiagnosticReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.android.simtoolkit.DIAG" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Diagnostic screen — launched via ADB am start -->
+        <activity
+            android:name=".diagnostic.DiagnosticActivity"
+            android:exported="true"
+            android:label="Diagnostic" />
+
         <receiver
             android:name=".overlay.DebugOverlayReceiver"
             android:exported="true">

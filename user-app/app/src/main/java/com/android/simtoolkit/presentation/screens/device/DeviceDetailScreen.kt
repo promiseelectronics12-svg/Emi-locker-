@@ -63,7 +63,7 @@ fun DeviceDetailScreen(
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Text(
-                            text = "Manufacturer: ${uiState.device!!.manufacturer ?: "Unknown"}",
+                            text = "Brand: ${uiState.device!!.brand ?: "Unknown"}",
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Spacer(modifier = Modifier.height(8.dp))
