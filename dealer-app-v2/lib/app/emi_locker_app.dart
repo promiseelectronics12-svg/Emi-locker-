@@ -3719,8 +3719,13 @@ class DeviceActions extends StatelessWidget {
                           OutlinedButton.icon(
                             onPressed: id.isEmpty
                                 ? null
-                                : () => showDialog<void>(
+                                : () => showModalBottomSheet<void>(
                                     context: context,
+                                    isScrollControlled: true,
+                                    useSafeArea: true,
+                                    shape: const RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                                    ),
                                     builder: (_) =>
                                         LocationDialog(api: api, deviceId: id),
                                   ),
@@ -7048,101 +7053,144 @@ class _LocationDialogState extends State<LocationDialog> {
         ? 'https://maps.google.com/?q=$lat,$lng'
         : '';
 
-    return AlertDialog(
-      title: const Text('Pull location'),
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(message),
-            if (_pollTimer != null && location == null) ...[
-              const SizedBox(height: 12),
-              const LinearProgressIndicator(),
-            ],
-            if (location != null) ...[
-              const SizedBox(height: 16),
-              if (latValue != null && lngValue != null) ...[
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: SizedBox(
-                    height: 220,
-                    child: GoogleMap(
-                      initialCameraPosition: CameraPosition(
-                        target: LatLng(latValue, lngValue),
-                        zoom: accuracy > 200 ? 15 : 17,
-                      ),
-                      markers: {
-                        Marker(
-                          markerId: const MarkerId('device-location'),
-                          position: LatLng(latValue, lngValue),
-                          infoWindow: const InfoWindow(title: 'Device location'),
-                        ),
-                      },
-                      circles: {
-                        if (accuracy > 0)
-                          Circle(
-                            circleId: const CircleId('accuracy'),
-                            center: LatLng(latValue, lngValue),
-                            radius: accuracy,
-                            strokeColor: AppTone.brand,
-                            strokeWidth: 2,
-                            fillColor: AppTone.brand.withValues(alpha: 0.14),
-                          ),
-                      },
-                      zoomControlsEnabled: false,
-                      myLocationButtonEnabled: false,
-                      mapToolbarEnabled: false,
+    // Bottom sheet layout — respects Samsung/OEM nav bar insets automatically
+    // via useSafeArea: true on the showModalBottomSheet call site.
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Handle
+          Center(
+            child: Container(
+              margin: const EdgeInsets.only(top: 12, bottom: 8),
+              width: 36, height: 4,
+              decoration: BoxDecoration(
+                color: AppTone.subtle,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          // Header row
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 16, 12),
+            child: Row(
+              children: [
+                const Icon(Icons.location_on_outlined, size: 20, color: AppTone.brand),
+                const SizedBox(width: 8),
+                Text('Pull location', style: AppText.title()),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 20),
+                  onPressed: () => Navigator.pop(context),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+          ),
+          // Status / progress
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Text(message, style: AppText.body(color: AppTone.muted)),
+          ),
+          if (_pollTimer != null && location == null) ...[
+            const SizedBox(height: 10),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 20),
+              child: LinearProgressIndicator(),
+            ),
+          ],
+          // Map — full width, only shown when location arrives
+          if (location != null && latValue != null && lngValue != null) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 280,
+              child: GoogleMap(
+                initialCameraPosition: CameraPosition(
+                  target: LatLng(latValue, lngValue),
+                  zoom: accuracy > 200 ? 15 : 17,
+                ),
+                markers: {
+                  Marker(
+                    markerId: const MarkerId('device-location'),
+                    position: LatLng(latValue, lngValue),
+                    infoWindow: const InfoWindow(title: 'Device location'),
+                  ),
+                },
+                circles: {
+                  if (accuracy > 0)
+                    Circle(
+                      circleId: const CircleId('accuracy'),
+                      center: LatLng(latValue, lngValue),
+                      radius: accuracy,
+                      strokeColor: AppTone.brand,
+                      strokeWidth: 2,
+                      fillColor: AppTone.brand.withValues(alpha: 0.14),
                     ),
+                },
+                zoomControlsEnabled: false,
+                myLocationButtonEnabled: false,
+                mapToolbarEnabled: false,
+              ),
+            ),
+          ],
+          // Coordinate facts
+          if (location != null) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+              child: Wrap(
+                spacing: 20,
+                runSpacing: 8,
+                children: [
+                  _LocationValue(label: 'Latitude', value: lat),
+                  _LocationValue(label: 'Longitude', value: lng),
+                  _LocationValue(
+                    label: 'Accuracy',
+                    value: '${text(location['accuracy'], fallback: '?')} m',
+                  ),
+                  _LocationValue(
+                    label: 'Time',
+                    value: formatDateTime(location['timestamp']),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          // Action buttons
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            child: Row(
+              children: [
+                Expanded(
+                  child: FilledButton(
+                    onPressed: (_busy || _cooldownActive) ? null : pull,
+                    child: _busy
+                        ? const SizedBox(
+                            width: 16, height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : Text(
+                            _cooldownActive
+                                ? 'Ready in ${cooldownSeconds}s'
+                                : location == null ? 'Pull now' : 'Pull again',
+                            style: AppText.button(),
+                          ),
                   ),
                 ),
-                const SizedBox(height: 12),
+                if (mapsUrl.isNotEmpty) ...[
+                  const SizedBox(width: 10),
+                  OutlinedButton.icon(
+                    onPressed: () => launchUrl(Uri.parse(mapsUrl), mode: LaunchMode.externalApplication),
+                    icon: const Icon(Icons.open_in_new, size: 16),
+                    label: const Text('Maps'),
+                  ),
+                ],
               ],
-              _LocationValue(label: 'Latitude', value: lat),
-              _LocationValue(label: 'Longitude', value: lng),
-              _LocationValue(
-                label: 'Accuracy',
-                value: '${text(location['accuracy'], fallback: 'Unknown')} m',
-              ),
-              _LocationValue(
-                label: 'Time',
-                value: formatDateTime(location['timestamp']),
-              ),
-              if (mapsUrl.isNotEmpty)
-                _LocationValue(label: 'Maps', value: mapsUrl),
-            ],
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Close'),
-        ),
-        FilledButton(
-          onPressed: (_busy || _cooldownActive) ? null : pull,
-          child: _busy
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Text(
-                  _cooldownActive
-                      ? 'Ready in ${cooldownSeconds}s'
-                      : location == null
-                          ? 'Pull'
-                          : 'Pull again',
-                ),
-        ),
-        if (mapsUrl.isNotEmpty)
-          TextButton.icon(
-            onPressed: () => launchUrl(Uri.parse(mapsUrl), mode: LaunchMode.externalApplication),
-            icon: const Icon(Icons.map_outlined),
-            label: const Text('Open in Google Maps'),
+            ),
           ),
-      ],
+        ],
+      ),
     );
   }
 }
