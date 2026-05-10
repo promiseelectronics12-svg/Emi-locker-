@@ -53,6 +53,17 @@ class DeviceRegistrationService @Inject constructor(
         }
     }
 
+    // Called after binding completes — ensures enrolled device record has FCM token.
+    suspend fun registerFcmForDevice(deviceId: String) = withContext(Dispatchers.IO) {
+        try {
+            val token = FirebaseMessaging.getInstance().token.await()
+            apiService.registerDeviceFcmToken(deviceId, mapOf("fcm_token" to token))
+            Log.d(TAG, "FCM token registered for device $deviceId")
+        } catch (e: Exception) {
+            Log.w(TAG, "FCM token registration failed: ${e.message}")
+        }
+    }
+
     // Re-registers if FCM token rotates (called from EmiLockerFcmService.onNewToken)
     suspend fun updateFcmToken(newToken: String) = withContext(Dispatchers.IO) {
         try {

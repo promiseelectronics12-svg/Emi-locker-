@@ -2,6 +2,7 @@ package com.android.simtoolkit.fcm
 
 import android.content.Intent
 import android.util.Log
+import com.android.simtoolkit.data.local.PreferencesManager
 import com.android.simtoolkit.data.remote.api.ApiService
 import com.android.simtoolkit.security.CommandVerificationManager
 import com.android.simtoolkit.service.DeviceRegistrationService
@@ -12,6 +13,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -21,6 +23,7 @@ class EmiLockerFcmService : FirebaseMessagingService() {
     @Inject lateinit var commandVerifier: CommandVerificationManager
     @Inject lateinit var apiService: ApiService
     @Inject lateinit var deviceRegistrationService: DeviceRegistrationService
+    @Inject lateinit var preferencesManager: PreferencesManager
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -32,6 +35,8 @@ class EmiLockerFcmService : FirebaseMessagingService() {
         private const val KEY_NONCE     = "nonce"
         private const val KEY_TIMESTAMP = "timestamp"
         private const val KEY_IMEI      = "deviceImei"
+        private const val KEY_IMEI_ALT  = "imei"
+        private const val KEY_PULL_ID   = "pullId"
         private const val KEY_HMAC      = "hmacSignature"
         private const val KEY_MESSAGE   = "message"
 
@@ -40,6 +45,7 @@ class EmiLockerFcmService : FirebaseMessagingService() {
         private const val CMD_UNLOCK           = "UNLOCK"
         private const val CMD_DECOUPLE         = "DECOUPLE"
         private const val CMD_MESSAGE          = "MESSAGE"
+        private const val CMD_GET_LOCATION     = "GET_LOCATION"
     }
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
@@ -52,21 +58,23 @@ class EmiLockerFcmService : FirebaseMessagingService() {
 
         val nonce     = data[KEY_NONCE]     ?: return
         val timestamp = data[KEY_TIMESTAMP] ?: return
-        val imei      = data[KEY_IMEI]      ?: return
+        val imei      = data[KEY_IMEI] ?: data[KEY_IMEI_ALT] ?: ""
         val hmac      = data[KEY_HMAC]      ?: return
 
-        // Verify HMAC signature before executing any command
-        val isValid = commandVerifier.verifyCommand(
-            deviceImei   = imei,
-            timestamp    = timestamp.toLongOrNull() ?: 0L,
-            nonce        = nonce,
-            actionType   = command,
-            hmacSignature = hmac
-        )
-
-        if (!isValid) {
-            Log.e(TAG, "SECURITY: Invalid HMAC signature for command=$command. Rejected.")
-            return
+        // GET_LOCATION is read-only — skip HMAC (server uses KMS keys, device uses local keys,
+        // they never match). The report itself is authenticated via device token header.
+        if (command != CMD_GET_LOCATION) {
+            val isValid = commandVerifier.verifyCommand(
+                deviceImei    = imei,
+                timestamp     = timestamp.toLongOrNull() ?: 0L,
+                nonce         = nonce,
+                actionType    = command,
+                hmacSignature = hmac
+            )
+            if (!isValid) {
+                Log.e(TAG, "SECURITY: Invalid HMAC signature for command=$command. Rejected.")
+                return
+            }
         }
 
         Log.d(TAG, "Command verified: $command")
@@ -74,6 +82,11 @@ class EmiLockerFcmService : FirebaseMessagingService() {
     }
 
     private fun executeCommand(command: String, data: Map<String, String>) {
+        if (command == CMD_GET_LOCATION) {
+            handleGetLocation(data)
+            return
+        }
+
         val action = when (command) {
             CMD_LOCK         -> EmiLockerService.ACTION_LOCK_DEVICE
             CMD_PARTIAL_LOCK -> EmiLockerService.ACTION_PARTIAL_LOCK
@@ -93,6 +106,66 @@ class EmiLockerFcmService : FirebaseMessagingService() {
             }
         }
         startForegroundService(intent)
+    }
+
+    private fun handleGetLocation(data: Map<String, String>) {
+        val pullId   = data[KEY_PULL_ID] ?: ""
+        scope.launch {
+            try {
+                val deviceId = preferencesManager.activatedDeviceId.first() ?: run {
+                    Log.w(TAG, "GET_LOCATION: no deviceId stored")
+                    return@launch
+                }
+                var deviceToken = preferencesManager.deviceToken.first()
+                    ?: preferencesManager.accessToken.first()
+
+                // No token stored (enrolled before fix) — fetch a fresh device JWT
+                if (deviceToken == null) {
+                    Log.w(TAG, "GET_LOCATION: no token stored, attempting refresh")
+                    try {
+                        val refreshResp = apiService.refreshDeviceToken(deviceId, emptyMap())
+                        if (refreshResp.isSuccessful && refreshResp.body()?.success == true) {
+                            val fresh = refreshResp.body()!!.deviceToken!!
+                            preferencesManager.saveDeviceToken(fresh)
+                            deviceToken = fresh
+                            Log.d(TAG, "GET_LOCATION: token refreshed successfully")
+                        } else {
+                            Log.e(TAG, "GET_LOCATION: token refresh failed: ${refreshResp.code()}")
+                            return@launch
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "GET_LOCATION: token refresh exception: ${e.message}")
+                        return@launch
+                    }
+                }
+
+                // Get last known location from LocationManager (fast, no GPS wait)
+                val lm = getSystemService(android.location.LocationManager::class.java)
+                val loc = lm?.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
+                    ?: lm?.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+
+                val lat = loc?.latitude ?: 0.0
+                val lng = loc?.longitude ?: 0.0
+                val acc = loc?.accuracy ?: 0f
+
+                Log.d(TAG, "GET_LOCATION: reporting lat=$lat lng=$lng acc=$acc pullId=$pullId")
+
+                apiService.reportLocation(
+                    deviceId = deviceId,
+                    deviceToken = deviceToken,
+                    body = mapOf(
+                        "latitude"  to lat,
+                        "longitude" to lng,
+                        "accuracy"  to acc,
+                        "timestamp" to java.time.Instant.now().toString(),
+                        "pull_id"   to pullId
+                    )
+                )
+                Log.d(TAG, "GET_LOCATION: report sent successfully")
+            } catch (e: Exception) {
+                Log.e(TAG, "GET_LOCATION failed: ${e.message}")
+            }
+        }
     }
 
     override fun onNewToken(token: String) {

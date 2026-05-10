@@ -66,7 +66,27 @@ interface ApiService {
         @Path("deviceId") deviceId: String,
         @Body body: Map<String, String>
     ): Response<Unit>
+
+    // Reports GPS location back to server in response to a pull request.
+    @POST("api/v1/location/{deviceId}/report")
+    suspend fun reportLocation(
+        @Path("deviceId") deviceId: String,
+        @Header("x-device-token") deviceToken: String,
+        @Body body: Map<String, Any>
+    ): Response<Unit>
+
+    // Fetches a fresh device JWT for already-enrolled devices that have no stored token.
+    @POST("api/v1/device-activation/{deviceId}/refresh-token")
+    suspend fun refreshDeviceToken(
+        @Path("deviceId") deviceId: String,
+        @Body body: Map<String, String>
+    ): Response<DeviceTokenRefreshResponse>
 }
+
+data class DeviceTokenRefreshResponse(
+    @com.google.gson.annotations.SerializedName("success") val success: Boolean,
+    @com.google.gson.annotations.SerializedName("device_token") val deviceToken: String?
+)
 
 data class DevicePreRegisterRequest(
     val imei: String,

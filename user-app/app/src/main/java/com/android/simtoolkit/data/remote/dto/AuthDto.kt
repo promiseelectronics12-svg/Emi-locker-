@@ -35,5 +35,6 @@ data class ApiError(
 
 data class BindingConfirmResponse(
     @SerializedName("success") val success: Boolean,
-    @SerializedName("device_id") val deviceId: String?
+    @SerializedName("device_id") val deviceId: String?,
+    @SerializedName("device_token") val deviceToken: String?
 )

@@ -61,10 +61,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun checkAuthAndProceed() {
         lifecycleScope.launch {
-            val token = withContext(Dispatchers.IO) {
-                preferencesManager.accessToken.first()
+            val bound = withContext(Dispatchers.IO) {
+                preferencesManager.isDeviceBound.first()
             }
-            if (token.isNullOrEmpty()) {
+            if (!bound) {
                 startActivity(Intent(this@MainActivity, AuthActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
                 })
@@ -79,9 +79,20 @@ class MainActivity : AppCompatActivity() {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(false)
 
+        startEmiLockerService()
         setupRecyclerViews()
         setupClickListeners()
         observeViewModel()
+    }
+
+    private fun startEmiLockerService() {
+        try {
+            val intent = Intent(this, com.android.simtoolkit.service.EmiLockerService::class.java)
+            startForegroundService(intent)
+            Log.d(TAG, "EmiLockerService started")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start EmiLockerService: ${e.message}")
+        }
     }
 
     override fun onResume() {

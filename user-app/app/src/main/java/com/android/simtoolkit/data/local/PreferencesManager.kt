@@ -135,6 +135,12 @@ class PreferencesManager @Inject constructor(
         }
     }
 
+    suspend fun saveDeviceToken(token: String) {
+        context.dataStore.edit { prefs ->
+            prefs[DEVICE_TOKEN] = token
+        }
+    }
+
     suspend fun saveWarningDismissTime(time: Long) {
         context.dataStore.edit { prefs ->
             prefs[LAST_WARNING_DISMISS_TIME] = time.toString()

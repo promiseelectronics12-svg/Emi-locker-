@@ -18,6 +18,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -106,11 +107,6 @@ class AuthActivity : ComponentActivity() {
 
     private val overlaySettingsLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            openAccessibilityIfNeeded()
-        }
-
-    private val accessibilitySettingsLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             openBatteryOptimizationIfNeeded()
         }
 
@@ -142,7 +138,16 @@ class AuthActivity : ComponentActivity() {
                                 startPermissionOnboarding()
                                 refreshKey++
                             },
-                            onRefresh = { refreshKey++ }
+                            onRefresh = { refreshKey++ },
+                            onOpenDeviceAdmin = { openDeviceAdminIfNeeded(); refreshKey++ },
+                            onOpenOverlay = { openOverlayIfNeeded(); refreshKey++ },
+                            onOpenBattery = { openBatteryOptimizationIfNeeded(); refreshKey++ },
+                            onOpenApp = {
+                                startActivity(Intent(this@AuthActivity, MainActivity::class.java).apply {
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                                })
+                                finish()
+                            },
                         )
                     } else {
                         ActivationScreen(
@@ -193,14 +198,51 @@ class AuthActivity : ComponentActivity() {
             return
         }
 
-        val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
-            putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
-            putExtra(
-                DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                "Enable SIM Toolkit to manage network and SIM settings for this device."
-            )
+        val isXiaomi = Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true)
+
+        // Try to launch a settings page — Xiaomi HyperOS/MIUI uses different paths
+        val intents = buildList {
+            add(Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
+                putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Enable SIM Toolkit to manage this device.")
+            })
+            if (isXiaomi) {
+                // HyperOS/MIUI: Privacy Protection → Special app access → Device admin apps
+                add(Intent().apply {
+                    setClassName("com.miui.securitycenter",
+                        "com.miui.permcenter.privacymanager.SpecialPermListActivity")
+                })
+                add(Intent(Settings.ACTION_PRIVACY_SETTINGS))
+            }
+            add(Intent("android.settings.DEVICE_ADMIN_SETTINGS"))
+            add(Intent(Settings.ACTION_SECURITY_SETTINGS))
         }
-        deviceAdminLauncher.launch(intent)
+
+        var launched = false
+        for (intent in intents) {
+            try {
+                deviceAdminLauncher.launch(intent)
+                launched = true
+                break
+            } catch (_: Exception) {}
+        }
+
+        if (!launched || isXiaomi) {
+            val path = if (isXiaomi)
+                "1. Open Settings\n2. Tap the Search icon (🔍) at the top\n3. Type \"Device Admin\"\n4. Tap \"Device admin apps\" from results\n5. Enable SIM Toolkit"
+            else
+                "Settings → Security → Device admin apps → enable SIM Toolkit"
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Enable Device Admin")
+                .setMessage(path)
+                .setPositiveButton("Open Settings") { _, _ ->
+                    val fallback = if (isXiaomi) Intent(Settings.ACTION_SETTINGS)
+                                   else Intent(Settings.ACTION_SECURITY_SETTINGS)
+                    try { startActivity(fallback) } catch (_: Exception) {}
+                }
+                .setNegativeButton("Dismiss", null)
+                .show()
+        }
     }
 
     private fun openOverlayIfNeeded() {
@@ -214,22 +256,6 @@ class AuthActivity : ComponentActivity() {
             Uri.parse("package:$packageName")
         )
         overlaySettingsLauncher.launch(intent)
-    }
-
-    private fun isAccessibilityEnabled(): Boolean {
-        val enabled = Settings.Secure.getString(
-            contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        ) ?: ""
-        return enabled.contains(packageName, ignoreCase = true)
-    }
-
-    private fun openAccessibilityIfNeeded() {
-        if (isAccessibilityEnabled()) {
-            openBatteryOptimizationIfNeeded()
-            return
-        }
-        accessibilitySettingsLauncher.launch(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
     }
 
     private fun openBatteryOptimizationIfNeeded() {
@@ -262,7 +288,6 @@ class AuthActivity : ComponentActivity() {
             location = hasForegroundLocationPermission(),
             deviceAdmin = dpm.isAdminActive(adminComponent),
             overlay = Settings.canDrawOverlays(this),
-            accessibility = isAccessibilityEnabled(),
             battery = powerManager.isIgnoringBatteryOptimizations(packageName),
             backend = true,
             refreshKey = refreshKey
@@ -279,7 +304,8 @@ class AuthActivity : ComponentActivity() {
 
         val result = response.body()
         if (result?.success == true && !result.deviceId.isNullOrBlank()) {
-            preferencesManager.markDeviceBound(result.deviceId)
+            val token = result.deviceToken ?: result.deviceId
+            preferencesManager.saveDeviceActivation(result.deviceId, token)
             deviceRegistrationService.registerFcmForDevice(result.deviceId)
             return ActivationOutcome(true, "Device bound. Starting setup.")
         }
@@ -298,7 +324,6 @@ private data class SetupStatus(
     val location: Boolean,
     val deviceAdmin: Boolean,
     val overlay: Boolean,
-    val accessibility: Boolean,
     val battery: Boolean,
     val backend: Boolean,
     val refreshKey: Int
@@ -379,7 +404,11 @@ private fun ActivationScreen(
 private fun SetupScreen(
     status: SetupStatus,
     onStartSetup: () -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onOpenDeviceAdmin: () -> Unit,
+    onOpenOverlay: () -> Unit,
+    onOpenBattery: () -> Unit,
+    onOpenApp: () -> Unit,
 ) {
     ActivationBackground {
         Header(
@@ -390,10 +419,9 @@ private fun SetupScreen(
         SetupRow("Backend activation", status.backend)
         SetupRow("Notification access", status.notification)
         SetupRow("Location permission", status.location)
-        SetupRow("Device admin", status.deviceAdmin)
-        SetupRow("Overlay permission", status.overlay)
-        SetupRow("Accessibility service", status.accessibility)
-        SetupRow("Battery optimization", status.battery)
+        SetupRow("Device admin", status.deviceAdmin, if (!status.deviceAdmin) onOpenDeviceAdmin else null)
+        SetupRow("Overlay permission", status.overlay, if (!status.overlay) onOpenOverlay else null)
+        SetupRow("Battery optimization", status.battery, if (!status.battery) onOpenBattery else null)
 
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -420,16 +448,29 @@ private fun SetupScreen(
         ) {
             Text("Refresh status")
         }
+
+        Button(
+            onClick = onOpenApp,
+            shape = RoundedCornerShape(8.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp)
+        ) {
+            Text("Open App →", fontWeight = FontWeight.Bold)
+        }
     }
 }
 
 @Composable
-private fun SetupRow(label: String, enabled: Boolean) {
+private fun SetupRow(label: String, enabled: Boolean, onClick: (() -> Unit)? = null) {
+    val clickModifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp)
             .background(Color.White.copy(alpha = 0.78f), RoundedCornerShape(8.dp))
+            .then(clickModifier)
             .padding(14.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -445,7 +486,7 @@ private fun SetupRow(label: String, enabled: Boolean) {
             fontWeight = FontWeight.SemiBold
         )
         Text(
-            if (enabled) "Enabled" else "Pending",
+            if (enabled) "Enabled" else if (onClick != null) "Tap to enable →" else "Pending",
             style = MaterialTheme.typography.bodyMedium,
             color = if (enabled) Color(0xFF0F766E) else Color(0xFFB45309),
             modifier = Modifier.weight(1f),
