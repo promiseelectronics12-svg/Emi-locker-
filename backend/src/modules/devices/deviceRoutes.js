@@ -52,6 +52,13 @@ router.post(
   enrollDevice
 );
 
+// GET /devices — alias for /my, used by user app ApiService.getDevices()
+router.get(
+  '/',
+  authenticateToken,
+  getDevicesByOwner
+);
+
 router.get(
   '/my',
   authenticateToken,

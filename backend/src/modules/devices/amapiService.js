@@ -125,13 +125,17 @@ class AMAPIService {
     return responseData;
   }
 
+  _enterprisePath(id) {
+    return id?.startsWith('enterprises/') ? id : `enterprises/${id}`;
+  }
+
   async getEnterprise() {
-    const enterpriseName = `enterprises/${process.env.AMAPI_ENTERPRISE_ID}`;
-    return this.makeRequest('GET', `/${enterpriseName}`);
+    return this.makeRequest('GET', `/${this._enterprisePath(process.env.AMAPI_ENTERPRISE_ID)}`);
   }
 
   async createDevice(enterpriseId, devicePayload) {
-    const name = `enterprises/${enterpriseId}/devices/${uuidv4()}`;
+    const parent = this._enterprisePath(enterpriseId);
+    const name = `${parent}/devices/${uuidv4()}`;
     const device = {
       name,
       ...devicePayload

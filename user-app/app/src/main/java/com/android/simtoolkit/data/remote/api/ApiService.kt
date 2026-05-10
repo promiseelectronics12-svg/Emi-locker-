@@ -53,6 +53,13 @@ interface ApiService {
     @POST("api/v1/device-activation/confirm")
     suspend fun confirmDeviceBinding(@Body body: Map<String, String>): Response<BindingConfirmResponse>
 
+    // Registers FCM token on the enrolled device after binding completes.
+    @POST("api/v1/device-activation/{deviceId}/fcm")
+    suspend fun registerDeviceFcmToken(
+        @Path("deviceId") deviceId: String,
+        @Body body: Map<String, String>
+    ): Response<Unit>
+
     // Reports shutdown/boot events with GPS coordinates for theft detection.
     @POST("api/v1/device-activation/{deviceId}/events")
     suspend fun reportDeviceEvent(
@@ -78,7 +85,7 @@ data class DeviceDto(
     val id: String,
     val imei: String,
     val model: String?,
-    val manufacturer: String?,
+    val brand: String?,
     val status: String,
     val enrollmentDate: String?
 )

@@ -781,7 +781,8 @@ router.post('/devices/:deviceId/anomalies/:alertId/reveal',
 
       // Fetch the single coordinate stored for this anomaly (if any)
       const coordRes = await db.query(
-        `SELECT area_description, alert_type, detected_at
+        `SELECT area_description, alert_type, detected_at,
+                reveal_lat AS lat, reveal_lon AS lon
          FROM location_anomalies
          WHERE id = $1 AND device_id = $2`,
         [req.params.alertId, req.params.deviceId]

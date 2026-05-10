@@ -19,6 +19,7 @@ router.post(
   body('model').isString().trim().isLength({ min: 1, max: 64 }),
   body('imei1').isString().trim().isLength({ min: 15, max: 15 }).isNumeric(),
   body('imei2').optional({ nullable: true }).isString().trim().isLength({ min: 15, max: 15 }).isNumeric(),
+  body('tier').optional().isIn(['standard', 'premium', 'vip']),
   createEnrollment
 );
 
