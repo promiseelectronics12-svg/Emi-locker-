@@ -88,6 +88,7 @@ class LocationService {
           nonce,
           serverId: process.env.SERVER_ID || 'server-001',
           expiresAt,
+          deviceImei: device.imei,
           imei: device.imei,
           hmacSignature: signatureResult.signature,
           signatureProvider: signatureResult.provider,
