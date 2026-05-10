@@ -160,6 +160,24 @@ function emitPaymentRecorded(deviceId, deviceName, amount) {
   pushToManagement('payment_recorded', { deviceId, deviceName, amount, recordedAt: new Date().toISOString() });
 }
 
+function emitLocationReported(device, location) {
+  const payload = {
+    deviceId: device.id,
+    deviceName: device.device_name,
+    imei: device.imei,
+    pullId: location.pullId || null,
+    latitude: location.latitude,
+    longitude: location.longitude,
+    accuracy: location.accuracy,
+    timestamp: location.timestamp || new Date().toISOString(),
+  };
+
+  pushToManagement('location_reported', payload);
+  if (device.dealer_id) {
+    pushToDealer(device.dealer_id, 'location_reported', payload);
+  }
+}
+
 function emitKeyRequested(resellerId, resellerName, requestId, quantity, tier) {
   pushToAdmins('key_requested', {
     requestId,
@@ -195,6 +213,7 @@ module.exports = {
   emitEnrollmentComplete,
   emitGraceExpired,
   emitPaymentRecorded,
+  emitLocationReported,
   emitKeyRequested,
   emitKeyRequestApproved,
 };

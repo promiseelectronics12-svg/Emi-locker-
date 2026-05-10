@@ -287,23 +287,27 @@ async function sendDealerMessage(deviceId, message, dealerId, dealerName, isAdmi
       };
     }
 
-    const rateLimitCheck = await checkAndIncrementDealerMessageRateLimit(deviceId);
+    const sanitizedMessage = sanitizeMessage(message);
+    if (sanitizedMessage.length === 0) {
+      return {
+        success: false,
+        rateLimit: { allowed: true, currentCount: 0, limit: 10, resetAt: new Date() },
+        error: 'Message contains no valid characters'
+      };
+    }
+
+    const rateLimitCheck = await checkAndIncrementDealerMessageRateLimit(deviceId, sanitizedMessage);
 
     if (!rateLimitCheck.allowed) {
       return {
         success: false,
         rateLimit: rateLimitCheck,
-        error: `Daily message limit reached. Limit: ${rateLimitCheck.limit} messages per day.`,
+        error: rateLimitCheck.error || 'Please wait before sending the same message again.',
       };
     }
 
     if (!device.fcm_token) {
       return { success: false, rateLimit: rateLimitCheck, error: 'Device has no FCM token' };
-    }
-
-    const sanitizedMessage = sanitizeMessage(message);
-    if (sanitizedMessage.length === 0) {
-      return { success: false, rateLimit: rateLimitCheck, error: 'Message contains no valid characters' };
     }
 
     const payload = buildDealerMessagePayload(sanitizedMessage, dealerId, dealerName);

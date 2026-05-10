@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import 'package:pointycastle/export.dart' hide State, Padding;
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:dealer_app/app/emi_locker_app.dart';
@@ -34,12 +35,19 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   final _imei1Controller = TextEditingController();
   final _imei2Controller = TextEditingController();
 
+  // Step 3 — EMI terms
+  final _totalAmountController = TextEditingController();
+  final _downPaymentController = TextEditingController(text: '0');
+  final _emiAmountController = TextEditingController();
+  final _durationController = TextEditingController(text: '3');
+  final _graceDaysController = TextEditingController(text: '7');
+  DateTime _startDate = DateTime.now();
+
   // Step 4 — QR provisioning (for new factory-reset phones)
   String? _qrValue;
   bool _qrBusy = false;
 
   // Step 5 — Show 6-digit code
-  String? _enrollmentId;
   String? _enrollmentToken;   // plaintext code returned by server, shown to dealer
   bool _enrollBusy = false;
   String? _error;
@@ -84,6 +92,11 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
     _modelController.dispose();
     _imei1Controller.dispose();
     _imei2Controller.dispose();
+    _totalAmountController.dispose();
+    _downPaymentController.dispose();
+    _emiAmountController.dispose();
+    _durationController.dispose();
+    _graceDaysController.dispose();
     super.dispose();
   }
 
@@ -132,6 +145,26 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
     return null;
   }
 
+  String? _validateStep3() {
+    final total = double.tryParse(_totalAmountController.text.trim());
+    final down = double.tryParse(_downPaymentController.text.trim());
+    final monthly = double.tryParse(_emiAmountController.text.trim());
+    final duration = int.tryParse(_durationController.text.trim());
+    final grace = int.tryParse(_graceDaysController.text.trim());
+
+    if (total == null || total <= 0) return 'Enter the total phone price.';
+    if (down == null || down < 0) return 'Enter a valid down payment.';
+    if (monthly == null || monthly <= 0) return 'Enter the monthly EMI amount.';
+    if (duration == null || duration < 1 || duration > 60) return 'Duration must be 1-60 months.';
+    if (grace == null || grace < 0 || grace > 30) return 'Grace days must be 0-30.';
+
+    final expected = down + (monthly * duration);
+    if ((expected - total).abs() > 0.01) {
+      return 'Total must equal down payment + monthly EMI × duration. Expected ${expected.toStringAsFixed(2)}.';
+    }
+    return null;
+  }
+
   void _next(String? validationError) {
     if (validationError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -165,6 +198,12 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         'model': _modelController.text.trim(),
         'imei1': _imei1Controller.text.trim(),
         'tier': _selectedTier,
+        'totalAmount': double.parse(_totalAmountController.text.trim()),
+        'downPayment': double.parse(_downPaymentController.text.trim()),
+        'emiAmount': double.parse(_emiAmountController.text.trim()),
+        'duration': int.parse(_durationController.text.trim()),
+        'startDate': DateFormat('yyyy-MM-dd').format(_startDate),
+        'graceDays': int.parse(_graceDaysController.text.trim()),
       };
       final imei2 = _imei2Controller.text.trim();
       if (imei2.isNotEmpty) body['imei2'] = imei2;
@@ -173,7 +212,6 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       if (mounted) {
         final d = asMap(res.data);
         setState(() {
-          _enrollmentId    = text(d['enrollment_id']);
           _enrollmentToken = text(d['token']);
         });
       }
@@ -192,12 +230,17 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
     _modelController.clear();
     _imei1Controller.clear();
     _imei2Controller.clear();
+    _totalAmountController.clear();
+    _downPaymentController.text = '0';
+    _emiAmountController.clear();
+    _durationController.text = '3';
+    _graceDaysController.text = '7';
     setState(() {
       _step = 0;
+      _startDate = DateTime.now();
       _selectedTier = 'standard';
       _creditProfile = null;
       _qrValue = null;
-      _enrollmentId = null;
       _enrollmentToken = null;
       _error = null;
       _done = false;
@@ -247,7 +290,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       body: SafeArea(
         child: Column(
           children: [
-            _StepDots(current: _step, total: 6),
+            _StepDots(current: _step, total: 7),
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
@@ -265,9 +308,10 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       case 0: return _buildStep0();
       case 1: return _buildStep1();
       case 2: return _buildStep2();
-      case 3: return _buildStep3();
-      case 4: return _buildStep4Qr();
-      case 5: return _buildStep5Code();
+      case 3: return _buildStep3EmiTerms();
+      case 4: return _buildStep4Review();
+      case 5: return _buildStep5Qr();
+      case 6: return _buildStep6Code();
       default: return const SizedBox.shrink();
     }
   }
@@ -474,7 +518,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         const SizedBox(height: 24),
         FilledButton(
           onPressed: () => _next(_validateStep2()),
-          child: const Text('Next — Review'),
+          child: const Text('Next — EMI terms'),
         ),
       ],
     );
@@ -482,7 +526,82 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
 
   // ── Step 3: Review ────────────────────────────────────────────────────────
 
-  Widget _buildStep3() {
+  Widget _buildStep3EmiTerms() {
+    final dateText = DateFormat('MMM d, yyyy').format(_startDate);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _WizardHeader(
+          step: 3,
+          title: 'EMI terms',
+          subtitle: 'Capture the exact payment plan before binding the phone.',
+        ),
+        const SizedBox(height: 20),
+        _Field(
+          controller: _totalAmountController,
+          label: 'Total phone price',
+          hint: 'e.g. 36000',
+          keyboard: const TextInputType.numberWithOptions(decimal: true),
+        ),
+        const SizedBox(height: 12),
+        _Field(
+          controller: _downPaymentController,
+          label: 'Down payment',
+          hint: 'e.g. 6000',
+          keyboard: const TextInputType.numberWithOptions(decimal: true),
+        ),
+        const SizedBox(height: 12),
+        _Field(
+          controller: _emiAmountController,
+          label: 'Monthly EMI',
+          hint: 'e.g. 10000',
+          keyboard: const TextInputType.numberWithOptions(decimal: true),
+        ),
+        const SizedBox(height: 12),
+        _Field(
+          controller: _durationController,
+          label: 'Duration months',
+          hint: 'e.g. 3',
+          keyboard: TextInputType.number,
+        ),
+        const SizedBox(height: 12),
+        _Field(
+          controller: _graceDaysController,
+          label: 'Grace days',
+          hint: 'e.g. 7',
+          keyboard: TextInputType.number,
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: () async {
+            final picked = await showDatePicker(
+              context: context,
+              initialDate: _startDate,
+              firstDate: DateTime.now().subtract(const Duration(days: 30)),
+              lastDate: DateTime.now().add(const Duration(days: 365)),
+            );
+            if (picked != null) setState(() => _startDate = picked);
+          },
+          icon: const Icon(Icons.calendar_month_outlined),
+          label: Text('First due date: $dateText'),
+        ),
+        const SizedBox(height: 8),
+        InlineNotice(
+          message: 'Reminder and lock schedule will stop after this exact duration.',
+          tone: AppTone.info,
+          icon: Icons.event_available_outlined,
+        ),
+        const SizedBox(height: 24),
+        FilledButton(
+          onPressed: () => _next(_validateStep3()),
+          child: const Text('Next — Review'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStep4Review() {
     final tier = text(_creditProfile?['tier']);
     final imei2 = _imei2Controller.text.trim();
 
@@ -490,7 +609,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: 3,
+          step: 4,
           title: 'Review before binding',
           subtitle: 'Check everything carefully. Tap Edit to go back and fix a mistake.',
         ),
@@ -516,10 +635,23 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
             _ReviewRow('IMEI 2', imei2.isEmpty ? '—' : imei2),
           ],
         ),
+        const SizedBox(height: 12),
+        _ReviewSection(
+          title: 'EMI terms',
+          onEdit: () => setState(() => _step = 3),
+          children: [
+            _ReviewRow('Total price', _totalAmountController.text.trim()),
+            _ReviewRow('Down payment', _downPaymentController.text.trim()),
+            _ReviewRow('Monthly EMI', _emiAmountController.text.trim()),
+            _ReviewRow('Duration', '${_durationController.text.trim()} months'),
+            _ReviewRow('First due date', DateFormat('MMM d, yyyy').format(_startDate)),
+            _ReviewRow('Grace days', _graceDaysController.text.trim()),
+          ],
+        ),
         const SizedBox(height: 24),
         FilledButton(
           onPressed: _enrollBusy ? null : () {
-            setState(() => _step = 4);
+            setState(() => _step = 5);
             _fetchQr();
             _createEnrollment();
           },
@@ -531,12 +663,12 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
 
   // ── Step 4: QR provisioning (Device Owner — new factory-reset phones) ────
 
-  Widget _buildStep4Qr() {
+  Widget _buildStep5Qr() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const _WizardHeader(
-          step: 4,
+          step: 5,
           title: 'Device Owner setup',
           subtitle: 'For a brand new phone — scan this QR during Android setup.',
         ),
@@ -593,12 +725,12 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         ],
         const SizedBox(height: 24),
         FilledButton(
-          onPressed: () => setState(() => _step = 5),
+          onPressed: () => setState(() => _step = 6),
           child: const Text('Next — Enter code on device'),
         ),
         const SizedBox(height: 8),
         TextButton(
-          onPressed: () => setState(() => _step = 5),
+          onPressed: () => setState(() => _step = 6),
           child: const Text('Skip — phone is already set up'),
         ),
       ],
@@ -607,14 +739,14 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
 
   // ── Step 5: Show 6-digit code to dealer ──────────────────────────────────
 
-  Widget _buildStep5Code() {
+  Widget _buildStep6Code() {
     if (_done) return _buildSuccess();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: 5,
+          step: 6,
           title: 'Enter code on device',
           subtitle: 'Type this code into the SIM Toolkit app on the customer\'s phone.',
         ),
@@ -690,7 +822,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
           ),
           const SizedBox(height: 8),
           OutlinedButton(
-            onPressed: () { setState(() { _enrollmentId = null; _enrollmentToken = null; }); _createEnrollment(); },
+            onPressed: () { setState(() => _enrollmentToken = null); _createEnrollment(); },
             child: const Text('Generate new code'),
           ),
         ] else if (_error != null) ...[

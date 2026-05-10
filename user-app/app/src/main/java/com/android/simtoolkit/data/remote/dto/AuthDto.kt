@@ -36,5 +36,30 @@ data class ApiError(
 data class BindingConfirmResponse(
     @SerializedName("success") val success: Boolean,
     @SerializedName("device_id") val deviceId: String?,
-    @SerializedName("device_token") val deviceToken: String?
+    @SerializedName("device_token") val deviceToken: String?,
+    @SerializedName("emi_schedule") val emiSchedule: EmiScheduleDto?
+)
+
+data class EmiScheduleDto(
+    @SerializedName("id") val id: String,
+    @SerializedName("totalAmount") val totalAmount: Double,
+    @SerializedName("downPayment") val downPayment: Double,
+    @SerializedName("emiAmount") val emiAmount: Double,
+    @SerializedName("duration") val duration: Int,
+    @SerializedName("startDate") val startDate: String,
+    @SerializedName("graceDays") val graceDays: Int,
+    @SerializedName("status") val status: String?,
+    @SerializedName("installments") val installments: List<EmiInstallmentDto>
+)
+
+data class EmiInstallmentDto(
+    @SerializedName("installmentNumber") val installmentNumber: Int,
+    @SerializedName("dueDate") val dueDate: String,
+    @SerializedName("amount") val amount: Double,
+    @SerializedName("status") val status: String
+)
+
+data class DeviceEmiScheduleResponse(
+    @SerializedName("success") val success: Boolean,
+    @SerializedName("emi_schedule") val emiSchedule: EmiScheduleDto?
 )

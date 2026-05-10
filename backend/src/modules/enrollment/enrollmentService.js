@@ -19,14 +19,144 @@ function generateSixDigitToken() {
   return String(crypto.randomInt(100000, 999999));
 }
 
+function normalizeEmiTerms({ totalAmount, downPayment, emiAmount, duration, startDate, graceDays }) {
+  const total = Number(totalAmount);
+  const down = Number(downPayment);
+  const monthly = Number(emiAmount);
+  const months = Number.parseInt(duration, 10);
+  const grace = graceDays === undefined || graceDays === null || graceDays === ''
+    ? 7
+    : Number.parseInt(graceDays, 10);
+
+  if (!Number.isFinite(total) || total <= 0) throw new Error('Total amount must be positive.');
+  if (!Number.isFinite(down) || down < 0) throw new Error('Down payment must be zero or more.');
+  if (!Number.isFinite(monthly) || monthly <= 0) throw new Error('Monthly EMI amount must be positive.');
+  if (!Number.isInteger(months) || months < 1 || months > 60) throw new Error('Duration must be 1-60 months.');
+  if (!Number.isInteger(grace) || grace < 0 || grace > 30) throw new Error('Grace days must be 0-30.');
+  if (!startDate || Number.isNaN(new Date(startDate).getTime())) throw new Error('Start date is required.');
+
+  const expected = down + (monthly * months);
+  if (Math.abs(expected - total) > 0.01) {
+    const err = new Error(`Total amount must equal down payment + monthly EMI × duration (${expected.toFixed(2)}).`);
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return {
+    totalAmount: total.toFixed(2),
+    downPayment: down.toFixed(2),
+    emiAmount: monthly.toFixed(2),
+    duration: months,
+    startDate: new Date(startDate).toISOString().slice(0, 10),
+    graceDays: grace
+  };
+}
+
+function addMonths(date, months) {
+  const result = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const originalDay = result.getUTCDate();
+  result.setUTCMonth(result.getUTCMonth() + months);
+  if (result.getUTCDate() !== originalDay) result.setUTCDate(0);
+  return result;
+}
+
+function buildInstallments(schedule) {
+  const startDate = schedule.start_date instanceof Date
+    ? schedule.start_date.toISOString().slice(0, 10)
+    : String(schedule.start_date).slice(0, 10);
+  const start = new Date(`${startDate}T00:00:00.000Z`);
+  const duration = Number(schedule.duration) || 0;
+  const amount = Number(schedule.emi_amount) || 0;
+  return Array.from({ length: duration }, (_, index) => ({
+    installmentNumber: index + 1,
+    dueDate: addMonths(start, index).toISOString().slice(0, 10),
+    amount,
+    status: 'PENDING'
+  }));
+}
+
+function formatSchedule(schedule) {
+  if (!schedule) return null;
+  return {
+    id: schedule.id,
+    totalAmount: Number(schedule.total_amount),
+    downPayment: Number(schedule.down_payment || 0),
+    emiAmount: Number(schedule.emi_amount),
+    duration: Number(schedule.duration),
+    startDate: schedule.start_date instanceof Date
+      ? schedule.start_date.toISOString().slice(0, 10)
+      : String(schedule.start_date).slice(0, 10),
+    graceDays: Number(schedule.grace_days || 0),
+    status: schedule.status,
+    installments: buildInstallments(schedule)
+  };
+}
+
+async function resolveDealerIdentity(dealerId, client = db) {
+  const result = await client.query(
+    `SELECT id, user_id, reseller_id
+     FROM dealers
+     WHERE id = $1 OR user_id = $1
+     LIMIT 1`,
+    [dealerId]
+  );
+
+  const dealer = result.rows[0];
+  const dealerRecordId = dealer?.id || dealerId;
+  const dealerUserId = dealer?.user_id || dealerId;
+
+  return {
+    dealerRecordId,
+    dealerUserId,
+    resellerId: dealer?.reseller_id || null,
+    keyDealerIds: [...new Set([dealerRecordId, dealerUserId].filter(Boolean))]
+  };
+}
+
 /**
  * Dealer submits customer + device info.
  * Server generates a 6-digit code, stores its hash, and returns the
  * plaintext code directly to the dealer app to show on screen.
  * No FCM involved — dealer physically types the code into the user app.
  */
-async function startEnrollment({ dealerId, customer_name, nid_hash, phone_number, brand, model, imei1, imei2, tier }) {
+async function startEnrollment({
+  dealerId,
+  customer_name,
+  nid_hash,
+  phone_number,
+  brand,
+  model,
+  imei1,
+  imei2,
+  tier,
+  totalAmount,
+  downPayment,
+  emiAmount,
+  duration,
+  startDate,
+  graceDays
+}) {
   const keyTier = ['standard', 'premium', 'vip'].includes(tier) ? tier : 'standard';
+  const emiTerms = normalizeEmiTerms({ totalAmount, downPayment, emiAmount, duration, startDate, graceDays });
+  const dealerIdentity = await resolveDealerIdentity(dealerId);
+
+  const stockRow = await db.query(
+    `SELECT id
+     FROM activation_keys
+     WHERE dealer_id = ANY($1::uuid[])
+       AND tier = $2
+       AND status = 'assigned'
+       AND device_id IS NULL
+     LIMIT 1`,
+    [dealerIdentity.keyDealerIds, keyTier]
+  );
+
+  if (!stockRow.rows.length) {
+    const err = new Error(`No ready ${keyTier} activation code available for this dealer.`);
+    err.statusCode = 409;
+    throw err;
+  }
+
   const deviceRow = await db.query(
     `SELECT id, status FROM devices WHERE imei = $1 LIMIT 1`,
     [imei1]
@@ -63,10 +193,14 @@ async function startEnrollment({ dealerId, customer_name, nid_hash, phone_number
   await db.query(
     `INSERT INTO enrollments
        (id, device_id, dealer_id, customer_name, nid_hash, phone_number,
-        brand, model, imei1, imei2, token_hash, tier, status, expires_at, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',$13,NOW())`,
-    [enrollmentId, device.id, dealerId, customer_name, nid_hash, phone_number,
-     brand, model, imei1, imei2 || null, tokenHash, keyTier, expiresAt]
+        brand, model, imei1, imei2, token_hash, tier,
+        total_amount, down_payment, emi_amount, duration, start_date, grace_days,
+        status, expires_at, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pending',$19,NOW())`,
+    [enrollmentId, device.id, dealerIdentity.dealerRecordId, customer_name, nid_hash, phone_number,
+     brand, model, imei1, imei2 || null, tokenHash, keyTier,
+     emiTerms.totalAmount, emiTerms.downPayment, emiTerms.emiAmount, emiTerms.duration, emiTerms.startDate, emiTerms.graceDays,
+     expiresAt]
   );
 
   logger.info('Enrollment started', { enrollmentId, imei: imei1.slice(-4) });
@@ -122,70 +256,137 @@ async function confirmFromDevice({ code, imei }) {
   }
 
   const enrollment = row.rows[0];
+  const client = await db.getClient();
+  let committedEnrollment;
+  let committedDealerIdentity;
+  let consumedKey;
+  let createdSchedule;
 
-  await db.query(
-    `UPDATE devices
-     SET status     = 'enrolled',
-         brand      = $2,
-         model      = $3,
-         dealer_id  = $4,
-         updated_at = NOW()
-     WHERE id = $1`,
-    [enrollment.dev_id, enrollment.brand, enrollment.model, enrollment.dealer_id]
-  );
-
-  await db.query(
-    `UPDATE enrollments SET status = 'confirmed', confirmed_at = NOW() WHERE id = $1`,
-    [enrollment.id]
-  );
-
-  // Consume one activation key of the enrollment's tier for this dealer
   try {
-    const keyTier = enrollment.tier || 'standard';
-    const keyRow = await db.query(
-      `UPDATE activation_keys
-       SET status = 'activated', device_id = $1, activated_at = NOW(), updated_at = NOW()
-       WHERE id = (
-         SELECT id FROM activation_keys
-         WHERE dealer_id = $2
-           AND tier = $3
-           AND status = 'assigned'
-           AND device_id IS NULL
-         ORDER BY created_at ASC
-         LIMIT 1
-       )
-       RETURNING id`,
-      [enrollment.dev_id, enrollment.dealer_id, keyTier]
+    await client.query('BEGIN');
+
+    const lockedRow = await client.query(
+      `SELECT e.*, d.id AS dev_id
+       FROM enrollments e
+       JOIN devices d ON d.id = e.device_id
+       WHERE e.id = $1
+         AND e.status = 'pending'
+         AND e.expires_at > NOW()
+       LIMIT 1
+       FOR UPDATE OF e`,
+      [enrollment.id]
     );
-    if (keyRow.rows.length) {
-      logger.info('Activation key consumed', { keyId: keyRow.rows[0].id, tier: keyTier });
-      await db.query(
-        `UPDATE devices SET activation_key_id = $1 WHERE id = $2`,
-        [keyRow.rows[0].id, enrollment.dev_id]
-      );
-    } else {
-      logger.warn('No available activation key to consume', { dealerId: enrollment.dealer_id, tier: keyTier });
+
+    if (!lockedRow.rows.length) {
+      const err = new Error('Code is incorrect or has expired. Ask your dealer to try again.');
+      err.statusCode = 422;
+      throw err;
     }
-  } catch (keyErr) {
-    logger.warn('Key consumption failed (non-fatal)', { error: keyErr.message });
+
+    committedEnrollment = lockedRow.rows[0];
+    committedDealerIdentity = await resolveDealerIdentity(committedEnrollment.dealer_id, client);
+    const keyTier = committedEnrollment.tier || 'standard';
+
+    const keyRow = await client.query(
+      `SELECT id, reseller_id
+       FROM activation_keys
+       WHERE dealer_id = ANY($1::uuid[])
+         AND tier = $2
+         AND status = 'assigned'
+         AND device_id IS NULL
+       ORDER BY created_at ASC
+       LIMIT 1
+       FOR UPDATE`,
+      [committedDealerIdentity.keyDealerIds, keyTier]
+    );
+
+    if (!keyRow.rows.length) {
+      const err = new Error(`No ready ${keyTier} activation code available for this dealer.`);
+      err.statusCode = 409;
+      throw err;
+    }
+
+    consumedKey = keyRow.rows[0];
+
+    await client.query(
+      `UPDATE activation_keys
+       SET status = 'activated',
+           device_id = $1,
+           activated_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $2`,
+      [committedEnrollment.dev_id, consumedKey.id]
+    );
+
+    await client.query(
+      `UPDATE devices
+       SET status            = 'enrolled',
+           brand             = $2,
+           model             = $3,
+           dealer_id         = $4,
+           reseller_id       = COALESCE($5, reseller_id),
+           activation_key_id = $6,
+           updated_at        = NOW()
+       WHERE id = $1`,
+      [
+        committedEnrollment.dev_id,
+        committedEnrollment.brand,
+        committedEnrollment.model,
+        committedDealerIdentity.dealerRecordId,
+        consumedKey.reseller_id || committedDealerIdentity.resellerId,
+        consumedKey.id
+      ]
+    );
+
+    await client.query(
+      `UPDATE enrollments SET status = 'confirmed', confirmed_at = NOW() WHERE id = $1`,
+      [committedEnrollment.id]
+    );
+
+    const scheduleResult = await client.query(
+      `INSERT INTO emi_schedules
+         (device_id, total_amount, down_payment, emi_amount, duration, start_date, grace_days, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', NOW(), NOW())
+       RETURNING *`,
+      [
+        committedEnrollment.dev_id,
+        committedEnrollment.total_amount,
+        committedEnrollment.down_payment,
+        committedEnrollment.emi_amount,
+        committedEnrollment.duration,
+        committedEnrollment.start_date,
+        committedEnrollment.grace_days
+      ]
+    );
+    createdSchedule = scheduleResult.rows[0];
+
+    await client.query('COMMIT');
+    logger.info('Activation key consumed', { keyId: consumedKey.id, tier: keyTier });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
   }
 
-  logger.info('Device bound via user app', { enrollmentId: enrollment.id, imei: imei ? imei.slice(-4) : 'unknown' });
+  logger.info('Device bound via user app', { enrollmentId: committedEnrollment.id, imei: imei ? imei.slice(-4) : 'unknown' });
 
   try {
-    const devRow = await db.query(`SELECT id, device_name, imei FROM devices WHERE id = $1`, [enrollment.dev_id]);
-    if (devRow.rows.length) emitEnrollmentComplete(devRow.rows[0], enrollment.dealer_id);
+    const devRow = await db.query(`SELECT id, device_name, imei FROM devices WHERE id = $1`, [committedEnrollment.dev_id]);
+    if (devRow.rows.length) emitEnrollmentComplete(devRow.rows[0], committedDealerIdentity.dealerRecordId);
   } catch (_) {}
 
-  // Fetch reseller_id for device token
-  let resellerId = null;
-  try {
-    const dealerRow = await db.query(`SELECT reseller_id FROM dealers WHERE id = $1`, [enrollment.dealer_id]);
-    resellerId = dealerRow.rows[0]?.reseller_id || null;
-  } catch (_) {}
-
-  const deviceToken = createDeviceToken({ deviceId: enrollment.dev_id, dealerId: enrollment.dealer_id, resellerId });
-  return { success: true, device_id: enrollment.dev_id, device_token: deviceToken };
+  const deviceToken = createDeviceToken({
+    deviceId: committedEnrollment.dev_id,
+    dealerId: committedDealerIdentity.dealerRecordId,
+    resellerId: consumedKey.reseller_id || committedDealerIdentity.resellerId
+  });
+  return {
+    success: true,
+    device_id: committedEnrollment.dev_id,
+    device_token: deviceToken,
+    emi_schedule: formatSchedule(createdSchedule)
+  };
 }
 
-module.exports = { startEnrollment, confirmFromDevice };
+module.exports = { startEnrollment, confirmFromDevice, formatSchedule };

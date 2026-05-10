@@ -66,7 +66,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.android.simtoolkit.data.local.PreferencesManager
+import com.android.simtoolkit.data.local.dao.EmiScheduleDao
+import com.android.simtoolkit.data.local.entity.EmiSchedule
 import com.android.simtoolkit.data.remote.NetworkModule
+import com.android.simtoolkit.data.remote.dto.EmiScheduleDto
 import com.android.simtoolkit.device.DeviceAdminReceiver
 import com.android.simtoolkit.presentation.theme.EMILockerTheme
 import com.android.simtoolkit.security.CommandVerificationManager
@@ -75,6 +78,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.LocalDate
+import java.time.ZoneId
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -91,6 +96,9 @@ class AuthActivity : ComponentActivity() {
 
     @Inject
     lateinit var deviceRegistrationService: com.android.simtoolkit.service.DeviceRegistrationService
+
+    @Inject
+    lateinit var emiScheduleDao: EmiScheduleDao
 
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -306,11 +314,36 @@ class AuthActivity : ComponentActivity() {
         if (result?.success == true && !result.deviceId.isNullOrBlank()) {
             val token = result.deviceToken ?: result.deviceId
             preferencesManager.saveDeviceActivation(result.deviceId, token)
+            syncEmiSchedule(result.emiSchedule)
             deviceRegistrationService.registerFcmForDevice(result.deviceId)
             return ActivationOutcome(true, "Device bound. Starting setup.")
         }
 
         return ActivationOutcome(false, "Binding failed. Ask your dealer to generate a new code.")
+    }
+
+    private suspend fun syncEmiSchedule(schedule: EmiScheduleDto?) {
+        if (schedule == null) return
+        val zone = ZoneId.systemDefault()
+        val localRows = schedule.installments
+            .sortedBy { it.installmentNumber }
+            .map { installment ->
+                EmiSchedule(
+                    dueDate = LocalDate.parse(installment.dueDate)
+                        .atStartOfDay(zone)
+                        .toInstant()
+                        .toEpochMilli(),
+                    amount = installment.amount,
+                    status = installment.status.uppercase(),
+                    reminderDays = 7,
+                    warningDays = 3,
+                    overdueAlertDays = 0,
+                    partialLockDays = schedule.graceDays,
+                    fullLockDays = schedule.graceDays + 4
+                )
+            }
+        emiScheduleDao.deleteAllSchedules()
+        emiScheduleDao.insertSchedules(localRows)
     }
 }
 

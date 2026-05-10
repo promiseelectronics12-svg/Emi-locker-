@@ -57,8 +57,12 @@ class DeviceRegistrationService @Inject constructor(
     suspend fun registerFcmForDevice(deviceId: String) = withContext(Dispatchers.IO) {
         try {
             val token = FirebaseMessaging.getInstance().token.await()
-            apiService.registerDeviceFcmToken(deviceId, mapOf("fcm_token" to token))
-            Log.d(TAG, "FCM token registered for device $deviceId")
+            val response = apiService.registerDeviceFcmToken(deviceId, mapOf("fcm_token" to token))
+            if (response.isSuccessful) {
+                Log.d(TAG, "FCM token registered for device $deviceId")
+            } else {
+                Log.w(TAG, "FCM token registration rejected: ${response.code()}")
+            }
         } catch (e: Exception) {
             Log.w(TAG, "FCM token registration failed: ${e.message}")
         }

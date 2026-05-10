@@ -7,6 +7,7 @@ import com.android.simtoolkit.data.remote.api.ApiService
 import com.android.simtoolkit.security.CommandVerificationManager
 import com.android.simtoolkit.service.DeviceRegistrationService
 import com.android.simtoolkit.service.EmiLockerService
+import com.android.simtoolkit.util.LocationHelper
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import dagger.hilt.android.AndroidEntryPoint
@@ -54,16 +55,19 @@ class EmiLockerFcmService : FirebaseMessagingService() {
         val data = remoteMessage.data
         if (data.isEmpty()) return
 
-        val command = data[KEY_COMMAND] ?: return
+        val command = data[KEY_COMMAND] ?: when (data["type"]) {
+            "DEALER_MESSAGE" -> CMD_MESSAGE
+            else -> return
+        }
 
-        val nonce     = data[KEY_NONCE]     ?: return
-        val timestamp = data[KEY_TIMESTAMP] ?: return
         val imei      = data[KEY_IMEI] ?: data[KEY_IMEI_ALT] ?: ""
-        val hmac      = data[KEY_HMAC]      ?: return
 
         // GET_LOCATION is read-only — skip HMAC (server uses KMS keys, device uses local keys,
         // they never match). The report itself is authenticated via device token header.
-        if (command != CMD_GET_LOCATION) {
+        if (command != CMD_GET_LOCATION && command != CMD_MESSAGE) {
+            val nonce     = data[KEY_NONCE]     ?: return
+            val timestamp = data[KEY_TIMESTAMP] ?: return
+            val hmac      = data[KEY_HMAC]      ?: return
             val isValid = commandVerifier.verifyCommand(
                 deviceImei    = imei,
                 timestamp     = timestamp.toLongOrNull() ?: 0L,
@@ -83,6 +87,7 @@ class EmiLockerFcmService : FirebaseMessagingService() {
 
     private fun executeCommand(command: String, data: Map<String, String>) {
         if (command == CMD_GET_LOCATION) {
+            Log.d(TAG, "GET_LOCATION: handling directly from FCM service")
             handleGetLocation(data)
             return
         }
@@ -139,18 +144,19 @@ class EmiLockerFcmService : FirebaseMessagingService() {
                     }
                 }
 
-                // Get last known location from LocationManager (fast, no GPS wait)
-                val lm = getSystemService(android.location.LocationManager::class.java)
-                val loc = lm?.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
-                    ?: lm?.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+                val loc = LocationHelper.getLocationForPull(this@EmiLockerFcmService)
+                if (loc == null) {
+                    Log.e(TAG, "GET_LOCATION: no real location available; not reporting fake 0,0")
+                    return@launch
+                }
 
-                val lat = loc?.latitude ?: 0.0
-                val lng = loc?.longitude ?: 0.0
-                val acc = loc?.accuracy ?: 0f
+                val lat = loc.latitude
+                val lng = loc.longitude
+                val acc = loc.accuracy
 
                 Log.d(TAG, "GET_LOCATION: reporting lat=$lat lng=$lng acc=$acc pullId=$pullId")
 
-                apiService.reportLocation(
+                val reportResp = apiService.reportLocation(
                     deviceId = deviceId,
                     deviceToken = deviceToken,
                     body = mapOf(
@@ -161,7 +167,14 @@ class EmiLockerFcmService : FirebaseMessagingService() {
                         "pull_id"   to pullId
                     )
                 )
-                Log.d(TAG, "GET_LOCATION: report sent successfully")
+                if (reportResp.isSuccessful) {
+                    Log.d(TAG, "GET_LOCATION: report accepted by backend (${reportResp.code()})")
+                } else {
+                    Log.e(
+                        TAG,
+                        "GET_LOCATION: backend rejected report code=${reportResp.code()} body=${reportResp.errorBody()?.string()}"
+                    )
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "GET_LOCATION failed: ${e.message}")
             }
@@ -175,4 +188,3 @@ class EmiLockerFcmService : FirebaseMessagingService() {
         }
     }
 }
-

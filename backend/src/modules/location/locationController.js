@@ -27,14 +27,15 @@ class LocationController {
   async reportLocation(req, res) {
     try {
       const { deviceId } = req.params;
-      const { latitude, longitude, accuracy, timestamp, battery_level } = req.body;
+      const { latitude, longitude, accuracy, timestamp, battery_level, pull_id } = req.body;
 
       const result = await locationService.recordLocationReport(deviceId, {
         latitude,
         longitude,
         accuracy,
         timestamp,
-        battery_level
+        battery_level,
+        pull_id
       });
 
       if (result.alert) {

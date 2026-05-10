@@ -65,7 +65,7 @@ const reportRateLimiter = rateLimit({
 
 const pullRateLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 5,
+  max: 30,
   message: { success: false, error: 'Too many pull requests, please try again later' },
   standardHeaders: true,
   legacyHeaders: false
@@ -73,7 +73,7 @@ const pullRateLimiter = rateLimit({
 
 const historyRateLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 20,
+  max: 60,
   message: { success: false, error: 'Too many history requests, please try again later' },
   standardHeaders: true,
   legacyHeaders: false
@@ -143,6 +143,7 @@ const reportLocationValidation = [
   body('accuracy').isFloat({ min: 0 }).withMessage('Accuracy must be positive'),
   body('timestamp').isISO8601().withMessage('Valid ISO timestamp required'),
   body('battery_level').optional().isInt({ min: 0, max: 100 }).withMessage('Battery level 0-100'),
+  body('pull_id').optional().isString().isLength({ min: 1, max: 128 }),
   validateRequest
 ];
 

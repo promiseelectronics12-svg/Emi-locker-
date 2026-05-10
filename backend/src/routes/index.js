@@ -19,6 +19,7 @@ router.use('/notifications', require('../modules/notifications/notification.rout
 router.use('/alerts', require('./alerts'));
 router.use('/keys', require('../modules/keys/keyRoutes'));
 router.use('/device-activation', require('../modules/deviceActivation/deviceActivationRoutes'));
+router.use('/device', require('../modules/deviceActivation/deviceRuntimeRoutes'));
 router.use('/location', require('../modules/location/locationRoutes'));
 router.use('/fraud', require('../modules/fraud/fraudRoutes'));
 router.use('/evidence', require('./evidence'));

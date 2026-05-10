@@ -81,6 +81,11 @@ interface ApiService {
         @Path("deviceId") deviceId: String,
         @Body body: Map<String, String>
     ): Response<DeviceTokenRefreshResponse>
+
+    @GET("api/v1/device/emi-schedule")
+    suspend fun getDeviceEmiSchedule(
+        @Header("x-device-token") deviceToken: String
+    ): Response<DeviceEmiScheduleResponse>
 }
 
 data class DeviceTokenRefreshResponse(

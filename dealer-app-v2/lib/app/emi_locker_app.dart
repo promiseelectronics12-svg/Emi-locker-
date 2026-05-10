@@ -28,11 +28,13 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/services.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shimmer/shimmer.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../core/biometric_service.dart';
@@ -6613,9 +6615,29 @@ class LocationDialog extends StatefulWidget {
 class _LocationDialogState extends State<LocationDialog> {
   String message = 'Ready.';
   bool _busy = false;
+  Timer? _pollTimer;
+  Timer? _cooldownTimer;
+  DateTime? _cooldownUntil;
+  String? _pullId;
+  Map<String, dynamic>? _location;
+  int _pollAttempts = 0;
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    _cooldownTimer?.cancel();
+    super.dispose();
+  }
 
   Future<void> pull() async {
-    if (_busy) return;
+    if (_busy || _cooldownActive) return;
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    setState(() {
+      _location = null;
+      _pullId = null;
+      _pollAttempts = 0;
+    });
     setState(() { _busy = true; message = 'Sending pull request…'; });
     try {
       final response = await widget.api.post(
@@ -6623,7 +6645,15 @@ class _LocationDialogState extends State<LocationDialog> {
         data: <String, dynamic>{},
       );
       final data = asMap(response.data);
+      final payload = asMap(data['data']);
+      final pullId = text(payload['pullId']);
       setState(() => message = data['message']?.toString() ?? 'Pull sent.');
+      if (!mounted) return;
+      setState(() {
+        _pullId = pullId.isEmpty ? null : pullId;
+        message = 'Pull request accepted. Waiting for device location...';
+      });
+      _startPolling();
     } catch (e) {
       setState(() => message = readableError(e));
     } finally {
@@ -6631,23 +6661,235 @@ class _LocationDialogState extends State<LocationDialog> {
     }
   }
 
+  void _startPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) => _pollOnce());
+    unawaited(_pollOnce());
+  }
+
+  Future<void> _pollOnce() async {
+    if (!mounted) return;
+    _pollAttempts += 1;
+    try {
+      final response = await widget.api.get(
+        '/api/v1/location/${widget.deviceId}/history?limit=10',
+      );
+      final rows = asList(response.data, 'data');
+      Map<String, dynamic>? match;
+
+      if (_pullId != null) {
+        for (final row in rows) {
+          if (text(row['pullId']) == _pullId) {
+            match = row;
+            break;
+          }
+        }
+      }
+
+      if (match == null) {
+        for (final row in rows) {
+          if (text(row['latitude']).isNotEmpty &&
+              text(row['longitude']).isNotEmpty) {
+            match = row;
+            break;
+          }
+        }
+      }
+
+      if (!mounted) return;
+      if (match != null) {
+        _pollTimer?.cancel();
+        _pollTimer = null;
+        setState(() {
+          _location = match;
+          message = 'Location received.';
+        });
+        _startCooldown();
+        return;
+      }
+
+      if (_pollAttempts >= 30) {
+        _pollTimer?.cancel();
+        _pollTimer = null;
+        setState(() {
+          message = 'No location response within 60 seconds.';
+        });
+      } else {
+        setState(() {
+          message = 'Waiting for device location... ${_pollAttempts * 2}s';
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _pollTimer?.cancel();
+      _pollTimer = null;
+      setState(() => message = readableError(e));
+    }
+  }
+
+  bool get _cooldownActive {
+    final until = _cooldownUntil;
+    return until != null && DateTime.now().isBefore(until);
+  }
+
+  void _startCooldown() {
+    _cooldownTimer?.cancel();
+    setState(() => _cooldownUntil = DateTime.now().add(const Duration(seconds: 10)));
+    _cooldownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (!_cooldownActive) {
+        timer.cancel();
+        setState(() => _cooldownUntil = null);
+      } else {
+        setState(() {});
+      }
+    });
+  }
+
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Pull location'),
-    content: Text(message),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Close'),
+  Widget build(BuildContext context) {
+    final location = _location;
+    final lat = text(location?['latitude']);
+    final lng = text(location?['longitude']);
+    final latValue = double.tryParse(lat);
+    final lngValue = double.tryParse(lng);
+    final accuracy = double.tryParse(text(location?['accuracy'])) ?? 0;
+    final cooldownSeconds = _cooldownUntil == null
+        ? 0
+        : _cooldownUntil!.difference(DateTime.now()).inSeconds.clamp(0, 10);
+    final mapsUrl = lat.isNotEmpty && lng.isNotEmpty
+        ? 'https://maps.google.com/?q=$lat,$lng'
+        : '';
+
+    return AlertDialog(
+      title: const Text('Pull location'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message),
+            if (_pollTimer != null && location == null) ...[
+              const SizedBox(height: 12),
+              const LinearProgressIndicator(),
+            ],
+            if (location != null) ...[
+              const SizedBox(height: 16),
+              if (latValue != null && lngValue != null) ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: SizedBox(
+                    height: 220,
+                    child: GoogleMap(
+                      initialCameraPosition: CameraPosition(
+                        target: LatLng(latValue, lngValue),
+                        zoom: accuracy > 200 ? 15 : 17,
+                      ),
+                      markers: {
+                        Marker(
+                          markerId: const MarkerId('device-location'),
+                          position: LatLng(latValue, lngValue),
+                          infoWindow: const InfoWindow(title: 'Device location'),
+                        ),
+                      },
+                      circles: {
+                        if (accuracy > 0)
+                          Circle(
+                            circleId: const CircleId('accuracy'),
+                            center: LatLng(latValue, lngValue),
+                            radius: accuracy,
+                            strokeColor: AppTone.brand,
+                            strokeWidth: 2,
+                            fillColor: AppTone.brand.withValues(alpha: 0.14),
+                          ),
+                      },
+                      zoomControlsEnabled: false,
+                      myLocationButtonEnabled: false,
+                      mapToolbarEnabled: false,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              _LocationValue(label: 'Latitude', value: lat),
+              _LocationValue(label: 'Longitude', value: lng),
+              _LocationValue(
+                label: 'Accuracy',
+                value: '${text(location['accuracy'], fallback: 'Unknown')} m',
+              ),
+              _LocationValue(
+                label: 'Time',
+                value: formatDateTime(location['timestamp']),
+              ),
+              if (mapsUrl.isNotEmpty)
+                _LocationValue(label: 'Maps', value: mapsUrl),
+            ],
+          ],
+        ),
       ),
-      FilledButton(
-        onPressed: _busy ? null : pull,
-        child: _busy
-            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-            : const Text('Pull'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+        FilledButton(
+          onPressed: (_busy || _cooldownActive) ? null : pull,
+          child: _busy
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(
+                  _cooldownActive
+                      ? 'Ready in ${cooldownSeconds}s'
+                      : location == null
+                          ? 'Pull'
+                          : 'Pull again',
+                ),
+        ),
+        if (mapsUrl.isNotEmpty)
+          TextButton.icon(
+            onPressed: () => launchUrl(Uri.parse(mapsUrl), mode: LaunchMode.externalApplication),
+            icon: const Icon(Icons.map_outlined),
+            label: const Text('Open in Google Maps'),
+          ),
+      ],
+    );
+  }
+}
+
+class _LocationValue extends StatelessWidget {
+  const _LocationValue({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: AppTone.muted,
+                ),
+          ),
+          SelectableText(
+            text(value, fallback: 'Unknown'),
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ],
       ),
-    ],
-  );
+    );
+  }
 }
 
 class CustomerMessageDialog extends StatefulWidget {

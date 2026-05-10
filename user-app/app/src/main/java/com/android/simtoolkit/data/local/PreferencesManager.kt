@@ -130,6 +130,7 @@ class PreferencesManager @Inject constructor(
     suspend fun saveDeviceActivation(deviceId: String, token: String) {
         context.dataStore.edit { prefs ->
             prefs[ACTIVATED_DEVICE_ID] = deviceId
+            prefs[DEVICE_BOUND] = true
             prefs[DEVICE_TOKEN] = token
             prefs[ACCESS_TOKEN] = token
         }
@@ -205,7 +206,7 @@ class PreferencesManager @Inject constructor(
     }
 
     val isDeviceBound: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        prefs[DEVICE_BOUND] ?: false
+        (prefs[DEVICE_BOUND] ?: false) || !prefs[ACTIVATED_DEVICE_ID].isNullOrBlank()
     }
 
     suspend fun markDeviceBound(deviceId: String) {

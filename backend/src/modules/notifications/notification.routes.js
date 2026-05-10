@@ -55,7 +55,7 @@ router.post(
       const result = await sendDealerMessage(deviceId, message, dealerId, dealerName, isAdmin, req.user.id);
 
       if (!result.success) {
-        if (result.error && result.error.includes('Daily message limit')) {
+        if (result.rateLimit && result.rateLimit.allowed === false) {
           return res.status(429).json({
             success: false,
             error: result.error,

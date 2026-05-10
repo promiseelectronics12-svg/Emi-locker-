@@ -20,6 +20,12 @@ router.post(
   body('imei1').isString().trim().isLength({ min: 15, max: 15 }).isNumeric(),
   body('imei2').optional({ nullable: true }).isString().trim().isLength({ min: 15, max: 15 }).isNumeric(),
   body('tier').optional().isIn(['standard', 'premium', 'vip']),
+  body('totalAmount').isFloat({ min: 0.01 }),
+  body('downPayment').isFloat({ min: 0 }),
+  body('emiAmount').isFloat({ min: 0.01 }),
+  body('duration').isInt({ min: 1, max: 60 }),
+  body('startDate').isISO8601(),
+  body('graceDays').optional().isInt({ min: 0, max: 30 }),
   createEnrollment
 );
 

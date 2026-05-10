@@ -173,6 +173,7 @@ function buildReminderPayload(daysUntilDue, amountDue, dueDate, dealerContact) {
 function buildDealerMessagePayload(message, dealerId, dealerName) {
   return {
     type: 'DEALER_MESSAGE',
+    command: 'MESSAGE',
     message,
     dealerId,
     dealerName,

@@ -11,9 +11,14 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.android.simtoolkit.R
 import com.android.simtoolkit.data.local.PreferencesManager
+import com.android.simtoolkit.data.local.dao.EmiScheduleDao
+import com.android.simtoolkit.data.local.entity.EmiSchedule
+import com.android.simtoolkit.data.remote.api.ApiService
+import com.android.simtoolkit.data.remote.dto.EmiScheduleDto
 import com.android.simtoolkit.databinding.ActivityMainBinding
 import com.android.simtoolkit.device.LockStateManager
 import com.android.simtoolkit.model.LockState
+import com.android.simtoolkit.service.DeviceRegistrationService
 import com.android.simtoolkit.presentation.screens.dashboard.DashboardUiState
 import com.android.simtoolkit.presentation.screens.dashboard.DashboardViewModel
 import com.android.simtoolkit.presentation.screens.dashboard.NotificationHistoryItem
@@ -29,6 +34,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import java.time.LocalDate
+import java.time.ZoneId
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -47,6 +54,15 @@ class MainActivity : AppCompatActivity() {
 
     @Inject
     lateinit var lockStateManager: LockStateManager
+
+    @Inject
+    lateinit var deviceRegistrationService: DeviceRegistrationService
+
+    @Inject
+    lateinit var apiService: ApiService
+
+    @Inject
+    lateinit var emiScheduleDao: EmiScheduleDao
 
     private lateinit var paymentAdapter: PaymentHistoryAdapter
     private lateinit var notificationAdapter: NotificationHistoryAdapter
@@ -80,9 +96,64 @@ class MainActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(false)
 
         startEmiLockerService()
+        refreshFcmRegistration()
+        refreshEmiSchedule()
         setupRecyclerViews()
         setupClickListeners()
         observeViewModel()
+    }
+
+    private fun refreshFcmRegistration() {
+        lifecycleScope.launch {
+            val deviceId = withContext(Dispatchers.IO) {
+                preferencesManager.activatedDeviceId.first()
+            }
+            if (!deviceId.isNullOrBlank()) {
+                deviceRegistrationService.registerFcmForDevice(deviceId)
+            }
+        }
+    }
+
+    private fun refreshEmiSchedule() {
+        lifecycleScope.launch {
+            try {
+                val token = withContext(Dispatchers.IO) {
+                    preferencesManager.deviceToken.first() ?: preferencesManager.accessToken.first()
+                } ?: return@launch
+                val response = withContext(Dispatchers.IO) {
+                    apiService.getDeviceEmiSchedule(token)
+                }
+                if (response.isSuccessful) {
+                    syncEmiSchedule(response.body()?.emiSchedule)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to refresh EMI schedule: ${e.message}")
+            }
+        }
+    }
+
+    private suspend fun syncEmiSchedule(schedule: EmiScheduleDto?) = withContext(Dispatchers.IO) {
+        if (schedule == null) return@withContext
+        val zone = ZoneId.systemDefault()
+        val rows = schedule.installments
+            .sortedBy { it.installmentNumber }
+            .map { installment ->
+                EmiSchedule(
+                    dueDate = LocalDate.parse(installment.dueDate)
+                        .atStartOfDay(zone)
+                        .toInstant()
+                        .toEpochMilli(),
+                    amount = installment.amount,
+                    status = installment.status.uppercase(),
+                    reminderDays = 7,
+                    warningDays = 3,
+                    overdueAlertDays = 0,
+                    partialLockDays = schedule.graceDays,
+                    fullLockDays = schedule.graceDays + 4
+                )
+            }
+        emiScheduleDao.deleteAllSchedules()
+        emiScheduleDao.insertSchedules(rows)
     }
 
     private fun startEmiLockerService() {

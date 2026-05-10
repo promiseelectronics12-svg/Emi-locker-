@@ -1,69 +1,65 @@
-const { Redis } = require('ioredis');
-
-const redis = new Redis(process.env.UPSTASH_REDIS_URL || process.env.REDIS_URL || 'redis://localhost:6379');
+const recentMessages = new Map();
 
 const DEALER_MESSAGE_LIMIT = 10;
 const DEALER_MESSAGE_WINDOW_SECONDS = 24 * 60 * 60;
+const DUPLICATE_WINDOW_MS = 10 * 1000;
 
-const ATOMIC_RATE_LIMIT_SCRIPT = `
-local key = KEYS[1]
-local limit = tonumber(ARGV[1])
-local window = tonumber(ARGV[2])
+function keyFor(deviceId) {
+  const now = new Date();
+  return `${deviceId}:${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`;
+}
 
-local current = redis.call('INCR', key)
-if current == 1 then
-  redis.call('EXPIRE', key, window)
-end
-
-local ttl = redis.call('TTL', key)
-local resetAt = tonumber(ARGV[3]) + (ttl > 0 and ttl or window) * 1000
-
-if current > limit then
-  return {0, current - 1, limit, resetAt}
-else
-  return {1, current, limit, resetAt}
-end
-`;
-
-async function checkAndIncrementDealerMessageRateLimit(deviceId) {
-  const key = `dealer_message:${deviceId}:${getDateKey()}`;
+async function checkAndIncrementDealerMessageRateLimit(deviceId, message = '') {
+  const key = keyFor(deviceId);
   const now = Date.now();
+  const existing = recentMessages.get(key);
 
-  try {
-    const result = await redis.eval(
-      ATOMIC_RATE_LIMIT_SCRIPT,
-      1,
-      key,
-      DEALER_MESSAGE_LIMIT.toString(),
-      DEALER_MESSAGE_WINDOW_SECONDS.toString(),
-      now.toString()
-    );
-
+  if (
+    existing &&
+    existing.message === message &&
+    now - existing.lastSentAt < DUPLICATE_WINDOW_MS
+  ) {
     return {
-      allowed: result[0] === 1,
-      currentCount: result[1],
-      limit: result[2],
-      resetAt: new Date(result[3]),
-    };
-  } catch (error) {
-    console.error('Redis error in checkAndIncrementDealerMessageRateLimit - allowing request (fail open):', error.message);
-    return {
-      allowed: true,
-      currentCount: 0,
+      allowed: false,
+      currentCount: existing.currentCount,
       limit: DEALER_MESSAGE_LIMIT,
-      resetAt: new Date(now + DEALER_MESSAGE_WINDOW_SECONDS * 1000),
+      resetAt: existing.resetAt,
+      error: 'Duplicate message cooldown active'
     };
   }
+
+  const resetAt = existing?.resetAt && existing.resetAt.getTime() > now
+    ? existing.resetAt
+    : new Date(now + DEALER_MESSAGE_WINDOW_SECONDS * 1000);
+
+  recentMessages.set(key, {
+    currentCount: (existing?.currentCount || 0) + 1,
+    message,
+    lastSentAt: now,
+    resetAt
+  });
+
+  return {
+    allowed: true,
+    currentCount: recentMessages.get(key).currentCount,
+    limit: DEALER_MESSAGE_LIMIT,
+    resetAt
+  };
 }
 
 async function resetDealerMessageCount(deviceId) {
-  const key = `dealer_message:${deviceId}:${getDateKey()}`;
-  await redis.del(key);
+  recentMessages.delete(keyFor(deviceId));
 }
 
-function getDateKey() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+async function checkDealerMessageRateLimit(deviceId) {
+  const existing = recentMessages.get(keyFor(deviceId));
+  const now = Date.now();
+  return {
+    allowed: true,
+    currentCount: existing && existing.resetAt.getTime() > now ? existing.currentCount : 0,
+    limit: DEALER_MESSAGE_LIMIT,
+    resetAt: existing?.resetAt || new Date(now + DEALER_MESSAGE_WINDOW_SECONDS * 1000)
+  };
 }
 
 async function getDealerMessageStats(deviceId) {
@@ -72,24 +68,7 @@ async function getDealerMessageStats(deviceId) {
     todayCount: result.currentCount,
     limit: result.limit,
     remaining: Math.max(0, result.limit - result.currentCount),
-    resetAt: result.resetAt,
-  };
-}
-
-async function checkDealerMessageRateLimit(deviceId) {
-  const key = `dealer_message:${deviceId}:${getDateKey()}`;
-
-  const currentCount = await redis.get(key);
-  const count = currentCount ? parseInt(currentCount, 10) : 0;
-
-  const ttl = await redis.ttl(key);
-  const resetAt = new Date(Date.now() + (ttl > 0 ? ttl * 1000 : DEALER_MESSAGE_WINDOW_SECONDS * 1000));
-
-  return {
-    allowed: count < DEALER_MESSAGE_LIMIT,
-    currentCount: count,
-    limit: DEALER_MESSAGE_LIMIT,
-    resetAt,
+    resetAt: result.resetAt
   };
 }
 
@@ -97,5 +76,5 @@ module.exports = {
   checkAndIncrementDealerMessageRateLimit,
   resetDealerMessageCount,
   getDealerMessageStats,
-  checkDealerMessageRateLimit,
+  checkDealerMessageRateLimit
 };

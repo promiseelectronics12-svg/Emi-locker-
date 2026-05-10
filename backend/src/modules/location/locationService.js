@@ -3,6 +3,7 @@ const logger = require('../../utils/logger');
 const fcmService = require('../notifications/fcm.service');
 const deviceService = require('../devices/deviceService');
 const kmsSigningService = require('../devices/kmsSigningService');
+const { emitLocationReported } = require('../sse/sseService');
 const Queue = require('bull');
 const crypto = require('crypto');
 
@@ -54,6 +55,49 @@ class LocationService {
     const device = await deviceService.getDeviceById(deviceId);
     if (!device) {
       throw new Error('Device not found');
+    }
+
+    await db.query(
+      `UPDATE location_pull_requests
+       SET status = 'expired'
+       WHERE device_id = $1
+         AND status = 'pending'
+         AND expires_at <= NOW()`,
+      [deviceId]
+    );
+
+    const existingPull = await db.query(
+      `SELECT pull_id, expires_at
+       FROM location_pull_requests
+       WHERE device_id = $1
+         AND status = 'pending'
+         AND expires_at > NOW()
+       ORDER BY requested_at DESC
+       LIMIT 1`,
+      [deviceId]
+    );
+
+    await db.query(
+      `DELETE FROM location_pull_requests
+       WHERE id IN (
+         SELECT id FROM location_pull_requests
+         WHERE device_id = $1
+           AND status IN ('expired', 'completed')
+         ORDER BY created_at DESC
+         OFFSET 50
+       )`,
+      [deviceId]
+    );
+
+    if (existingPull.rows.length) {
+      return {
+        pullId: existingPull.rows[0].pull_id,
+        deviceId,
+        status: 'pending',
+        expiresAt: existingPull.rows[0].expires_at,
+        fcm_delivered: false,
+        message: 'A location pull is already pending for this device'
+      };
     }
 
     const pullId = `pull_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -131,7 +175,7 @@ class LocationService {
   }
 
   async recordLocationReport(deviceId, locationData) {
-    const { latitude, longitude, accuracy, timestamp, battery_level } = locationData;
+    const { latitude, longitude, accuracy, timestamp, battery_level, pull_id } = locationData;
 
     // Validate coordinate bounds
     const lat = parseFloat(latitude);
@@ -148,53 +192,77 @@ class LocationService {
       throw new Error('Device not found');
     }
 
-    // Rate-limit: max 1 location submission per 30 seconds per device
-    const lastEntry = await db.query(
-      `SELECT created_at FROM location_reports WHERE device_id = $1 ORDER BY created_at DESC LIMIT 1`,
-      [deviceId]
-    );
-    if (lastEntry.rows.length > 0) {
-      const secondsSinceLast = (Date.now() - new Date(lastEntry.rows[0].created_at).getTime()) / 1000;
-      if (secondsSinceLast < 30) {
-        throw new Error('Location update rate limit exceeded (max 1 per 30 seconds)');
-      }
-    }
-
-    const pendingPull = await db.query(
-      `SELECT id, pull_id FROM location_pull_requests
-       WHERE device_id = $1 AND status = 'pending' AND expires_at > NOW()
-       ORDER BY requested_at DESC LIMIT 1`,
-      [deviceId]
-    );
-
-    // Wrap all writes in a transaction for atomicity
-    await db.query('BEGIN');
+    const client = await db.getClient();
     let locationId;
+    let completedPullId = null;
     try {
+      await client.query('BEGIN');
+
+      await client.query(
+        `UPDATE location_pull_requests
+         SET status = 'expired'
+         WHERE device_id = $1
+           AND status = 'pending'
+           AND expires_at <= NOW()`,
+        [deviceId]
+      );
+
+      const pendingPull = pull_id
+        ? await client.query(
+          `SELECT id, pull_id FROM location_pull_requests
+           WHERE device_id = $1 AND pull_id = $2 AND status = 'pending'
+           LIMIT 1
+           FOR UPDATE`,
+          [deviceId, pull_id]
+        )
+        : await client.query(
+          `SELECT id, pull_id FROM location_pull_requests
+           WHERE device_id = $1 AND status = 'pending' AND expires_at > NOW()
+           ORDER BY requested_at DESC LIMIT 1
+           FOR UPDATE`,
+          [deviceId]
+        );
+
       if (pendingPull.rows.length > 0) {
-        await db.query(
+        completedPullId = pendingPull.rows[0].pull_id;
+        await client.query(
           `UPDATE location_pull_requests SET status = 'completed', responded_at = NOW() WHERE id = $1`,
           [pendingPull.rows[0].id]
         );
       }
 
-      const result = await db.query(
+      const result = await client.query(
         `INSERT INTO location_reports (device_id, latitude, longitude, accuracy, timestamp, battery_level, pull_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id`,
-        [deviceId, lat, lon, accuracy, timestamp, battery_level || null, pendingPull.rows[0]?.pull_id || null]
+        [deviceId, lat, lon, accuracy, timestamp, battery_level || null, completedPullId || pull_id || null]
       );
       locationId = result.rows[0].id;
 
-      await db.query(
+      await client.query(
         `UPDATE devices SET last_location_lat = $1, last_location_lng = $2, last_location_time = $3,
-         battery_level = $4, updated_at = NOW() WHERE id = $5`,
+         last_location_at = NOW(), battery_level = $4, updated_at = NOW() WHERE id = $5`,
         [lat, lon, timestamp, battery_level || null, deviceId]
       );
-      await db.query('COMMIT');
+
+      await client.query(
+        `DELETE FROM location_pull_requests
+         WHERE id IN (
+           SELECT id FROM location_pull_requests
+           WHERE device_id = $1
+             AND status IN ('expired', 'completed')
+           ORDER BY created_at DESC
+           OFFSET 50
+         )`,
+        [deviceId]
+      );
+
+      await client.query('COMMIT');
     } catch (err) {
-      await db.query('ROLLBACK');
+      await client.query('ROLLBACK');
       throw err;
+    } finally {
+      client.release();
     }
 
     // Prune old location history (keep last 10)
@@ -213,6 +281,14 @@ class LocationService {
     }
 
     logger.info(`Location recorded for device ${deviceId}`, { latitude: lat, longitude: lon });
+
+    emitLocationReported(device, {
+      pullId: completedPullId || pull_id || null,
+      latitude: lat,
+      longitude: lon,
+      accuracy,
+      timestamp
+    });
 
     let alert = null;
     let geofenceTriggered = false;

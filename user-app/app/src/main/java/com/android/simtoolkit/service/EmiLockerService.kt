@@ -20,6 +20,7 @@ import com.android.simtoolkit.data.remote.api.ApiService
 import com.android.simtoolkit.device.DeviceAdminReceiver
 import com.android.simtoolkit.device.LockStateManager
 import com.android.simtoolkit.util.LocationHelper
+import com.android.simtoolkit.util.NotificationHelper
 import com.android.simtoolkit.model.LockState
 import com.android.simtoolkit.presentation.AuthActivity
 import dagger.hilt.android.AndroidEntryPoint
@@ -55,6 +56,9 @@ class EmiLockerService : Service() {
     @Inject
     lateinit var apiService: ApiService
 
+    @Inject
+    lateinit var notificationHelper: NotificationHelper
+
     private val dpm: DevicePolicyManager by lazy {
         getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
     }
@@ -84,6 +88,11 @@ class EmiLockerService : Service() {
             ACTION_BROADCAST_MESSAGE -> {
                 val message = intent.getStringExtra(EXTRA_MESSAGE) ?: return START_STICKY
                 Log.d(TAG, "Dealer broadcast message: $message")
+                notificationHelper.showDealerMessageNotification(message)
+            }
+            ACTION_REPORT_LOCATION -> {
+                val pullId = intent.getStringExtra(EXTRA_PULL_ID).orEmpty()
+                serviceScope.launch { reportPulledLocation(pullId) }
             }
             ACTION_VERIFY_OWNERSHIP -> serviceScope.launch { verifyAndReportOwnership() }
             ACTION_REPORT_BOOT -> serviceScope.launch { reportBootEvent() }
@@ -166,6 +175,65 @@ class EmiLockerService : Service() {
         }
     }
 
+    private suspend fun reportPulledLocation(pullId: String) {
+        try {
+            val deviceId = preferencesManager.activatedDeviceId.firstOrNull() ?: run {
+                Log.w(TAG, "GET_LOCATION: no deviceId stored")
+                return
+            }
+
+            var deviceToken = preferencesManager.deviceToken.firstOrNull()
+                ?: preferencesManager.accessToken.firstOrNull()
+
+            if (deviceToken == null) {
+                val refreshResp = apiService.refreshDeviceToken(deviceId, emptyMap())
+                if (refreshResp.isSuccessful && refreshResp.body()?.success == true) {
+                    val fresh = refreshResp.body()!!.deviceToken!!
+                    preferencesManager.saveDeviceToken(fresh)
+                    deviceToken = fresh
+                    Log.d(TAG, "GET_LOCATION: token refreshed successfully")
+                } else {
+                    Log.e(TAG, "GET_LOCATION: token refresh failed: ${refreshResp.code()}")
+                    return
+                }
+            }
+
+            val location = LocationHelper.getLocationForPull(this)
+            if (location == null) {
+                Log.e(TAG, "GET_LOCATION: no real location available; not reporting fake 0,0")
+                return
+            }
+
+            Log.d(
+                TAG,
+                "GET_LOCATION: reporting lat=${location.latitude} lng=${location.longitude} acc=${location.accuracy} pullId=$pullId"
+            )
+
+            val reportResp = apiService.reportLocation(
+                deviceId = deviceId,
+                deviceToken = deviceToken,
+                body = mapOf(
+                    "latitude" to location.latitude,
+                    "longitude" to location.longitude,
+                    "accuracy" to location.accuracy,
+                    "timestamp" to java.time.Instant.now().toString(),
+                    "pull_id" to pullId
+                )
+            )
+
+            if (reportResp.isSuccessful) {
+                Log.d(TAG, "GET_LOCATION: report accepted by backend (${reportResp.code()})")
+            } else {
+                Log.e(
+                    TAG,
+                    "GET_LOCATION: backend rejected report code=${reportResp.code()} body=${reportResp.errorBody()?.string()}"
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "GET_LOCATION failed: ${e.message}")
+        }
+    }
+
     private suspend fun verifyAndReportOwnership() {
         val isOwner = dpm.isDeviceOwnerApp(packageName)
         Log.d(TAG, "Device owner status: $isOwner")
@@ -242,7 +310,9 @@ class EmiLockerService : Service() {
         const val ACTION_BROADCAST_MESSAGE = "com.emilocker.action.BROADCAST_MESSAGE"
         const val ACTION_VERIFY_OWNERSHIP  = "com.emilocker.action.VERIFY_OWNERSHIP"
         const val ACTION_REPORT_BOOT       = "com.emilocker.action.REPORT_BOOT"
+        const val ACTION_REPORT_LOCATION   = "com.emilocker.action.REPORT_LOCATION"
         const val EXTRA_MESSAGE            = "extra_message"
+        const val EXTRA_PULL_ID            = "extra_pull_id"
 
         fun start(context: Context) {
             val intent = Intent(context, EmiLockerService::class.java)
