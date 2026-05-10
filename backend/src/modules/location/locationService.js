@@ -105,7 +105,7 @@ class LocationService {
     await db.query(
       `INSERT INTO location_pull_requests (device_id, pull_id, reason, requested_by, status, requested_at, expires_at)
        VALUES ($1, $2, $3, $4, 'pending', NOW(), $5)`,
-      [deviceId, pullId, reason, userId, expiresAt]
+      [deviceId, pullId, reason || 'manual_pull', userId, expiresAt]
     );
 
     logger.info(`Location pull requested for device ${deviceId}`, { pullId, reason });
