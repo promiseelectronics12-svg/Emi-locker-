@@ -4128,44 +4128,48 @@ class _DealerKeysState extends State<DealerKeys> {
             else ...[
               // Tier cards row — NotificationListener prevents horizontal scroll
               // events from bubbling to the page-level pull-to-refresh handler
-              NotificationListener<ScrollNotification>(
-                onNotification: (_) => true,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  physics: const ClampingScrollPhysics(),
-                  child: Row(
-                    children: [
-                      _KeyTierCard(
-                        tier: 'standard',
-                        assigned: _tierInt(inv, 'standard', 'assigned'),
-                        quota: _tierInt(inv, 'standard', 'quota'),
-                        selected: _tierFilter == 'standard',
-                        onTap: () => setState(() => _tierFilter = _tierFilter == 'standard' ? 'all' : 'standard'),
-                      ),
-                      const SizedBox(width: 12),
-                      _KeyTierCard(
-                        tier: 'premium',
-                        assigned: _tierInt(inv, 'premium', 'assigned'),
-                        quota: _tierInt(inv, 'premium', 'quota'),
-                        selected: _tierFilter == 'premium',
-                        onTap: () => setState(() => _tierFilter = _tierFilter == 'premium' ? 'all' : 'premium'),
-                      ),
-                      const SizedBox(width: 12),
-                      _KeyTierCard(
-                        tier: 'vip',
-                        assigned: _tierInt(inv, 'vip', 'assigned'),
-                        quota: _tierInt(inv, 'vip', 'quota'),
-                        selected: _tierFilter == 'vip',
-                        onTap: () => setState(() => _tierFilter = _tierFilter == 'vip' ? 'all' : 'vip'),
-                      ),
-                    ],
+              RepaintBoundary(
+                child: NotificationListener<ScrollNotification>(
+                  onNotification: (_) => true,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: const ClampingScrollPhysics(),
+                    child: Row(
+                      children: [
+                        _KeyTierCard(
+                          tier: 'standard',
+                          assigned: _tierInt(inv, 'standard', 'assigned'),
+                          quota: _tierInt(inv, 'standard', 'quota'),
+                          selected: _tierFilter == 'standard',
+                          onTap: () => setState(() => _tierFilter = _tierFilter == 'standard' ? 'all' : 'standard'),
+                        ),
+                        const SizedBox(width: 12),
+                        _KeyTierCard(
+                          tier: 'premium',
+                          assigned: _tierInt(inv, 'premium', 'assigned'),
+                          quota: _tierInt(inv, 'premium', 'quota'),
+                          selected: _tierFilter == 'premium',
+                          onTap: () => setState(() => _tierFilter = _tierFilter == 'premium' ? 'all' : 'premium'),
+                        ),
+                        const SizedBox(width: 12),
+                        _KeyTierCard(
+                          tier: 'vip',
+                          assigned: _tierInt(inv, 'vip', 'assigned'),
+                          quota: _tierInt(inv, 'vip', 'quota'),
+                          selected: _tierFilter == 'vip',
+                          onTap: () => setState(() => _tierFilter = _tierFilter == 'vip' ? 'all' : 'vip'),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
               const SizedBox(height: 16),
               Section(
                 title: 'Activation capacity',
-                child: _KeyCapacitySummary(inv: inv, tierFilter: _tierFilter),
+                child: RepaintBoundary(
+                  child: _KeyCapacitySummary(inv: inv, tierFilter: _tierFilter),
+                ),
               ),
             ],
           ],
@@ -10081,17 +10085,17 @@ class _PageState extends State<Page> with SingleTickerProviderStateMixin {
   bool _handleScroll(ScrollNotification n) {
     if (widget.reload == null || _refreshing) return false;
     if (n is OverscrollNotification && n.metrics.extentBefore < 1.0 && n.overscroll < 0) {
-      setState(() {
-        _pullOffset = (_pullOffset + (-n.overscroll) * 0.55).clamp(0.0, 110.0);
-      });
-    } else if (n is ScrollUpdateNotification && (n.scrollDelta ?? 0) > 0) {
-      setState(() {
-        _pullOffset = (_pullOffset - n.scrollDelta! * 0.5).clamp(0.0, 110.0);
-      });
+      final next = (_pullOffset + (-n.overscroll) * 0.55).clamp(0.0, 110.0);
+      if (next != _pullOffset) setState(() => _pullOffset = next);
+    } else if (n is ScrollUpdateNotification && (n.scrollDelta ?? 0) > 0 && _pullOffset > 0) {
+      // Only setState when we're actually collapsing the pull indicator —
+      // never during normal scroll (avoids re-triggering .animate() on children).
+      final next = (_pullOffset - n.scrollDelta! * 0.5).clamp(0.0, 110.0);
+      if (next != _pullOffset) setState(() => _pullOffset = next);
     } else if (n is ScrollEndNotification) {
       if (_pullOffset >= 80) {
         _onRefresh();
-      } else {
+      } else if (_pullOffset > 0) {
         setState(() => _pullOffset = 0);
       }
     }
