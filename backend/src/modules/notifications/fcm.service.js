@@ -44,11 +44,15 @@ async function sendToDevice(fcmToken, payload) {
     ),
     android: {
       priority: 'high',
-      notification: {
-        channelId: 'emi_locker_high_priority',
-        defaultSound: true,
-        defaultVibrateTimings: true,
-      },
+      // Only set android.notification for actual notification messages.
+      // Setting it on data-only messages prevents onMessageReceived from firing in background.
+      ...(payload.title && payload.body ? {
+        notification: {
+          channelId: 'emi_locker_high_priority',
+          defaultSound: true,
+          defaultVibrateTimings: true,
+        },
+      } : {}),
     },
     apns: {
       payload: {
