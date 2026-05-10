@@ -145,9 +145,14 @@ async function connectRedis() {
 // Eagerly connect on import so the server fails fast if Redis is down
 connectRedis().catch(() => {}); // errors already handled inside connectRedis
 
+// Non-Redis helpers that must NOT be delegated to the Redis instance
+const _nonRedisProps = { createClient: null, connectRedis: null };
+
 // Proxy: callers do `redis.get(...)` without awaiting connectRedis() themselves
 const proxy = new Proxy({}, {
   get(_target, prop) {
+    // Pass through known module-level exports without delegating to Redis instance
+    if (prop in _nonRedisProps) return _nonRedisProps[prop];
     const instance = _redis || client;
     const val = instance[prop];
     return typeof val === 'function' ? val.bind(instance) : val;
@@ -172,6 +177,10 @@ function createClient() {
   c.on('error', (err) => console.error('Redis queue client error:', err.message));
   return c;
 }
+
+// Register into proxy passthrough map
+_nonRedisProps.createClient  = createClient;
+_nonRedisProps.connectRedis  = connectRedis;
 
 module.exports = proxy;
 module.exports.createClient  = createClient;
