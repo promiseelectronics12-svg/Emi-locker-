@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pointycastle/export.dart' hide State, Padding;
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:dealer_app/app/emi_locker_app.dart';
 
 class BindDeviceWizard extends StatefulWidget {
@@ -33,7 +34,11 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   final _imei1Controller = TextEditingController();
   final _imei2Controller = TextEditingController();
 
-  // Step 4 — Show 6-digit code
+  // Step 4 — QR provisioning (for new factory-reset phones)
+  String? _qrValue;
+  bool _qrBusy = false;
+
+  // Step 5 — Show 6-digit code
   String? _enrollmentId;
   String? _enrollmentToken;   // plaintext code returned by server, shown to dealer
   bool _enrollBusy = false;
@@ -191,12 +196,26 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       _step = 0;
       _selectedTier = 'standard';
       _creditProfile = null;
+      _qrValue = null;
       _enrollmentId = null;
       _enrollmentToken = null;
       _error = null;
       _done = false;
     });
     _loadInventory();
+  }
+
+  Future<void> _fetchQr() async {
+    setState(() { _qrBusy = true; _qrValue = null; });
+    try {
+      final res = await widget.api.post('/api/v1/dealer/enrollment-qr');
+      final d = asMap(res.data);
+      if (mounted) setState(() => _qrValue = text(d['qr_value']));
+    } catch (_) {
+      if (mounted) setState(() => _qrValue = '');
+    } finally {
+      if (mounted) setState(() => _qrBusy = false);
+    }
   }
 
   String _maskNid(String nid) {
@@ -228,7 +247,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       body: SafeArea(
         child: Column(
           children: [
-            _StepDots(current: _step, total: 5),
+            _StepDots(current: _step, total: 6),
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
@@ -247,7 +266,8 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       case 1: return _buildStep1();
       case 2: return _buildStep2();
       case 3: return _buildStep3();
-      case 4: return _buildStep4Code();
+      case 4: return _buildStep4Qr();
+      case 5: return _buildStep5Code();
       default: return const SizedBox.shrink();
     }
   }
@@ -499,25 +519,102 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         const SizedBox(height: 24),
         FilledButton(
           onPressed: _enrollBusy ? null : () {
-            _createEnrollment();
             setState(() => _step = 4);
+            _fetchQr();
+            _createEnrollment();
           },
-          child: const Text('Confirm and generate code'),
+          child: const Text('Confirm and generate codes'),
         ),
       ],
     );
   }
 
-  // ── Step 4: Show 6-digit code to dealer ──────────────────────────────────
+  // ── Step 4: QR provisioning (Device Owner — new factory-reset phones) ────
 
-  Widget _buildStep4Code() {
+  Widget _buildStep4Qr() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _WizardHeader(
+          step: 4,
+          title: 'Device Owner setup',
+          subtitle: 'For a brand new phone — scan this QR during Android setup.',
+        ),
+        const SizedBox(height: 20),
+        if (_qrBusy)
+          const Center(child: Padding(
+            padding: EdgeInsets.all(40),
+            child: CircularProgressIndicator(),
+          ))
+        else if (_qrValue != null && _qrValue!.isNotEmpty) ...[
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppTone.line),
+              ),
+              child: QrImageView(
+                data: _qrValue!,
+                version: QrVersions.auto,
+                size: 220,
+                backgroundColor: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppTone.page,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('For brand new phones:',
+                    style: TextStyle(fontWeight: FontWeight.w700, color: AppTone.ink, fontSize: 13)),
+                SizedBox(height: 8),
+                _Step('1', 'Power on the new phone'),
+                _Step('2', 'On the Welcome screen — tap 6 times quickly'),
+                _Step('3', 'Camera appears — scan this QR code'),
+                _Step('4', 'Phone sets up automatically with Device Owner'),
+                _Step('5', 'SIM Toolkit installs by itself'),
+              ],
+            ),
+          ),
+        ] else ...[
+          const InlineNotice(
+            message: 'QR setup not available. Use the 6-digit code on the next screen instead.',
+            tone: AppTone.warning,
+            icon: Icons.warning_amber_rounded,
+          ),
+        ],
+        const SizedBox(height: 24),
+        FilledButton(
+          onPressed: () => setState(() => _step = 5),
+          child: const Text('Next — Enter code on device'),
+        ),
+        const SizedBox(height: 8),
+        TextButton(
+          onPressed: () => setState(() => _step = 5),
+          child: const Text('Skip — phone is already set up'),
+        ),
+      ],
+    );
+  }
+
+  // ── Step 5: Show 6-digit code to dealer ──────────────────────────────────
+
+  Widget _buildStep5Code() {
     if (_done) return _buildSuccess();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: 4,
+          step: 5,
           title: 'Enter code on device',
           subtitle: 'Type this code into the SIM Toolkit app on the customer\'s phone.',
         ),
