@@ -1,6 +1,14 @@
 const Queue = require('bull');
 const cron = require('node-cron');
 const logger = require('../../utils/logger');
+const { createClient } = require('../../config/redis');
+
+// Bull createClient factory — all internal ioredis connections get error handlers
+const bullCreateClient = (type) => {
+  const c = createClient();
+  c.on('error', (err) => logger.warn(`Bull Redis (${type}) error: ${err.message}`));
+  return c;
+};
 
 const FRAUD_WINDOW_DAYS = 5;
 const FRAUD_WINDOW_MS = FRAUD_WINDOW_DAYS * 24 * 60 * 60 * 1000;
@@ -16,7 +24,7 @@ let cronFallbackActive = false;
 
 function getFraudWindowQueue() {
   if (!fraudWindowQueue) {
-    fraudWindowQueue = new Queue('decoupling-fraud-window', process.env.BULL_REDIS_URL || process.env.UPSTASH_REDIS_URL || process.env.REDIS_URL || 'redis://localhost:6379', {
+    fraudWindowQueue = new Queue('decoupling-fraud-window', { createClient: bullCreateClient,
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: 'exponential', delay: 60000 },
@@ -38,7 +46,7 @@ function getFraudWindowQueue() {
 
 function getAdminNotifyQueue() {
   if (!adminNotifyQueue) {
-    adminNotifyQueue = new Queue('decoupling-admin-notify', process.env.BULL_REDIS_URL || process.env.UPSTASH_REDIS_URL || process.env.REDIS_URL || 'redis://localhost:6379', {
+    adminNotifyQueue = new Queue('decoupling-admin-notify', { createClient: bullCreateClient,
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: 'exponential', delay: 60000 },
@@ -60,7 +68,7 @@ function getAdminNotifyQueue() {
 
 function getAMAPIRetryQueue() {
   if (!amapiRetryQueue) {
-    amapiRetryQueue = new Queue('decoupling-amapi-retry', process.env.BULL_REDIS_URL || process.env.UPSTASH_REDIS_URL || process.env.REDIS_URL || 'redis://localhost:6379', {
+    amapiRetryQueue = new Queue('decoupling-amapi-retry', { createClient: bullCreateClient,
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: 'exponential', delay: 60000 },

@@ -158,7 +158,7 @@ const proxy = new Proxy({}, {
 // Bull requires separate subscriber + blocking connections; sharing the main
 // client with it causes ENOTCONN errors.
 function createClient() {
-  return new Redis(connectionUrl, {
+  const c = new Redis(connectionUrl, {
     ...tlsOptions,
     lazyConnect: true,
     maxRetriesPerRequest: null,
@@ -169,6 +169,8 @@ function createClient() {
       return Math.min(times * 300, 3000);
     },
   });
+  c.on('error', (err) => console.error('Redis queue client error:', err.message));
+  return c;
 }
 
 module.exports = proxy;
