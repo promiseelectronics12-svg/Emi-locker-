@@ -168,6 +168,11 @@ Color roleAccentLight(AppUser user) =>
 Future<void> bootstrapEmiLockerApp() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: '.env');
+  // Lock to portrait — the gyroscope should never rotate the dealer UI.
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
   runApp(const EmiLockerApp());
 }
 
@@ -4120,6 +4125,7 @@ class _DealerKeysState extends State<DealerKeys> {
                 onNotification: (_) => true,
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
+                  physics: const ClampingScrollPhysics(),
                   child: Row(
                     children: [
                       _KeyTierCard(
@@ -4151,12 +4157,8 @@ class _DealerKeysState extends State<DealerKeys> {
               ),
               const SizedBox(height: 16),
               Section(
-                title: 'Key inventory',
-                child: DealerKeyInventory(
-                  keys: _tierFilter == 'all'
-                      ? keys
-                      : keys.where((k) => text(k['tier']) == _tierFilter).toList(),
-                ),
+                title: 'Activation capacity',
+                child: _KeyCapacitySummary(inv: inv, tierFilter: _tierFilter),
               ),
             ],
           ],
@@ -4168,6 +4170,131 @@ class _DealerKeysState extends State<DealerKeys> {
   int _tierInt(Map<String, dynamic> inv, String tier, String field) {
     final t = asMap(inv[tier]);
     return int.tryParse(t[field]?.toString() ?? '0') ?? 0;
+  }
+}
+
+// ── Key Capacity Summary ──────────────────────────────────────────────────────
+
+class _KeyCapacitySummary extends StatelessWidget {
+  const _KeyCapacitySummary({required this.inv, required this.tierFilter});
+  final Map<String, dynamic> inv;
+  final String tierFilter;
+
+  static const _tiers = ['standard', 'premium', 'vip'];
+  static const _tierLabel = {'standard': 'Standard', 'premium': 'Premium', 'vip': 'VIP'};
+  static const _tierIcon = {
+    'standard': Icons.vpn_key_outlined,
+    'premium': Icons.stars_outlined,
+    'vip': Icons.workspace_premium_outlined,
+  };
+  static const _tierColor = {
+    'standard': Color(0xFF8E8E93),
+    'premium': Color(0xFF0A84FF),
+    'vip': Color(0xFFBF5AF2),
+  };
+
+  int _val(String tier, String field) {
+    final t = inv[tier];
+    if (t == null) return 0;
+    return int.tryParse((t as Map)[field]?.toString() ?? '0') ?? 0;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tiers = tierFilter == 'all' ? _tiers : [tierFilter];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ...tiers.map((tier) {
+          final assigned = _val(tier, 'assigned');
+          final quota = _val(tier, 'quota');
+          final activated = _val(tier, 'activated');
+          final progress = quota > 0 ? (assigned / quota).clamp(0.0, 1.0) : 0.0;
+          final color = _tierColor[tier]!;
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: color.withValues(alpha: 0.18)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(_tierIcon[tier], size: 16, color: color),
+                      const SizedBox(width: 8),
+                      Text(_tierLabel[tier]!, style: AppText.titleSm(color: color)),
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '$assigned remaining',
+                          style: AppText.captionBold(color: color),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(
+                      value: progress,
+                      minHeight: 6,
+                      backgroundColor: color.withValues(alpha: 0.12),
+                      valueColor: AlwaysStoppedAnimation(color),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _CapFact(label: 'Quota', value: '$quota', color: AppTone.muted),
+                      const SizedBox(width: 20),
+                      _CapFact(label: 'Ready', value: '$assigned', color: color),
+                      const SizedBox(width: 20),
+                      _CapFact(label: 'Used', value: '$activated', color: AppTone.muted),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            'Keys are generated by your reseller. Contact them to increase quota.',
+            style: AppText.caption(),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CapFact extends StatelessWidget {
+  const _CapFact({required this.label, required this.value, required this.color});
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: AppText.label(color: AppTone.muted)),
+        const SizedBox(height: 2),
+        Text(value, style: AppText.titleSm(color: color)),
+      ],
+    );
   }
 }
 
@@ -4759,16 +4886,30 @@ class _PadtSupportPanelState extends State<_PadtSupportPanel> {
         DropdownButtonFormField<String>(
           key: const ValueKey('padt_device_selector'),
           value: _selectedDeviceId,
+          isExpanded: true,
           decoration: const InputDecoration(
             labelText: 'Select device',
             prefixIcon: Icon(Icons.phone_android_outlined),
           ),
-          items: devices.map((d) {
+          selectedItemBuilder: (context) => devices.map((d) {
             final label =
                 '${text(d['device_name'] ?? d['model'], fallback: 'Device')} — ${text(d['imei'], fallback: '')}';
+            return Text(label, overflow: TextOverflow.ellipsis, maxLines: 1);
+          }).toList(),
+          items: devices.map((d) {
+            final name = text(d['device_name'] ?? d['model'], fallback: 'Device');
+            final imei = text(d['imei'], fallback: '');
             return DropdownMenuItem(
               value: text(d['id']),
-              child: Text(label, overflow: TextOverflow.ellipsis),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(name, style: AppText.bodyBold(), overflow: TextOverflow.ellipsis),
+                  if (imei.isNotEmpty)
+                    Text(imei, style: AppText.mono(size: 11, color: AppTone.muted), overflow: TextOverflow.ellipsis),
+                ],
+              ),
             );
           }).toList(),
           onChanged: (v) {
