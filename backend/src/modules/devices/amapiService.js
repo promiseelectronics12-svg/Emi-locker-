@@ -47,48 +47,10 @@ class AMAPIService {
   }
 
   createCertificatePinningAgent() {
-    return new https.Agent({
-      rejectUnauthorized: true,
-      checkServerIdentity: (host, cert) => {
-        const trustedHosts = ['androidmanagement.googleapis.com'];
-        if (!trustedHosts.includes(host)) {
-          const error = new Error(`Certificate pinning: host ${host} not trusted`);
-          error.code = 'CERT_HOST_NOT_TRUSTED';
-          return error;
-        }
-
-        const subject = cert.subject || {};
-        const commonName = (subject.CN || '').toLowerCase();
-
-        if (!trustedHosts.some(h => commonName.includes(h))) {
-          const error = new Error(`Certificate pinning: CN ${commonName} not trusted for host ${host}`);
-          error.code = 'CERT_CN_NOT_TRUSTED';
-          return error;
-        }
-
-        const trustedFingerprints = GOOGLE_ROOT_CERT_PINS.map(pin => pin.replace(/:/g, '').toUpperCase());
-        const certFingerprint = (cert.fingerprint?.toUpperCase() || '').replace(/:/g, '');
-
-        if (!trustedFingerprints.includes(certFingerprint)) {
-          const error = new Error(`Certificate pinning: fingerprint not trusted for host ${host}`);
-          error.code = 'CERT_FINGERPRINT_NOT_TRUSTED';
-          return error;
-        }
-
-        const trustedIssuers = ['google', 'google trust services'];
-        const issuer = cert.issuer || {};
-        const issuerOrg = (issuer.O || '').toLowerCase();
-        const isTrustedIssuer = trustedIssuers.some(t => issuerOrg.includes(t));
-
-        if (!isTrustedIssuer) {
-          const error = new Error(`Certificate issuer not trusted: ${issuerOrg}`);
-          error.code = 'CERT_NOT_TRUSTED';
-          return error;
-        }
-
-        return undefined;
-      }
-    });
+    // Standard TLS verification — Node's built-in CA bundle covers Google's certs.
+    // Custom fingerprint pinning was broken (compared SHA-1 cert.fingerprint
+    // against SHA-256 pins, always failing). Removed the broken check.
+    return new https.Agent({ rejectUnauthorized: true });
   }
 
   async initialize() {
@@ -204,17 +166,19 @@ class AMAPIService {
 
   async createEnrollmentToken(enterpriseId, options = {}) {
     const token = {
-      allowsPersonalData: false,
+      allowsPersonalUsage: 'DISALLOW_PERSONAL_USAGE',
       duration: options.duration || '86400s',
       ownership: 'DEVICE_OWNER',
-      qrCode: options.qrCode || true
     };
 
     if (options.user) {
       token.user = options.user;
     }
 
-    return this.makeRequest('POST', `/${enterpriseId}/enrollmentTokens`, token);
+    const parent = enterpriseId.startsWith('enterprises/')
+      ? enterpriseId
+      : `enterprises/${enterpriseId}`;
+    return this.makeRequest('POST', `/${parent}/enrollmentTokens`, token);
   }
 
   async revokeEnrollmentToken(enterpriseId, token) {
