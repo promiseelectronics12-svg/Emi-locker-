@@ -8,7 +8,14 @@ const { authenticateToken } = require('../../middleware/auth');
 const { requireRole } = require('../../middleware/rbac');
 const { validateRequest } = require('../../middleware/validation');
 const locationController = require('./locationController');
-const { deviceIdParam, validateRequest: validateDeviceRequest } = require('../devices/deviceController');
+const { param: paramValidator } = require('express-validator');
+const locationDeviceIdParam = paramValidator('deviceId').isUUID().withMessage('Valid device ID required');
+const validateLocationDeviceId = (req, res, next) => {
+  const { validationResult } = require('express-validator');
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+  next();
+};
 
 async function validateDeviceToken(req, res, next) {
   const deviceToken = req.headers['x-device-token'];
@@ -163,8 +170,8 @@ router.post(
   requireRole('admin', 'dealer', 'reseller'),
   pullRateLimiter,
   verifyDeviceOwnership,
-  deviceIdParam,
-  validateDeviceRequest,
+  locationDeviceIdParam,
+  validateLocationDeviceId,
   pullLocationValidation,
   locationController.pullLocation
 );
@@ -173,8 +180,8 @@ router.post(
   '/:deviceId/report',
   reportRateLimiter,
   validateDeviceToken,
-  deviceIdParam,
-  validateDeviceRequest,
+  locationDeviceIdParam,
+  validateLocationDeviceId,
   reportLocationValidation,
   locationController.reportLocation
 );
@@ -185,8 +192,8 @@ router.get(
   requireRole('admin', 'dealer', 'reseller'),
   historyRateLimiter,
   verifyDeviceOwnership,
-  deviceIdParam,
-  validateDeviceRequest,
+  locationDeviceIdParam,
+  validateLocationDeviceId,
   locationController.getLocationHistory
 );
 
@@ -196,8 +203,8 @@ router.post(
   requireRole('admin', 'dealer', 'reseller'),
   geofenceSetRateLimiter,
   verifyDeviceOwnership,
-  deviceIdParam,
-  validateDeviceRequest,
+  locationDeviceIdParam,
+  validateLocationDeviceId,
   setGeofenceValidation,
   locationController.setGeofence
 );
@@ -208,8 +215,8 @@ router.get(
   requireRole('admin', 'dealer', 'reseller'),
   geofenceGetRateLimiter,
   verifyDeviceOwnership,
-  deviceIdParam,
-  validateDeviceRequest,
+  locationDeviceIdParam,
+  validateLocationDeviceId,
   locationController.getGeofence
 );
 
@@ -219,8 +226,8 @@ router.delete(
   requireRole('admin', 'dealer', 'reseller'),
   geofenceDeleteRateLimiter,
   verifyDeviceOwnership,
-  deviceIdParam,
-  validateDeviceRequest,
+  locationDeviceIdParam,
+  validateLocationDeviceId,
   locationController.deleteGeofence
 );
 
@@ -230,8 +237,8 @@ router.post(
   '/:deviceId/anomaly',
   reportRateLimiter,
   validateDeviceToken,
-  deviceIdParam,
-  validateDeviceRequest,
+  locationDeviceIdParam,
+  validateLocationDeviceId,
   body('alert_type').isIn([
     'UNUSUAL_LOCATION', 'IMPOSSIBLE_TRAVEL', 'NEW_REGION',
     'RESET_WITH_RELOCATION', 'SIM_CHANGE_RELOCATION', 'EXTENDED_OFFLINE'

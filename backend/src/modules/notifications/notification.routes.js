@@ -45,13 +45,13 @@ router.post(
     const isAdmin = req.user.role === ROLES.ADMIN;
     const dealerName = req.user.name || 'Dealer';
 
-    // Resolve actual dealers.id — JWT only has users.id
-    const dealerRow = await db.query(
-      `SELECT id FROM dealers WHERE user_id = $1 LIMIT 1`, [req.user.id]
-    );
-    const dealerId = dealerRow.rows[0]?.id || req.user.id;
-
     try {
+      // Resolve actual dealers.id — JWT only has users.id
+      const dealerRow = await db.query(
+        `SELECT id FROM dealers WHERE user_id = $1 LIMIT 1`, [req.user.id]
+      );
+      const dealerId = dealerRow.rows[0]?.id || req.user.id;
+
       const result = await sendDealerMessage(deviceId, message, dealerId, dealerName, isAdmin);
 
       if (!result.success) {
