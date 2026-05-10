@@ -1,6 +1,19 @@
 require('dotenv').config();
 require('express-async-errors');
 
+// Prevent ioredis/Bull subscriber connection drops from crashing the process
+process.on('uncaughtException', (err) => {
+  if (err.message && (err.message.includes('ECONNRESET') || err.message.includes('MaxRetriesPerRequest') || err.message.includes('enableOfflineQueue'))) {
+    console.warn('Suppressed Redis connection error (non-fatal):', err.message);
+    return;
+  }
+  console.error('Uncaught exception (fatal):', err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason);
+});
+
 // 1. Load environment config (fail fast if required vars missing)
 const { validateEnvironment } = require('./config/envValidator');
 validateEnvironment();
