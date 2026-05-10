@@ -72,7 +72,7 @@ interface ApiService {
     suspend fun reportLocation(
         @Path("deviceId") deviceId: String,
         @Header("x-device-token") deviceToken: String,
-        @Body body: Map<String, Any>
+        @Body body: Map<String, @JvmSuppressWildcards Any>
     ): Response<Unit>
 
     // Fetches a fresh device JWT for already-enrolled devices that have no stored token.
