@@ -115,14 +115,14 @@ function verifyDeviceOwnership(req, res, next) {
     return next();
   }
 
-  // dealer_id on devices references dealers.id (not users.id), so join through dealers table
   db.query(
     `SELECT d.id
      FROM devices d
      LEFT JOIN dealers dl ON dl.id = d.dealer_id
+     LEFT JOIN dealers dl2 ON dl2.user_id = d.dealer_id
      LEFT JOIN resellers r ON r.id = d.reseller_id
      WHERE d.id = $1
-       AND (dl.user_id = $2 OR d.owner_id = $2 OR r.id = $2)`,
+       AND (dl.user_id = $2 OR dl2.user_id = $2 OR d.owner_id = $2 OR r.id = $2 OR d.dealer_id = $2)`,
     [deviceId, userId]
   ).then(result => {
     if (result.rows.length === 0) {

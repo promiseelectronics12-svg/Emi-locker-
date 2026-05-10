@@ -1,5 +1,6 @@
 const { validationResult } = require('express-validator');
 const logger = require('../../utils/logger');
+const db = require('../../config/database');
 const { startEnrollment } = require('./enrollmentService');
 
 async function createEnrollment(req, res) {
@@ -9,8 +10,15 @@ async function createEnrollment(req, res) {
   }
 
   try {
+    // JWT payload has no dealer_id — look it up from dealers table
+    const dealerRow = await db.query(
+      `SELECT id FROM dealers WHERE user_id = $1 LIMIT 1`,
+      [req.user.id]
+    );
+    const dealerId = dealerRow.rows[0]?.id || req.user.id;
+
     const result = await startEnrollment({
-      dealerId: req.user.dealer_id || req.user.id,
+      dealerId,
       ...req.body,
     });
     // result = { enrollment_id, token }

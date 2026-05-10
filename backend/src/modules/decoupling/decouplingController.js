@@ -1,5 +1,6 @@
 const asyncHandler = require('express-async-handler');
 const decouplingService = require('./decouplingService');
+const db = require('../../config/database');
 const logger = require('../../utils/logger');
 
 // ============================================================
@@ -36,7 +37,8 @@ const getAuditTrail = asyncHandler(async (req, res) => {
 const flagFraud = asyncHandler(async (req, res) => {
   const { deviceId } = req.params;
   const { reason, evidenceUrl } = req.body;
-  const dealerId = req.user.id;
+  const dealerRow = await db.query(`SELECT id FROM dealers WHERE user_id = $1 LIMIT 1`, [req.user.id]);
+  const dealerId = dealerRow.rows[0]?.id || req.user.id;
 
   if (!reason || reason.trim().length < 10) {
     return res.status(400).json({ error: 'Fraud reason is required (minimum 10 characters)' });

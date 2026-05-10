@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken } = require('../../middleware/auth');
 const { requireRole, ROLES } = require('../../middleware/rbac');
+const db = require('../../config/database');
 const {
   sendDealerMessage,
   getDeviceMessageStats,
@@ -41,9 +42,14 @@ router.post(
     }
 
     const { deviceId, message } = req.body;
-    const dealerId = req.user.id;
-    const dealerName = req.user.name || 'Dealer';
     const isAdmin = req.user.role === ROLES.ADMIN;
+    const dealerName = req.user.name || 'Dealer';
+
+    // Resolve actual dealers.id — JWT only has users.id
+    const dealerRow = await db.query(
+      `SELECT id FROM dealers WHERE user_id = $1 LIMIT 1`, [req.user.id]
+    );
+    const dealerId = dealerRow.rows[0]?.id || req.user.id;
 
     try {
       const result = await sendDealerMessage(deviceId, message, dealerId, dealerName, isAdmin);
