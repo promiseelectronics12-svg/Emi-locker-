@@ -52,7 +52,7 @@ router.post(
       );
       const dealerId = dealerRow.rows[0]?.id || req.user.id;
 
-      const result = await sendDealerMessage(deviceId, message, dealerId, dealerName, isAdmin);
+      const result = await sendDealerMessage(deviceId, message, dealerId, dealerName, isAdmin, req.user.id);
 
       if (!result.success) {
         if (result.error && result.error.includes('Daily message limit')) {

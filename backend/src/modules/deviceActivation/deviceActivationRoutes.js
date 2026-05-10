@@ -76,6 +76,58 @@ router.post(
   }
 );
 
+// Called by user app on startup if no device token stored.
+// Authenticates via deviceId (stored) + imei (hardware read-only).
+router.post(
+  '/:deviceId/refresh-token',
+  rateLimit({ windowMs: 60 * 60 * 1000, max: 10, message: { error: 'Rate limit exceeded' } }),
+  body('imei').optional().isString().trim().isLength({ min: 14, max: 16 }),
+  async (req, res) => {
+    const { validationResult } = require('express-validator');
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: 'Invalid request' });
+
+    const db = require('../../config/database');
+    const jwt = require('jsonwebtoken');
+    const { deviceId } = req.params;
+    const { imei } = req.body;
+
+    try {
+      let result;
+      if (imei) {
+        const imeiHash = require('crypto').createHash('sha256').update(String(imei)).digest('hex');
+        result = await db.query(
+          `SELECT id, dealer_id, reseller_id FROM devices WHERE id = $1 AND imei_hash = $2 AND status = 'enrolled'`,
+          [deviceId, imeiHash]
+        );
+      } else {
+        result = await db.query(
+          `SELECT id, dealer_id, reseller_id FROM devices WHERE id = $1 AND status = 'enrolled'`,
+          [deviceId]
+        );
+      }
+
+      if (!result.rows.length) {
+        return res.status(404).json({ success: false, error: 'Device not found or not enrolled' });
+      }
+
+      const device = result.rows[0];
+      const secret = process.env.DEVICE_TOKEN_SECRET || process.env.JWT_SECRET;
+      if (!secret) return res.status(500).json({ error: 'Server misconfigured' });
+
+      const deviceToken = jwt.sign(
+        { sub: device.id, type: 'device', dealerId: device.dealer_id, resellerId: device.reseller_id },
+        secret,
+        { expiresIn: process.env.DEVICE_TOKEN_EXPIRES_IN || '30d' }
+      );
+
+      return res.json({ success: true, device_token: deviceToken });
+    } catch (e) {
+      return res.status(500).json({ error: 'Token refresh failed' });
+    }
+  }
+);
+
 // Device reports shutdown/boot events with GPS for theft detection
 router.post(
   '/:deviceId/events',

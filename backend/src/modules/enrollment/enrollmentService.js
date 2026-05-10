@@ -1,8 +1,19 @@
 const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../../config/database');
 const logger = require('../../utils/logger');
 const { emitEnrollmentComplete } = require('../sse/sseService');
+
+function createDeviceToken({ deviceId, dealerId, resellerId }) {
+  const secret = process.env.DEVICE_TOKEN_SECRET || process.env.JWT_SECRET;
+  if (!secret) throw new Error('DEVICE_TOKEN_SECRET or JWT_SECRET must be configured');
+  return jwt.sign(
+    { sub: deviceId, type: 'device', dealerId, resellerId },
+    secret,
+    { expiresIn: process.env.DEVICE_TOKEN_EXPIRES_IN || '30d' }
+  );
+}
 
 function generateSixDigitToken() {
   return String(crypto.randomInt(100000, 999999));
@@ -166,7 +177,15 @@ async function confirmFromDevice({ code, imei }) {
     if (devRow.rows.length) emitEnrollmentComplete(devRow.rows[0], enrollment.dealer_id);
   } catch (_) {}
 
-  return { success: true, device_id: enrollment.dev_id };
+  // Fetch reseller_id for device token
+  let resellerId = null;
+  try {
+    const dealerRow = await db.query(`SELECT reseller_id FROM dealers WHERE id = $1`, [enrollment.dealer_id]);
+    resellerId = dealerRow.rows[0]?.reseller_id || null;
+  } catch (_) {}
+
+  const deviceToken = createDeviceToken({ deviceId: enrollment.dev_id, dealerId: enrollment.dealer_id, resellerId });
+  return { success: true, device_id: enrollment.dev_id, device_token: deviceToken };
 }
 
 module.exports = { startEnrollment, confirmFromDevice };

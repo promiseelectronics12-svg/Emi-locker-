@@ -268,7 +268,7 @@ async function sendReminderNotification(deviceId, daysUntilDue, amountDue, dueDa
   }
 }
 
-async function sendDealerMessage(deviceId, message, dealerId, dealerName, isAdmin = false) {
+async function sendDealerMessage(deviceId, message, dealerId, dealerName, isAdmin = false, userId = null) {
   try {
     const device = await getDeviceById(deviceId);
     if (!device) {
@@ -279,7 +279,7 @@ async function sendDealerMessage(deviceId, message, dealerId, dealerName, isAdmi
       };
     }
 
-    if (!isAdmin && device.dealer_id !== dealerId) {
+    if (!isAdmin && device.dealer_id !== dealerId && device.dealer_id !== userId) {
       return {
         success: false,
         rateLimit: { allowed: true, currentCount: 0, limit: 10, resetAt: new Date() },

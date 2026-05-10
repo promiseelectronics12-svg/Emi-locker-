@@ -19,43 +19,38 @@ const validateLocationDeviceId = (req, res, next) => {
 
 async function validateDeviceToken(req, res, next) {
   const deviceToken = req.headers['x-device-token'];
-  const deviceTimestamp = req.headers['x-device-timestamp'];
-  const deviceNonce = req.headers['x-device-nonce'];
   const { deviceId } = req.params;
 
-  if (!deviceToken || !deviceTimestamp || !deviceNonce) {
-    return res.status(401).json({ success: false, error: 'Device token, timestamp, and nonce required' });
-  }
-
-  const age = Date.now() - parseInt(deviceTimestamp, 10);
-  if (age > 300000) {
-    return res.status(401).json({ success: false, error: 'Device token expired' });
+  if (!deviceToken) {
+    return res.status(401).json({ success: false, error: 'Device token required' });
   }
 
   try {
-    const result = await db.query(
-      `SELECT id, imei_encrypted FROM devices WHERE id = $1`,
-      [deviceId]
-    );
+    const jwt = require('jsonwebtoken');
+    const secret = process.env.DEVICE_TOKEN_SECRET || process.env.JWT_SECRET;
+    if (!secret) {
+      return res.status(500).json({ success: false, error: 'Server misconfigured' });
+    }
 
+    let payload;
+    try {
+      payload = jwt.verify(deviceToken, secret);
+    } catch (e) {
+      return res.status(401).json({ success: false, error: 'Invalid device token' });
+    }
+
+    if (payload.type !== 'device' || payload.sub !== deviceId) {
+      return res.status(401).json({ success: false, error: 'Token does not match device' });
+    }
+
+    const result = await db.query(`SELECT id FROM devices WHERE id = $1`, [deviceId]);
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, error: 'Device not found' });
     }
 
-    const crypto = require('crypto');
-    const secret = process.env.DEVICE_SIGNING_SECRET || 'dev-device-signing-secret';
-    const signatureData = `${result.rows[0].id}${deviceTimestamp}${deviceNonce}`;
-    const expectedToken = crypto
-      .createHmac('sha256', secret)
-      .update(signatureData)
-      .digest('hex');
-
-    if (!crypto.timingSafeEqual(Buffer.from(deviceToken, 'hex'), Buffer.from(expectedToken, 'hex'))) {
-      return res.status(401).json({ success: false, error: 'Invalid device token' });
-    }
-
     next();
   } catch (error) {
+    logger.error('validateDeviceToken error:', error);
     return res.status(500).json({ success: false, error: 'Authentication error' });
   }
 }
