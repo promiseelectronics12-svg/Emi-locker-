@@ -3,7 +3,7 @@ const { body, param, query, validationResult } = require('express-validator');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../config/database');
 const logger = require('../config/logger');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -14,7 +14,7 @@ const generateEmiNumber = () => {
 };
 
 router.post('/',
-  authenticate,
+  authenticateToken,
   [
     body('userId').isUUID(),
     body('deviceId').isUUID(),
@@ -85,7 +85,7 @@ router.post('/',
 );
 
 router.get('/',
-  authenticate,
+  authenticateToken,
   [
     query('status').optional().isIn(['active', 'completed', 'defaulted', 'cancelled', 'disputed']),
     query('page').optional().isInt({ min: 1 }),
@@ -136,7 +136,7 @@ router.get('/',
 );
 
 router.get('/:agreementId',
-  authenticate,
+  authenticateToken,
   [
     param('agreementId').isUUID()
   ],
@@ -178,7 +178,7 @@ router.get('/:agreementId',
 );
 
 router.put('/:agreementId/status',
-  authenticate,
+  authenticateToken,
   [
     param('agreementId').isUUID(),
     body('status').isIn(['active', 'completed', 'defaulted', 'cancelled', 'disputed']),
@@ -229,7 +229,7 @@ router.put('/:agreementId/status',
 );
 
 router.post('/:agreementId/payments',
-  authenticate,
+  authenticateToken,
   [
     param('agreementId').isUUID(),
     body('amount').isFloat({ min: 0 }),
