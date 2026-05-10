@@ -3723,6 +3723,8 @@ class DeviceActions extends StatelessWidget {
                                     context: context,
                                     isScrollControlled: true,
                                     useSafeArea: true,
+                                    isDismissible: false,
+                                    enableDrag: false,
                                     shape: const RoundedRectangleBorder(
                                       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
                                     ),
@@ -7061,32 +7063,38 @@ class _LocationDialogState extends State<LocationDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Handle
-          Center(
-            child: Container(
-              margin: const EdgeInsets.only(top: 12, bottom: 8),
-              width: 36, height: 4,
-              decoration: BoxDecoration(
-                color: AppTone.subtle,
-                borderRadius: BorderRadius.circular(2),
+          // Handle zone — only this area can drag-dismiss the sheet
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onVerticalDragEnd: (details) {
+              if (details.primaryVelocity != null && details.primaryVelocity! > 300) {
+                Navigator.pop(context);
+              }
+            },
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 10, 16, 10),
+              child: Row(
+                children: [
+                  const Icon(Icons.location_on_outlined, size: 20, color: AppTone.brand),
+                  const SizedBox(width: 8),
+                  Text('Pull location', style: AppText.title()),
+                  const Spacer(),
+                  // Visual handle pill
+                  Container(
+                    width: 36, height: 4,
+                    decoration: BoxDecoration(
+                      color: AppTone.subtle,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 20),
+                    onPressed: () => Navigator.pop(context),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
               ),
-            ),
-          ),
-          // Header row
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 16, 12),
-            child: Row(
-              children: [
-                const Icon(Icons.location_on_outlined, size: 20, color: AppTone.brand),
-                const SizedBox(width: 8),
-                Text('Pull location', style: AppText.title()),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.close, size: 20),
-                  onPressed: () => Navigator.pop(context),
-                  visualDensity: VisualDensity.compact,
-                ),
-              ],
             ),
           ),
           // Status / progress
