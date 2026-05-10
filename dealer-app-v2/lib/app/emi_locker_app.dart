@@ -96,6 +96,68 @@ class AppTone {
 const _fast = Duration(milliseconds: 160);
 const _medium = Duration(milliseconds: 280);
 
+/// Centralised typography tokens — use these everywhere instead of raw TextStyle.
+/// Keeps font, weight, size, and letter-spacing consistent across the whole app.
+class AppText {
+  AppText._();
+
+  // ── Display / Hero ────────────────────────────────────────────────────────
+  static TextStyle display({Color? color}) => GoogleFonts.inter(
+        fontSize: 30, fontWeight: FontWeight.w900,
+        letterSpacing: -0.8, height: 1.08, color: color ?? AppTone.ink);
+
+  static TextStyle headline({Color? color}) => GoogleFonts.inter(
+        fontSize: 22, fontWeight: FontWeight.w800,
+        letterSpacing: -0.5, height: 1.15, color: color ?? AppTone.ink);
+
+  // ── Titles ────────────────────────────────────────────────────────────────
+  static TextStyle title({Color? color}) => GoogleFonts.inter(
+        fontSize: 17, fontWeight: FontWeight.w800,
+        letterSpacing: -0.2, height: 1.3, color: color ?? AppTone.ink);
+
+  static TextStyle titleSm({Color? color}) => GoogleFonts.inter(
+        fontSize: 15, fontWeight: FontWeight.w700,
+        letterSpacing: -0.1, height: 1.3, color: color ?? AppTone.ink);
+
+  // ── Body ──────────────────────────────────────────────────────────────────
+  static TextStyle body({Color? color}) => GoogleFonts.inter(
+        fontSize: 14, fontWeight: FontWeight.w500,
+        letterSpacing: 0.0, height: 1.5, color: color ?? AppTone.ink);
+
+  static TextStyle bodyBold({Color? color}) => GoogleFonts.inter(
+        fontSize: 14, fontWeight: FontWeight.w700,
+        letterSpacing: 0.0, height: 1.5, color: color ?? AppTone.ink);
+
+  // ── Captions / Meta ───────────────────────────────────────────────────────
+  static TextStyle caption({Color? color}) => GoogleFonts.inter(
+        fontSize: 12, fontWeight: FontWeight.w500,
+        letterSpacing: 0.1, height: 1.4, color: color ?? AppTone.muted);
+
+  static TextStyle captionBold({Color? color}) => GoogleFonts.inter(
+        fontSize: 12, fontWeight: FontWeight.w700,
+        letterSpacing: 0.1, height: 1.4, color: color ?? AppTone.muted);
+
+  // ── Labels (ALL CAPS small chips) ─────────────────────────────────────────
+  static TextStyle label({Color? color}) => GoogleFonts.inter(
+        fontSize: 10, fontWeight: FontWeight.w800,
+        letterSpacing: 1.1, height: 1.2, color: color ?? AppTone.muted);
+
+  // ── Monospace (codes, IMEI, tokens) ──────────────────────────────────────
+  static TextStyle mono({double size = 13, Color? color, double spacing = 1.0}) =>
+      GoogleFonts.jetBrainsMono(
+        fontSize: size, fontWeight: FontWeight.w600,
+        letterSpacing: spacing, height: 1.4, color: color ?? AppTone.ink);
+
+  // ── Button ────────────────────────────────────────────────────────────────
+  static TextStyle button({Color? color}) => GoogleFonts.inter(
+        fontSize: 15, fontWeight: FontWeight.w700,
+        letterSpacing: 0.1, height: 1.0, color: color ?? Colors.white);
+
+  static TextStyle buttonSm({Color? color}) => GoogleFonts.inter(
+        fontSize: 13, fontWeight: FontWeight.w700,
+        letterSpacing: 0.1, height: 1.0, color: color ?? AppTone.ink);
+}
+
 Color roleAccent(AppUser user) =>
     user.isReseller ? AppTone.accent : AppTone.brand;
 Color roleAccentDark(AppUser user) =>
@@ -841,45 +903,51 @@ class _LoginScreenState extends State<LoginScreen> {
               showOtp: _showOtp,
               onPressed: busy ? null : (_showOtp ? _verifyOtp : login),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 24),
+            // Demo section header
             Row(
               children: [
-                Text(
-                  'TRY DEMO',
-                  style: TextStyle(
-                    color: AppTone.muted,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.0,
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTone.accent.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: AppTone.accent.withValues(alpha: 0.18)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.play_circle_outline_rounded, size: 12, color: AppTone.accent),
+                      const SizedBox(width: 5),
+                      Text('TRY DEMO', style: AppText.label(color: AppTone.accent)),
+                    ],
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(child: Divider(color: AppTone.line, height: 1)),
               ],
             ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _LightDemoButton(
-                    label: 'Dealer',
-                    onPressed: () {
-                      email.text = 'dealer@emi-locker.com';
-                      password.text = 'Demo@123456';
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _LightDemoButton(
-                    label: 'Reseller',
-                    onPressed: () {
-                      email.text = 'reseller@emi-locker.com';
-                      password.text = 'Demo@123456';
-                    },
-                  ),
-                ),
-              ],
+            const SizedBox(height: 10),
+            _RoleDemoCard(
+              role: 'Dealer',
+              email: 'dealer@emi-locker.com',
+              icon: Icons.storefront_rounded,
+              accent: AppTone.brand,
+              onPressed: () {
+                email.text = 'dealer@emi-locker.com';
+                password.text = 'Demo@123456';
+              },
+            ),
+            const SizedBox(height: 8),
+            _RoleDemoCard(
+              role: 'Reseller',
+              email: 'reseller@emi-locker.com',
+              icon: Icons.group_rounded,
+              accent: AppTone.accent,
+              onPressed: () {
+                email.text = 'reseller@emi-locker.com';
+                password.text = 'Demo@123456';
+              },
             ),
           ],
         ),
@@ -1417,33 +1485,98 @@ class _LightLoginInputState extends State<_LightLoginInput> {
   }
 }
 
-class _LightDemoButton extends StatelessWidget {
-  const _LightDemoButton({required this.label, required this.onPressed});
-  final String label;
+/// Premium role selector card used in the demo section of the login screen.
+class _RoleDemoCard extends StatefulWidget {
+  const _RoleDemoCard({
+    required this.role,
+    required this.email,
+    required this.icon,
+    required this.accent,
+    required this.onPressed,
+  });
+  final String role;
+  final String email;
+  final IconData icon;
+  final Color accent;
   final VoidCallback onPressed;
+
+  @override
+  State<_RoleDemoCard> createState() => _RoleDemoCardState();
+}
+
+class _RoleDemoCardState extends State<_RoleDemoCard> {
+  bool _pressed = false;
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onPressed,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) { setState(() => _pressed = false); widget.onPressed(); },
+      onTapCancel: () => setState(() => _pressed = false),
+      child: AnimatedContainer(
+        duration: _fast,
+        curve: Curves.easeOutCubic,
+        transform: Matrix4.identity()..scale(_pressed ? 0.97 : 1.0),
+        transformAlignment: Alignment.center,
+        padding: const EdgeInsets.fromLTRB(0, 0, 12, 0),
         decoration: BoxDecoration(
-          color: const Color(0xFFF9FAFB),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
-        ),
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: Color(0xFF6B7280),
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
+          color: _pressed ? widget.accent.withValues(alpha: 0.04) : const Color(0xFFF9FAFB),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: _pressed ? widget.accent.withValues(alpha: 0.4) : const Color(0xFFE5E7EB),
+            width: _pressed ? 1.5 : 1.0,
           ),
+          boxShadow: _pressed
+              ? [BoxShadow(color: widget.accent.withValues(alpha: 0.10), blurRadius: 12, offset: const Offset(0, 4))]
+              : null,
+        ),
+        child: Row(
+          children: [
+            // Accent stripe
+            Container(
+              width: 4,
+              height: 56,
+              decoration: BoxDecoration(
+                color: widget.accent,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(12),
+                  bottomLeft: Radius.circular(12),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Role icon
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: widget.accent.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(widget.icon, size: 16, color: widget.accent),
+            ),
+            const SizedBox(width: 10),
+            // Role name + email
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(widget.role, style: AppText.captionBold(color: AppTone.ink)),
+                  const SizedBox(height: 1),
+                  Text(
+                    widget.email,
+                    style: AppText.mono(size: 10, color: AppTone.muted, spacing: 0),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.arrow_forward_ios_rounded, size: 11, color: widget.accent.withValues(alpha: 0.5)),
+          ],
         ),
       ),
-    );
+    ).animate().fadeIn(duration: 260.ms, delay: 40.ms).slideY(begin: 0.04, end: 0, curve: Curves.easeOutCubic);
   }
 }
 
@@ -1634,12 +1767,7 @@ class _GradientLoginButton extends StatelessWidget {
                         const SizedBox(width: 8),
                         Text(
                           showOtp ? 'Verify device' : 'Sign in securely',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.1,
-                          ),
+                          style: AppText.button(),
                         ),
                       ],
                     ),
@@ -1651,30 +1779,45 @@ class _GradientLoginButton extends StatelessWidget {
   }
 }
 
-class _DarkDemoButton extends StatelessWidget {
+/// Dark-theme variant of the role demo card (used on the desktop/dark login panel).
+class _DarkDemoButton extends StatefulWidget {
   const _DarkDemoButton({required this.label, required this.onPressed});
   final String label;
   final VoidCallback onPressed;
 
   @override
+  State<_DarkDemoButton> createState() => _DarkDemoButtonState();
+}
+
+class _DarkDemoButtonState extends State<_DarkDemoButton> {
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onPressed,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) { setState(() => _pressed = false); widget.onPressed(); },
+      onTapCancel: () => setState(() => _pressed = false),
+      child: AnimatedContainer(
+        duration: _fast,
+        curve: Curves.easeOutCubic,
+        transform: Matrix4.identity()..scale(_pressed ? 0.97 : 1.0),
+        transformAlignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(vertical: 11),
         decoration: BoxDecoration(
-          color: const Color(0xFF0A1220),
+          color: _pressed ? const Color(0xFF0D1E30) : const Color(0xFF0A1220),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFF1C2D45)),
+          border: Border.all(
+            color: _pressed ? AppTone.brand.withValues(alpha: 0.4) : const Color(0xFF1C2D45),
+          ),
+          boxShadow: _pressed
+              ? [BoxShadow(color: AppTone.brand.withValues(alpha: 0.10), blurRadius: 10, offset: const Offset(0, 3))]
+              : null,
         ),
         child: Text(
-          label,
+          widget.label,
           textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: Color(0xFF4B6080),
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
+          style: AppText.captionBold(color: const Color(0xFF4B6080)),
         ),
       ),
     );
