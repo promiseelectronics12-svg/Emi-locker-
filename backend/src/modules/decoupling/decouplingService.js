@@ -476,6 +476,7 @@ async executeDecoupling(deviceId, adminId, totpCode) {
       try {
         await amapiService.initialize();
         const enterpriseId = process.env.AMAPI_ENTERPRISE_ID;
+        if (!enterpriseId) throw new Error('AMAPI enterprise not configured');
         await amapiService.deleteDevice(enterpriseId, decoupling.amapi_device_name);
         amapiSuccess = true;
         logger.info(`AMAPI device deleted for ${deviceId}: ${decoupling.amapi_device_name}`);

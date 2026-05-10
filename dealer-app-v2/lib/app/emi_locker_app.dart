@@ -194,7 +194,9 @@ class _EmiLockerAppState extends State<EmiLockerApp> {
   Future<void> _logout() async {
     _sse.stop();
     try {
-      await api.post('/api/v1/auth/logout');
+      final refresh = await storage.read(key: 'refreshToken');
+      await api.post('/api/v1/auth/logout',
+          data: refresh != null ? {'refreshToken': refresh} : null);
     } catch (_) {}
     api.clearTokens();
     await storage.deleteAll();
@@ -3670,7 +3672,7 @@ class _DeviceSettingsPanelState extends State<_DeviceSettingsPanel> {
   Future<void> _save() async {
     setState(() => _busy = true);
     try {
-      await widget.api.post(
+      await widget.api.put(
         '/api/v1/dealer/devices/${widget.deviceId}/settings',
         data: {'offline_grace_hours': _graceHours, 'default_lock_level': _lockLevel},
       );
@@ -5678,7 +5680,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _saveDealerDefaults() async {
     setState(() => _defaultsBusy = true);
     try {
-      await widget.api.post(
+      await widget.api.put(
         '/api/v1/dealer/settings',
         data: {
           'offline_grace_hours': _graceHours,
