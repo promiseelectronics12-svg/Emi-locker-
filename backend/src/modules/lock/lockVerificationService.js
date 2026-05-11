@@ -28,6 +28,7 @@ const ESCALATION_REASONS = ['SUSPECTED_FRAUD', 'SUSPECTED_SALE'];
 const GRACE_PERIOD_DAYS = parseInt(process.env.GRACE_PERIOD_DAYS, 10) || 7;
 const MAX_INVALID_REQUESTS = 3;
 const INVALID_REQUEST_WINDOW_HOURS = 24;
+const LOCK_ABUSE_GUARD_ENABLED = process.env.LOCK_ABUSE_GUARD_ENABLED === 'true';
 const GPS_RADIUS_METERS = parseInt(process.env.GPS_RADIUS_METERS, 10) || 500;
 
 class LockVerificationService {
@@ -53,9 +54,11 @@ class LockVerificationService {
     // During demo/testing, lock requests are idempotent: re-submitting a lock
     // should re-send the command instead of blocking on the current DB state.
 
-    const abuseCheck = await this.checkDealerAbuse(dealerUserId || dealerId);
-    if (abuseCheck.abused) {
-      failures.push(`Dealer submitted ${abuseCheck.count} invalid requests in the last ${INVALID_REQUEST_WINDOW_HOURS} hours`);
+    if (LOCK_ABUSE_GUARD_ENABLED) {
+      const abuseCheck = await this.checkDealerAbuse(dealerUserId || dealerId);
+      if (abuseCheck.abused) {
+        failures.push(`Dealer submitted ${abuseCheck.count} invalid requests in the last ${INVALID_REQUEST_WINDOW_HOURS} hours`);
+      }
     }
 
     if (ESCALATION_REASONS.includes(reason)) {

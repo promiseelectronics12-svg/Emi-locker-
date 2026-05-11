@@ -40,6 +40,7 @@ const { initKeyCronJobs } = require('./modules/keys/keyScheduler');
 const { initFraudCronJobs } = require('./modules/fraud');
 
 const app = express();
+app.set('trust proxy', 1);
 
 // 4. Apply global middleware
 app.use(helmet());
