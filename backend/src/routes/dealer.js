@@ -486,7 +486,7 @@ router.get('/devices/:deviceId/lock-detail',
               d.grace_expires_at, d.dealer_phone,
               u.name  AS customer_name,
               u.phone AS customer_phone,
-              lr.reason      AS lock_reason,
+              lr.reason_code AS lock_reason,
               lr.created_at  AS locked_at,
               es.duration    AS emi_total,
               COALESCE(
@@ -497,8 +497,8 @@ router.get('/devices/:deviceId/lock-detail',
        FROM devices d
        LEFT JOIN users u ON u.id = d.owner_id
        LEFT JOIN LATERAL (
-         SELECT reason, created_at FROM lock_requests
-         WHERE device_id = d.id AND decision = 'APPROVED'
+         SELECT reason_code, created_at FROM lock_requests
+         WHERE device_id = d.id AND status = 'approved'
          ORDER BY created_at DESC LIMIT 1
        ) lr ON TRUE
        LEFT JOIN emi_schedules es ON es.device_id = d.id AND es.status = 'active'
@@ -525,7 +525,7 @@ router.get('/devices/:deviceId/lock-detail',
     try {
       const graceRes = await db.query(
         `SELECT grace_hours, expires_at, issued_at FROM grace_unlock_events
-         WHERE device_id = $1 AND revoked = FALSE AND expires_at > NOW()
+         WHERE device_id = $1 AND revoked_at IS NULL AND expires_at > NOW()
          ORDER BY issued_at DESC LIMIT 1`,
         [row.id]
       );
@@ -546,7 +546,7 @@ router.get('/devices/:deviceId/lock-detail',
           : null,
       },
       lock: {
-        is_locked:    row.status === 'locked',
+        is_locked:    !!(row.lock_level && row.lock_level !== 'NONE'),
         lock_level:   row.lock_level || null,
         reason:       row.lock_reason  || null,
         locked_at:    row.locked_at    || null,
@@ -592,7 +592,8 @@ router.post('/devices/:deviceId/unlock',
     const dealerIds = getDealerIds(req.user.id, dealer);
 
     const result = await db.query(
-      `SELECT d.id, d.totp_secret, d.model, d.brand, d.status,
+      `SELECT d.id, d.totp_secret, d.model, d.brand, d.status, d.fcm_token,
+              d.device_name, d.amapi_device_name,
               u.phone AS customer_phone, u.name AS customer_name,
               d.dealer_phone
        FROM devices d
@@ -614,7 +615,15 @@ router.post('/devices/:deviceId/unlock',
 
     // Set grace_expires_at on the device record (both paths)
     await db.query(
-      `UPDATE devices SET grace_expires_at = $1, updated_at = NOW() WHERE id = $2`,
+      `UPDATE devices
+       SET grace_expires_at = $1,
+           lock_level = 'NONE',
+           status = 'enrolled',
+           lock_reason = NULL,
+           locked_at = NULL,
+           locked_by = NULL,
+           updated_at = NOW()
+       WHERE id = $2`,
       [expiresAt, device.id]
     );
 
@@ -639,13 +648,21 @@ router.post('/devices/:deviceId/unlock',
       let fcmSent = false;
       try {
         const fcmService = require('../modules/notifications/fcm.service');
-        await fcmService.sendToDevice(device.id, fcmService.buildUnlockCommandPayload({
-          reason:     'DEALER_GRACE_UNLOCK',
-          grace_hours: graceHours,
-          expires_at:  expiresAt.toISOString(),
-        }));
-        fcmSent = true;
-      } catch (_) {}
+        if (device.fcm_token) {
+          const result = await fcmService.sendToDevice(device.fcm_token, {
+            type: 'LOCK_COMMAND',
+            command: 'UNLOCK',
+            commandType: 'UNLOCK',
+            reason: 'DEALER_GRACE_UNLOCK',
+            grace_hours: graceHours,
+            expires_at: expiresAt.toISOString(),
+            timestamp: Date.now().toString(),
+          });
+          fcmSent = !!result.success;
+        }
+      } catch (error) {
+        console.warn('Online unlock FCM failed:', error.message);
+      }
 
       try {
         const sseService = require('../modules/sse/sseService');

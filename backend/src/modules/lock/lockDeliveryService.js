@@ -76,10 +76,12 @@ class LockDeliveryService {
     }
 
     try {
+      const appCommand = this.toAppCommand(command.actionType, lockLevel);
       const message = {
         token: fcmToken,
         data: this.buildFcmData({
           type: 'LOCK_COMMAND',
+          command: appCommand,
           commandType: command.actionType,
           lockLevel: lockLevel || 'FULL_LOCK',
           nonce: command.nonce,
@@ -103,6 +105,16 @@ class LockDeliveryService {
     }
 
     return result;
+  }
+
+  toAppCommand(actionType, lockLevel) {
+    if (actionType === 'UNLOCK' || lockLevel === LOCK_LEVELS.NONE) {
+      return 'UNLOCK';
+    }
+    if (lockLevel === LOCK_LEVELS.PARTIAL_LOCK || lockLevel === LOCK_LEVELS.REMINDER_MODE) {
+      return 'PARTIAL_LOCK';
+    }
+    return 'LOCK';
   }
 
   async deliverViaAmapi(deviceId, amapiDeviceName, lockLevel) {

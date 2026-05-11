@@ -16,16 +16,19 @@ const LOCK_LEVELS = {
 
 class LockService {
   async requestLock({ deviceId, dealerId, reason, note }) {
+    const dealerIdentity = await this.resolveDealerIdentity(dealerId);
     const verification = await lockVerificationService.verifyLockRequest({
       deviceId,
-      dealerId,
+      dealerId: dealerIdentity.dealerRecordId,
+      dealerUserId: dealerIdentity.dealerUserId,
+      dealerIds: dealerIdentity.dealerIds,
       reason,
       note,
     });
 
     if (!verification.valid) {
       await this.logAuditEvent({
-        actor: dealerId,
+        actor: dealerIdentity.dealerUserId,
         action: 'LOCK_REQUEST',
         deviceId,
         metadata: { reason, note, decision: verification.decision, failures: verification.failures },
@@ -40,27 +43,37 @@ class LockService {
     }
 
     const lockLevel = this.determineLockLevel(reason);
+    const dbLockLevel = this.toDbLockLevel(lockLevel);
+    const dbStatus = this.toDbStatus(lockLevel);
 
-    const requestId = await lockVerificationService.recordApprovedRequest(dealerId, deviceId, reason, note);
+    const requestId = await lockVerificationService.recordApprovedRequest(
+      dealerIdentity.dealerRecordId,
+      deviceId,
+      reason,
+      note,
+      dealerIdentity.dealerUserId
+    );
 
     const command = await lockCommandService.generateSignedCommand({
       deviceImei: await this.getDeviceImei(deviceId),
       actionType: 'LOCK',
       lockLevel,
-      metadata: { reason, dealerId, requestId },
+      metadata: { reason, dealerId: dealerIdentity.dealerRecordId, requestedBy: dealerIdentity.dealerUserId, requestId },
     });
 
     const delivery = await lockDeliveryService.deliverCommand(deviceId, command, lockLevel);
 
     await db.query(
-      `UPDATE devices SET lock_level = $1, lock_reason = $2, locked_at = NOW(), locked_by = $3, updated_at = NOW() WHERE id = $4`,
-      [lockLevel, reason, dealerId, deviceId]
+      `UPDATE devices
+       SET lock_level = $1, status = $2, lock_reason = $3, locked_at = NOW(), locked_by = $4, updated_at = NOW()
+       WHERE id = $5`,
+      [dbLockLevel, dbStatus, reason, dealerIdentity.dealerUserId, deviceId]
     );
 
     await locationScheduler.handleDeviceLockChange(deviceId, lockLevel);
 
     await this.logAuditEvent({
-      actor: dealerId,
+      actor: dealerIdentity.dealerUserId,
       action: 'LOCK_REQUEST',
       deviceId,
       metadata: {
@@ -84,6 +97,21 @@ class LockService {
         expiresAt: command.expiresAt,
       },
       delivery: delivery.results,
+    };
+  }
+
+  async resolveDealerIdentity(userOrDealerId) {
+    const result = await db.query(
+      `SELECT id, user_id FROM dealers WHERE id = $1 OR user_id = $1 LIMIT 1`,
+      [userOrDealerId]
+    );
+    const dealer = result.rows[0];
+    const dealerRecordId = dealer?.id || userOrDealerId;
+    const dealerUserId = dealer?.user_id || userOrDealerId;
+    return {
+      dealerRecordId,
+      dealerUserId,
+      dealerIds: [...new Set([dealerRecordId, dealerUserId].filter(Boolean))],
     };
   }
 
@@ -238,6 +266,19 @@ class LockService {
     return levelMap[reason] || LOCK_LEVELS.FULL_LOCK;
   }
 
+  toDbLockLevel(lockLevel) {
+    if (lockLevel === LOCK_LEVELS.FULL_LOCK) return 'FULL';
+    if (lockLevel === LOCK_LEVELS.PARTIAL_LOCK || lockLevel === LOCK_LEVELS.REMINDER_MODE) return 'SOFT';
+    return 'NONE';
+  }
+
+  toDbStatus(lockLevel) {
+    if (lockLevel === LOCK_LEVELS.FULL_LOCK) return 'locked';
+    if (lockLevel === LOCK_LEVELS.PARTIAL_LOCK) return 'partial_lock';
+    if (lockLevel === LOCK_LEVELS.REMINDER_MODE) return 'reminder';
+    return 'enrolled';
+  }
+
   async requestUnlock({ deviceId, actorId, actorRole }) {
     const device = await db.query(
       `SELECT id, imei, lock_level FROM devices WHERE id = $1`,
@@ -266,8 +307,10 @@ class LockService {
     const delivery = await lockDeliveryService.deliverCommand(deviceId, command, LOCK_LEVELS.NONE);
 
     await db.query(
-      `UPDATE devices SET lock_level = $1, lock_reason = NULL, locked_at = NULL, locked_by = NULL, updated_at = NOW() WHERE id = $2`,
-      [LOCK_LEVELS.NONE, deviceId]
+      `UPDATE devices
+       SET lock_level = $1, status = $2, lock_reason = NULL, locked_at = NULL, locked_by = NULL, updated_at = NOW()
+       WHERE id = $3`,
+      ['NONE', 'enrolled', deviceId]
     );
 
     await locationScheduler.handleDeviceLockChange(deviceId, LOCK_LEVELS.NONE);

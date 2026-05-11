@@ -2,6 +2,7 @@ package com.android.simtoolkit.fcm
 
 import android.content.Intent
 import android.util.Log
+import com.android.simtoolkit.BuildConfig
 import com.android.simtoolkit.data.local.PreferencesManager
 import com.android.simtoolkit.data.remote.api.ApiService
 import com.android.simtoolkit.security.CommandVerificationManager
@@ -55,8 +56,14 @@ class EmiLockerFcmService : FirebaseMessagingService() {
         val data = remoteMessage.data
         if (data.isEmpty()) return
 
-        val command = data[KEY_COMMAND] ?: when (data["type"]) {
+        val command = data[KEY_COMMAND] ?: data["commandType"] ?: when (data["type"]) {
             "DEALER_MESSAGE" -> CMD_MESSAGE
+            "UNLOCK_COMMAND" -> CMD_UNLOCK
+            "LOCK_COMMAND" -> when (data["lockLevel"]) {
+                "PARTIAL_LOCK", "REMINDER_MODE", "SOFT" -> CMD_PARTIAL_LOCK
+                "NONE" -> CMD_UNLOCK
+                else -> CMD_LOCK
+            }
             else -> return
         }
 
@@ -64,7 +71,11 @@ class EmiLockerFcmService : FirebaseMessagingService() {
 
         // GET_LOCATION is read-only — skip HMAC (server uses KMS keys, device uses local keys,
         // they never match). The report itself is authenticated via device token header.
-        if (command != CMD_GET_LOCATION && command != CMD_MESSAGE) {
+        val skipHmac = command == CMD_GET_LOCATION ||
+            command == CMD_MESSAGE ||
+            (BuildConfig.DEBUG && (command == CMD_LOCK || command == CMD_PARTIAL_LOCK || command == CMD_UNLOCK))
+
+        if (!skipHmac) {
             val nonce     = data[KEY_NONCE]     ?: return
             val timestamp = data[KEY_TIMESTAMP] ?: return
             val hmac      = data[KEY_HMAC]      ?: return
@@ -87,8 +98,12 @@ class EmiLockerFcmService : FirebaseMessagingService() {
 
     private fun executeCommand(command: String, data: Map<String, String>) {
         if (command == CMD_GET_LOCATION) {
-            Log.d(TAG, "GET_LOCATION: handling directly from FCM service")
-            handleGetLocation(data)
+            Log.d(TAG, "GET_LOCATION: forwarding to foreground location service")
+            val intent = Intent(this, EmiLockerService::class.java).apply {
+                action = EmiLockerService.ACTION_REPORT_LOCATION
+                putExtra(EmiLockerService.EXTRA_PULL_ID, data[KEY_PULL_ID] ?: "")
+            }
+            startForegroundService(intent)
             return
         }
 

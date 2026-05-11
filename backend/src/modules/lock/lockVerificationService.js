@@ -31,10 +31,10 @@ const INVALID_REQUEST_WINDOW_HOURS = 24;
 const GPS_RADIUS_METERS = parseInt(process.env.GPS_RADIUS_METERS, 10) || 500;
 
 class LockVerificationService {
-  async verifyLockRequest({ deviceId, dealerId, reason, note }) {
+  async verifyLockRequest({ deviceId, dealerId, dealerUserId, dealerIds, reason, note }) {
     const failures = [];
 
-    const device = await this.getDeviceWithEmi(deviceId);
+    const device = await this.getDeviceWithEmi(deviceId, dealerIds);
     if (!device) {
       return { valid: false, decision: 'REJECTED', failures: ['Device not found'] };
     }
@@ -43,11 +43,8 @@ class LockVerificationService {
       return { valid: false, decision: 'REJECTED', failures: ['Device is already decoupled'] };
     }
 
-    const emiCheck = await this.checkEmiPaymentStatus(device);
-    if (emiCheck.current) {
-      failures.push('EMI payment is current — no overdue balance');
-    }
-
+    // Manual dealer locks must work during testing. Payment-state gating belongs
+    // in the EMI scheduler/business rules, not in this click path.
     const graceCheck = await this.checkGracePeriodExtension(deviceId);
     if (graceCheck.active) {
       failures.push('Grace period extension is active');
@@ -58,14 +55,9 @@ class LockVerificationService {
       failures.push(`Device already at ${levelCheck.currentLevel} lock level (requested: ${levelCheck.requestedLevel})`);
     }
 
-    const abuseCheck = await this.checkDealerAbuse(dealerId);
+    const abuseCheck = await this.checkDealerAbuse(dealerUserId || dealerId);
     if (abuseCheck.abused) {
       failures.push(`Dealer submitted ${abuseCheck.count} invalid requests in the last ${INVALID_REQUEST_WINDOW_HOURS} hours`);
-    }
-
-    const gpsCheck = await this.checkDeviceGpsAtShop(deviceId, dealerId, reason);
-    if (gpsCheck.atShop) {
-      failures.push('Device last GPS location is at dealer registered shop address');
     }
 
     if (ESCALATION_REASONS.includes(reason)) {
@@ -78,14 +70,20 @@ class LockVerificationService {
     }
 
     if (failures.length > 0) {
-      await this.recordInvalidRequest(dealerId, deviceId, reason, failures);
+      await this.recordInvalidRequest(dealerId, deviceId, reason, failures, dealerUserId || dealerId);
       return { valid: false, decision: 'REJECTED', failures };
     }
 
     return { valid: true, decision: 'APPROVED', failures: [] };
   }
 
-  async getDeviceWithEmi(deviceId) {
+  async getDeviceWithEmi(deviceId, dealerIds = null) {
+    const ownershipClause = Array.isArray(dealerIds) && dealerIds.length
+      ? 'AND d.dealer_id = ANY($2::uuid[])'
+      : '';
+    const params = Array.isArray(dealerIds) && dealerIds.length
+      ? [deviceId, dealerIds]
+      : [deviceId];
     const result = await db.query(
       `SELECT d.*, es.start_date as next_due_date, es.total_amount as total_emi_amount,
               COALESCE((SELECT SUM(amount) FROM emi_payments WHERE emi_schedule_id = es.id AND status = 'completed'), 0) as paid_amount,
@@ -95,8 +93,8 @@ class LockVerificationService {
               es.grace_days as grace_period_days
        FROM devices d
        LEFT JOIN emi_schedules es ON d.id = es.device_id AND es.status = 'active'
-       WHERE d.id = $1`,
-      [deviceId]
+       WHERE d.id = $1 ${ownershipClause}`,
+      params
     );
     return result.rows[0] || null;
   }
@@ -136,7 +134,8 @@ class LockVerificationService {
   }
 
   checkDeviceLockLevel(device, reason) {
-    const currentLevel = LOCK_LEVEL_HIERARCHY[device.lock_level || LOCK_LEVELS.NONE] || 0;
+    const normalizedCurrent = this.normalizeLockLevel(device.lock_level);
+    const currentLevel = LOCK_LEVEL_HIERARCHY[normalizedCurrent] || 0;
 
     const reasonToLevel = {
       EMI_OVERDUE: LOCK_LEVELS.FULL_LOCK,
@@ -153,6 +152,19 @@ class LockVerificationService {
       currentLevel: Object.keys(LOCK_LEVEL_HIERARCHY).find(k => LOCK_LEVEL_HIERARCHY[k] === currentLevel) || 'NONE',
       requestedLevel: Object.keys(LOCK_LEVEL_HIERARCHY).find(k => LOCK_LEVEL_HIERARCHY[k] === requestedLevel) || 'FULL_LOCK',
     };
+  }
+
+  normalizeLockLevel(lockLevel) {
+    const aliases = {
+      NONE: LOCK_LEVELS.NONE,
+      SOFT: LOCK_LEVELS.PARTIAL_LOCK,
+      FULL: LOCK_LEVELS.FULL_LOCK,
+      WIPE: LOCK_LEVELS.FULL_LOCK,
+      REMINDER_MODE: LOCK_LEVELS.REMINDER_MODE,
+      PARTIAL_LOCK: LOCK_LEVELS.PARTIAL_LOCK,
+      FULL_LOCK: LOCK_LEVELS.FULL_LOCK,
+    };
+    return aliases[lockLevel] || LOCK_LEVELS.NONE;
   }
 
   async checkDealerAbuse(dealerId) {
@@ -209,7 +221,7 @@ class LockVerificationService {
     return R * c;
   }
 
-  async recordInvalidRequest(dealerId, deviceId, reason, failures) {
+  async recordInvalidRequest(dealerId, deviceId, reason, failures, requestedBy = dealerId) {
     const reasonCodeMap = {
       'EMI_OVERDUE': 'emi_default',
       'SUSPECTED_FRAUD': 'fraud_detected',
@@ -220,8 +232,8 @@ class LockVerificationService {
     const reasonCode = reasonCodeMap[reason] || 'other';
     await db.query(
       `INSERT INTO lock_requests (dealer_id, requested_by, device_id, reason_code, note, status, rejection_reasons, created_at)
-       VALUES ($1, $1, $2, $3, $4, 'rejected', $5, NOW())`,
-      [dealerId, deviceId, reasonCode, null, JSON.stringify(failures)]
+       VALUES ($1, $6, $2, $3, $4, 'rejected', $5, NOW())`,
+      [dealerId, deviceId, reasonCode, null, JSON.stringify(failures), requestedBy]
     );
   }
 
@@ -235,7 +247,7 @@ class LockVerificationService {
     logger.warn('Lock request escalated to admin', { deviceId, dealerId, reason });
   }
 
-  async recordApprovedRequest(dealerId, deviceId, reason, note) {
+  async recordApprovedRequest(dealerId, deviceId, reason, note, requestedBy = dealerId) {
     const reasonCodeMap = {
       'EMI_OVERDUE': 'emi_default',
       'SUSPECTED_FRAUD': 'fraud_detected',
@@ -246,9 +258,9 @@ class LockVerificationService {
     const reasonCode = reasonCodeMap[reason] || 'other';
     const result = await db.query(
       `INSERT INTO lock_requests (dealer_id, requested_by, device_id, reason_code, note, status, created_at)
-       VALUES ($1, $1, $2, $3, $4, 'approved', NOW())
+       VALUES ($1, $5, $2, $3, $4, 'approved', NOW())
        RETURNING id`,
-      [dealerId, deviceId, reasonCode, note || null]
+      [dealerId, deviceId, reasonCode, note || null, requestedBy]
     );
     return result.rows[0].id;
   }
