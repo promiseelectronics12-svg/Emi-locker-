@@ -156,11 +156,17 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
     }
 
     final d = _detail!;
-    final lockLevel    = text(d['lock_level'], fallback: '—');
-    final lockReason   = text(d['lock_reason'], fallback: 'No reason provided');
-    final lockedAt     = text(d['locked_at']);
-    final graceExpAt   = text(d['grace_expires_at']);
+    final lock = asMap(d['lock']);
+    final emi = asMap(d['emi']);
+    final lockLevel    = text(lock['lock_level'], fallback: 'NONE');
+    final isLocked     = lock['is_locked'] == true;
+    final lockReason   = text(lock['reason'], fallback: 'No reason provided');
+    final lockedAt     = text(lock['locked_at']);
+    final graceExpAt   = text(lock['grace_expires_at'] ?? d['grace_expires_at']);
     final lastCheckin  = text(d['last_checkin_at']);
+    final emiPaid      = text(emi['installments_paid'], fallback: '0');
+    final emiTotal     = text(emi['installments_total'], fallback: '0');
+    final emiLinked    = emiTotal != '0';
     final activeGrace  = d['active_grace'];
     final history      = d['history'] as List? ?? [];
 
@@ -171,8 +177,8 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: AppTone.danger.withOpacity(0.04),
-            border: Border(left: BorderSide(color: AppTone.danger, width: 4)),
+            color: (isLocked ? AppTone.danger : AppTone.brand).withOpacity(0.04),
+            border: Border(left: BorderSide(color: isLocked ? AppTone.danger : AppTone.brand, width: 4)),
             borderRadius: const BorderRadius.only(
               topRight: Radius.circular(8),
               bottomRight: Radius.circular(8),
@@ -183,17 +189,29 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
             children: [
               Row(
                 children: [
-                  const Icon(Icons.lock_outline, color: AppTone.danger, size: 18),
+                  Icon(
+                    isLocked ? Icons.lock_outline : Icons.lock_open_rounded,
+                    color: isLocked ? AppTone.danger : AppTone.brand,
+                    size: 18,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text('Lock level $lockLevel',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700, color: AppTone.danger)),
+                    child: Text(
+                      isLocked ? 'Device locked' : 'Device unlocked',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: isLocked ? AppTone.danger : AppTone.brand,
+                      ),
+                    ),
+                  ),
+                  StatusPill(
+                    label: lockLevel,
+                    color: isLocked ? AppTone.danger : AppTone.brand,
                   ),
                 ],
               ),
               const SizedBox(height: 6),
-              Text(_humanReason(lockReason),
+              Text(isLocked ? _humanReason(lockReason) : 'No active lock is applied.',
                   style: const TextStyle(fontSize: 13, color: AppTone.ink)),
               if (lockedAt.isNotEmpty) ...[
                 const SizedBox(height: 4),
@@ -210,6 +228,30 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
                 Text('Last check-in: $lastCheckin',
                     style: const TextStyle(fontSize: 11, color: AppTone.muted)),
               ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppTone.info.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppTone.info.withOpacity(0.18)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.payments_outlined, size: 18, color: AppTone.info),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  emiLinked
+                      ? 'EMI schedule linked: $emiPaid of $emiTotal installments paid'
+                      : 'EMI schedule not linked for this device',
+                  style: const TextStyle(fontWeight: FontWeight.w700, color: AppTone.ink),
+                ),
+              ),
             ],
           ),
         ),

@@ -3708,11 +3708,16 @@ class DeviceActions extends StatelessWidget {
                           FilledButton.icon(
                             onPressed: id.isEmpty
                                 ? null
-                                : () => showDialog<void>(
-                                    context: context,
-                                    builder: (_) =>
-                                        LockDialog(api: api, deviceId: id),
-                                  ),
+                                : () async {
+                                    final submitted = await showDialog<bool>(
+                                      context: context,
+                                      builder: (_) =>
+                                          LockDialog(api: api, deviceId: id),
+                                    );
+                                    if (submitted == true && context.mounted) {
+                                      Navigator.pop(context);
+                                    }
+                                  },
                             icon: const Icon(Icons.lock_outline),
                             label: const Text('Submit lock request'),
                           ),
@@ -6826,8 +6831,15 @@ class LockDialog extends StatefulWidget {
 class _LockDialogState extends State<LockDialog> {
   String reason = 'EMI_OVERDUE';
   final note = TextEditingController();
+  bool _busy = false;
+  String _status = '';
 
   Future<void> submit() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _status = 'Submitting lock request. Please wait...';
+    });
     try {
       final response = await widget.api.post(
         '/api/v1/lock/request',
@@ -6837,16 +6849,40 @@ class _LockDialogState extends State<LockDialog> {
           'note': note.text,
         },
       );
+      final root = asMap(response.data);
+      final data = asMap(root['data']);
+      final decision = text(data['decision'], fallback: 'submitted');
+      final lockLevel = text(data['lockLevel'], fallback: '');
+      final fcm = asMap(asMap(data['delivery'])['fcm']);
+      final fcmOk = fcm['success'] == true;
       if (mounted) {
-        Navigator.pop(context);
-        snack(
-          context,
-          'Decision: ${asMap(response.data)['decision'] ?? 'submitted'}',
+        setState(() {
+          _status = fcmOk
+              ? 'Request approved. Command sent to the phone. Status will refresh shortly.'
+              : 'Request approved. Backend updated status, but phone delivery is still pending.';
+        });
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+        if (!mounted) return;
+        final messenger = ScaffoldMessenger.of(context);
+        Navigator.pop(context, true);
+        final suffix = lockLevel.isEmpty ? '' : ' ($lockLevel)';
+        messenger.showSnackBar(
+          SnackBar(content: Text('Lock request $decision$suffix. Device status is refreshing.')),
         );
       }
     } catch (e) {
       if (mounted) snack(context, readableError(e));
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
     }
+  }
+
+  @override
+  void dispose() {
+    note.dispose();
+    super.dispose();
   }
 
   @override
@@ -6858,7 +6894,7 @@ class _LockDialogState extends State<LockDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            DropdownButtonFormField(
+            DropdownButtonFormField<String>(
               initialValue: reason,
               decoration: const InputDecoration(labelText: 'Reason'),
               items: const [
@@ -6878,25 +6914,50 @@ class _LockDialogState extends State<LockDialog> {
                   value: 'DEVICE_STOLEN',
                   child: Text('Device stolen'),
                 ),
+                DropdownMenuItem(
+                  value: 'TERMS_VIOLATION',
+                  child: Text('Partial lock test'),
+                ),
               ],
-              onChanged: (value) => setState(() => reason = value ?? reason),
+              onChanged: _busy ? null : (value) => setState(() => reason = value ?? reason),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: note,
+              enabled: !_busy,
               maxLength: 200,
               maxLines: 3,
               decoration: const InputDecoration(labelText: 'Note'),
             ),
+            if (_busy || _status.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              if (_busy) const LinearProgressIndicator(minHeight: 3),
+              const SizedBox(height: 10),
+              InlineNotice(
+                message: _status,
+                tone: AppTone.info,
+                icon: Icons.sync_rounded,
+              ),
+            ],
           ],
         ),
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context),
+          onPressed: _busy ? null : () => Navigator.pop(context, false),
           child: const Text('Cancel'),
         ),
-        FilledButton(onPressed: submit, child: const Text('Submit')),
+        FilledButton.icon(
+          onPressed: _busy ? null : submit,
+          icon: _busy
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.lock_outline),
+          label: Text(_busy ? 'Submitting...' : 'Submit'),
+        ),
       ],
     );
   }

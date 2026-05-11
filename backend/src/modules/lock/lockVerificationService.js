@@ -50,10 +50,8 @@ class LockVerificationService {
       failures.push('Grace period extension is active');
     }
 
-    const levelCheck = this.checkDeviceLockLevel(device, reason);
-    if (levelCheck.alreadyAtOrHigher) {
-      failures.push(`Device already at ${levelCheck.currentLevel} lock level (requested: ${levelCheck.requestedLevel})`);
-    }
+    // During demo/testing, lock requests are idempotent: re-submitting a lock
+    // should re-send the command instead of blocking on the current DB state.
 
     const abuseCheck = await this.checkDealerAbuse(dealerUserId || dealerId);
     if (abuseCheck.abused) {

@@ -6,6 +6,7 @@ const lockDeliveryService = require('./lockDeliveryService');
 const locationScheduler = require('../location/locationScheduler');
 const pautService = require('./pautService');
 const padtService = require('./padtService');
+const sseService = require('../sse/sseService');
 
 const LOCK_LEVELS = {
   NONE: 'NONE',
@@ -69,6 +70,11 @@ class LockService {
        WHERE id = $5`,
       [dbLockLevel, dbStatus, reason, dealerIdentity.dealerUserId, deviceId]
     );
+
+    const updatedDevice = await this.getDeviceForSse(deviceId);
+    if (updatedDevice) {
+      sseService.emitDeviceLocked(updatedDevice);
+    }
 
     await locationScheduler.handleDeviceLockChange(deviceId, lockLevel);
 
@@ -313,6 +319,11 @@ class LockService {
       ['NONE', 'enrolled', deviceId]
     );
 
+    const updatedDevice = await this.getDeviceForSse(deviceId);
+    if (updatedDevice) {
+      sseService.emitDeviceUnlocked(updatedDevice, null);
+    }
+
     await locationScheduler.handleDeviceLockChange(deviceId, LOCK_LEVELS.NONE);
 
     await this.logAuditEvent({
@@ -348,6 +359,21 @@ class LockService {
       throw new Error('Device not found');
     }
     return result.rows[0].imei;
+  }
+
+  async getDeviceForSse(deviceId) {
+    const result = await db.query(
+      `SELECT id, imei, device_name, amapi_device_name, dealer_id, lock_level, lock_reason, locked_at
+       FROM devices
+       WHERE id = $1`,
+      [deviceId]
+    );
+    const device = result.rows[0];
+    if (!device) return null;
+    return {
+      ...device,
+      device_name: device.device_name || device.amapi_device_name || device.imei,
+    };
   }
 
   async logAuditEvent({ actor, action, deviceId, metadata, result }) {

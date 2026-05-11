@@ -144,10 +144,13 @@ class _ReadyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final lockLevel = text(lockDetail['lock_level'], fallback: '—');
-    final reason    = text(lockDetail['lock_reason'], fallback: 'No reason provided');
-    final lockedAt  = text(lockDetail['locked_at']);
-    final overdue   = lockDetail['days_overdue'];
+    final lock = asMap(lockDetail['lock']);
+    final emi = asMap(lockDetail['emi']);
+    final lockLevel = text(lock['lock_level'], fallback: 'NONE');
+    final reason    = text(lock['reason'], fallback: 'No reason provided');
+    final lockedAt  = text(lock['locked_at']);
+    final overdue   = lock['days_overdue'] ?? emi['days_overdue'];
+    final isLocked  = lock['is_locked'] == true;
 
     return ListView(
       padding: const EdgeInsets.all(20),
@@ -170,7 +173,7 @@ class _ReadyState extends StatelessWidget {
                 children: [
                   const Icon(Icons.lock_outline, color: AppTone.danger, size: 18),
                   const SizedBox(width: 8),
-                  Text('Device locked',
+                  Text(isLocked ? 'Device locked' : 'No active lock',
                       style: const TextStyle(
                           fontWeight: FontWeight.w700, color: AppTone.danger)),
                   const Spacer(),

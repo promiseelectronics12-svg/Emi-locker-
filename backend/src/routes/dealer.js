@@ -130,9 +130,27 @@ router.get('/devices', asyncHandler(async (req, res) => {
   const dealerIds = getDealerIds(req.user.id, dealer);
 
   const result = await db.query(
-    `SELECT * FROM devices
-     WHERE dealer_id = ANY($1::uuid[])
-     ORDER BY created_at DESC`,
+    `SELECT d.*,
+            es.id AS emi_schedule_id,
+            es.status AS emi_status,
+            es.duration AS emi_duration,
+            es.start_date AS emi_start_date,
+            es.grace_days AS emi_grace_days,
+            lr.reason_code AS latest_lock_reason,
+            lr.note AS latest_lock_note,
+            lr.status AS latest_lock_request_status,
+            lr.created_at AS latest_lock_request_at
+     FROM devices d
+     LEFT JOIN emi_schedules es ON es.device_id = d.id AND es.status = 'active'
+     LEFT JOIN LATERAL (
+       SELECT reason_code, note, status, created_at
+       FROM lock_requests
+       WHERE device_id = d.id
+       ORDER BY created_at DESC
+       LIMIT 1
+     ) lr ON TRUE
+     WHERE d.dealer_id = ANY($1::uuid[])
+     ORDER BY d.created_at DESC`,
     [dealerIds]
   );
 

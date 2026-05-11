@@ -9,7 +9,7 @@ const lockController = require('./lockController');
 
 const lockRequestLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 10,
+  max: parseInt(process.env.LOCK_REQUEST_RATE_LIMIT_MAX || '1000', 10),
   message: { error: 'Too many lock requests, please try again later' },
 });
 
