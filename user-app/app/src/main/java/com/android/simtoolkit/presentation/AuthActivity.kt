@@ -101,29 +101,38 @@ class AuthActivity : ComponentActivity() {
     lateinit var emiScheduleDao: EmiScheduleDao
 
     private val notificationPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            _permissionChainActive = false
+        }
 
     private val locationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            _permissionChainActive = false
             openDeviceAdminIfNeeded()
         }
 
     private val deviceAdminLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            _permissionChainActive = false
             openOverlayIfNeeded()
         }
 
     private val overlaySettingsLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            _permissionChainActive = false
             openBatteryOptimizationIfNeeded()
         }
 
     private val batterySettingsLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            _permissionChainActive = false
+        }
+
+    // Track whether device was bound when we last entered onResume
+    private var _wasBound = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        requestNotificationPermission()
         enableEdgeToEdge()
         setContent {
             EMILockerTheme {
@@ -137,6 +146,8 @@ class AuthActivity : ComponentActivity() {
 
                     LaunchedEffect(Unit) {
                         isActivated = preferencesManager.isDeviceBound.first()
+                        _wasBound = isActivated
+                        if (isActivated) advancePermissionChain()
                     }
 
                     if (isActivated) {
@@ -164,6 +175,7 @@ class AuthActivity : ComponentActivity() {
                                     val outcome = verifyActivation(code, deviceBoundId)
                                     if (outcome.activated) {
                                         isActivated = true
+                                        _wasBound = true
                                         startPermissionOnboarding()
                                         Result.success(Unit)
                                     } else {
@@ -180,13 +192,38 @@ class AuthActivity : ComponentActivity() {
         }
     }
 
+    // True when we are actively stepping through the permission chain so
+    // onResume doesn't re-trigger while a system dialog is open.
+    private var _permissionChainActive = false
+
     private fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            !hasPermission(Manifest.permission.POST_NOTIFICATIONS)) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
+    // Called on every onResume when device is bound — advances to the next
+    // missing permission so the chain self-heals after any Settings visit.
+    private fun advancePermissionChain() {
+        if (_permissionChainActive) return
+        when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                !hasPermission(Manifest.permission.POST_NOTIFICATIONS) -> requestNotificationPermission()
+            !hasForegroundLocationPermission() -> startPermissionOnboarding()
+            !isDeviceAdminActive() -> openDeviceAdminIfNeeded()
+            !Settings.canDrawOverlays(this) -> openOverlayIfNeeded()
+            else -> { /* all permissions satisfied */ }
+        }
+    }
+
+    private fun isDeviceAdminActive(): Boolean {
+        val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        return dpm.isAdminActive(DeviceAdminReceiver.getAdminComponent(this))
+    }
+
     private fun startPermissionOnboarding() {
+        _permissionChainActive = true
         when {
             !hasForegroundLocationPermission() -> locationPermissionLauncher.launch(
                 arrayOf(
@@ -194,28 +231,27 @@ class AuthActivity : ComponentActivity() {
                     Manifest.permission.ACCESS_COARSE_LOCATION
                 )
             )
-            else -> openDeviceAdminIfNeeded()
+            else -> { _permissionChainActive = false; openDeviceAdminIfNeeded() }
         }
     }
 
     private fun openDeviceAdminIfNeeded() {
-        val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-        val admin = DeviceAdminReceiver.getAdminComponent(this)
-        if (dpm.isAdminActive(admin)) {
+        if (isDeviceAdminActive()) {
+            _permissionChainActive = false
             openOverlayIfNeeded()
             return
         }
 
+        val admin = DeviceAdminReceiver.getAdminComponent(this)
         val isXiaomi = Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true)
 
-        // Try to launch a settings page — Xiaomi HyperOS/MIUI uses different paths
+        // Build intent list — standard first, OEM-specific fallbacks after
         val intents = buildList {
             add(Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
                 putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
                 putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Enable SIM Toolkit to manage this device.")
             })
             if (isXiaomi) {
-                // HyperOS/MIUI: Privacy Protection → Special app access → Device admin apps
                 add(Intent().apply {
                     setClassName("com.miui.securitycenter",
                         "com.miui.permcenter.privacymanager.SpecialPermListActivity")
@@ -235,11 +271,13 @@ class AuthActivity : ComponentActivity() {
             } catch (_: Exception) {}
         }
 
-        if (!launched || isXiaomi) {
+        if (!launched) {
+            // Nothing opened — show manual instructions only when all intents failed
             val path = if (isXiaomi)
-                "1. Open Settings\n2. Tap the Search icon (🔍) at the top\n3. Type \"Device Admin\"\n4. Tap \"Device admin apps\" from results\n5. Enable SIM Toolkit"
+                "1. Open Settings\n2. Tap Search (🔍)\n3. Type \"Device Admin\"\n4. Tap \"Device admin apps\"\n5. Enable SIM Toolkit"
             else
                 "Settings → Security → Device admin apps → enable SIM Toolkit"
+            _permissionChainActive = false
             android.app.AlertDialog.Builder(this)
                 .setTitle("Enable Device Admin")
                 .setMessage(path)
@@ -284,6 +322,14 @@ class AuthActivity : ComponentActivity() {
     private fun hasForegroundLocationPermission(): Boolean {
         return hasPermission(Manifest.permission.ACCESS_FINE_LOCATION) ||
             hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // When device is bound and user returns from any Settings page,
+        // automatically advance to the next missing permission.
+        val bound = _wasBound
+        if (bound) advancePermissionChain()
     }
 
     private fun currentSetupStatus(refreshKey: Int): SetupStatus {
