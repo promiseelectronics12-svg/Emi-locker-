@@ -13,6 +13,7 @@
 
     <!-- Phone support for dealer contact. SMS/call-log permissions are production-policy gated. -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <!-- IMEI reading for device binding — DPM.getImei() used on Android 10+ when Device Owner -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
 
@@ -137,6 +138,15 @@
             <intent-filter>
                 <action android:name="com.android.simtoolkit.DEBUG_SHOW_OVERLAY" />
                 <action android:name="com.android.simtoolkit.DEBUG_HIDE_OVERLAY" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".sms.OfflineUnlockSmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
             </intent-filter>
         </receiver>
 

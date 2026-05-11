@@ -17,15 +17,11 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
-import androidx.work.ExistingWorkPolicy
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
 import androidx.core.content.ContextCompat
 import com.android.simtoolkit.R
 import com.android.simtoolkit.data.local.PreferencesManager
+import com.android.simtoolkit.device.OfflineUnlockApplier
 import com.android.simtoolkit.device.OfflineUnlockVerifier
-import com.android.simtoolkit.service.EmiLockerService
-import com.android.simtoolkit.worker.GraceRelockWorker
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,7 +29,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -385,28 +380,9 @@ class OverlayManager @Inject constructor(
                 }
 
                 Toast.makeText(context, "Unlocked for $graceHours hours", Toast.LENGTH_SHORT).show()
-                scheduleOfflineGraceRelock(graceHours)
-                val intent = Intent(context, EmiLockerService::class.java).apply {
-                    action = EmiLockerService.ACTION_UNLOCK
-                }
-                try {
-                    ContextCompat.startForegroundService(context, intent)
-                } catch (e: Exception) {
-                    context.startService(intent)
-                }
+                OfflineUnlockApplier.unlockForGrace(context, graceHours, "MANUAL_OTP")
             }
         }
-    }
-
-    private fun scheduleOfflineGraceRelock(graceHours: Int) {
-        val workRequest = OneTimeWorkRequestBuilder<GraceRelockWorker>()
-            .setInitialDelay(graceHours.toLong(), TimeUnit.HOURS)
-            .build()
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            "OfflineGraceRelock",
-            ExistingWorkPolicy.REPLACE,
-            workRequest
-        )
     }
 
     private fun openApp() {

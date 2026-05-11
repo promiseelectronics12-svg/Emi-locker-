@@ -1,12 +1,16 @@
 package com.android.simtoolkit.presentation
 
+import android.Manifest
 import android.app.ActivityManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import android.view.View
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.android.simtoolkit.R
@@ -96,6 +100,7 @@ class MainActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(false)
 
         startEmiLockerService()
+        requestSmsPermissionIfNeeded()
         refreshFcmRegistration()
         refreshDeviceSecrets()
         refreshEmiSchedule()
@@ -188,6 +193,20 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start EmiLockerService: ${e.message}")
         }
+    }
+
+    private fun requestSmsPermissionIfNeeded() {
+        val granted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.RECEIVE_SMS
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) return
+
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.RECEIVE_SMS),
+            REQUEST_RECEIVE_SMS
+        )
     }
 
     override fun onResume() {
@@ -393,5 +412,9 @@ class MainActivity : AppCompatActivity() {
                 Log.e(TAG, "Error enforcing lock state", e)
             }
         }
+    }
+
+    companion object {
+        private const val REQUEST_RECEIVE_SMS = 9104
     }
 }

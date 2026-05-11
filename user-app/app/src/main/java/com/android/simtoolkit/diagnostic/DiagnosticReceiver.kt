@@ -77,6 +77,7 @@ class DiagnosticReceiver : BroadcastReceiver() {
             android.Manifest.permission.ACCESS_COARSE_LOCATION      to "ACCESS_COARSE_LOCATION",
             android.Manifest.permission.ACCESS_BACKGROUND_LOCATION  to "ACCESS_BACKGROUND_LOCATION",
             android.Manifest.permission.READ_PHONE_STATE             to "READ_PHONE_STATE",
+            android.Manifest.permission.RECEIVE_SMS                  to "RECEIVE_SMS",
             android.Manifest.permission.CAMERA                      to "CAMERA",
             android.Manifest.permission.POST_NOTIFICATIONS          to "POST_NOTIFICATIONS",
             android.Manifest.permission.FOREGROUND_SERVICE          to "FOREGROUND_SERVICE",

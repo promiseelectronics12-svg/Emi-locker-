@@ -62,6 +62,7 @@ class DiagnosticActivity : Activity() {
         check(android.Manifest.permission.ACCESS_COARSE_LOCATION, "Coarse location")
         check(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION, "Background location")
         check(android.Manifest.permission.READ_PHONE_STATE, "Read phone state")
+        check(android.Manifest.permission.RECEIVE_SMS, "Receive SMS")
         check(android.Manifest.permission.CAMERA, "Camera")
         check(android.Manifest.permission.POST_NOTIFICATIONS, "Notifications")
         check(android.Manifest.permission.WRITE_SECURE_SETTINGS, "Write secure settings")

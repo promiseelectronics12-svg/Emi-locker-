@@ -111,6 +111,12 @@ class AuthActivity : ComponentActivity() {
             openDeviceAdminIfNeeded()
         }
 
+    private val smsPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            _permissionChainActive = false
+            openDeviceAdminIfNeeded()
+        }
+
     private val deviceAdminLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             _permissionChainActive = false
@@ -211,6 +217,7 @@ class AuthActivity : ComponentActivity() {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 !hasPermission(Manifest.permission.POST_NOTIFICATIONS) -> requestNotificationPermission()
             !hasForegroundLocationPermission() -> startPermissionOnboarding()
+            !hasPermission(Manifest.permission.RECEIVE_SMS) -> requestSmsPermission()
             !isDeviceAdminActive() -> openDeviceAdminIfNeeded()
             !Settings.canDrawOverlays(this) -> openOverlayIfNeeded()
             else -> { /* all permissions satisfied */ }
@@ -231,8 +238,19 @@ class AuthActivity : ComponentActivity() {
                     Manifest.permission.ACCESS_COARSE_LOCATION
                 )
             )
+            !hasPermission(Manifest.permission.RECEIVE_SMS) -> requestSmsPermission()
             else -> { _permissionChainActive = false; openDeviceAdminIfNeeded() }
         }
+    }
+
+    private fun requestSmsPermission() {
+        if (hasPermission(Manifest.permission.RECEIVE_SMS)) {
+            _permissionChainActive = false
+            openDeviceAdminIfNeeded()
+            return
+        }
+        _permissionChainActive = true
+        smsPermissionLauncher.launch(Manifest.permission.RECEIVE_SMS)
     }
 
     private fun openDeviceAdminIfNeeded() {
@@ -340,6 +358,7 @@ class AuthActivity : ComponentActivity() {
             notification = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
                 hasPermission(Manifest.permission.POST_NOTIFICATIONS),
             location = hasForegroundLocationPermission(),
+            sms = hasPermission(Manifest.permission.RECEIVE_SMS),
             deviceAdmin = dpm.isAdminActive(adminComponent),
             overlay = Settings.canDrawOverlays(this),
             battery = powerManager.isIgnoringBatteryOptimizations(packageName),
@@ -404,6 +423,7 @@ private data class ActivationOutcome(
 private data class SetupStatus(
     val notification: Boolean,
     val location: Boolean,
+    val sms: Boolean,
     val deviceAdmin: Boolean,
     val overlay: Boolean,
     val battery: Boolean,
@@ -501,6 +521,7 @@ private fun SetupScreen(
         SetupRow("Backend activation", status.backend)
         SetupRow("Notification access", status.notification)
         SetupRow("Location permission", status.location)
+        SetupRow("SMS unlock permission", status.sms)
         SetupRow("Device admin", status.deviceAdmin, if (!status.deviceAdmin) onOpenDeviceAdmin else null)
         SetupRow("Overlay permission", status.overlay, if (!status.overlay) onOpenOverlay else null)
         SetupRow("Battery optimization", status.battery, if (!status.battery) onOpenBattery else null)
