@@ -554,6 +554,9 @@ class AppUser {
   final String shopName;
 
   bool get isReseller => role == 'reseller';
+  bool get isDemo =>
+      email.toLowerCase() == 'dealer@emi-locker.com' ||
+      email.toLowerCase() == 'reseller@emi-locker.com';
 
   factory AppUser.fromJson(Map<String, dynamic> json) => AppUser(
     id: text(json['id']),
@@ -1971,6 +1974,7 @@ class _WorkspaceState extends State<Workspace> {
             Icons.qr_code_scanner,
             EnrollmentPage(
               api: widget.api,
+              requireEvidence: !widget.session.user.isDemo,
               onNavigate: (page) => setState(() => index = page),
             ),
           ),
@@ -4005,9 +4009,11 @@ class EnrollmentPage extends StatefulWidget {
     super.key,
     required this.api,
     required this.onNavigate,
+    this.requireEvidence = true,
   });
   final ApiClient api;
   final ValueChanged<int> onNavigate;
+  final bool requireEvidence;
 
   @override
   State<EnrollmentPage> createState() => _EnrollmentPageState();
@@ -4075,7 +4081,10 @@ class _EnrollmentPageState extends State<EnrollmentPage> {
                   : () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => BindDeviceWizard(api: widget.api),
+                          builder: (_) => BindDeviceWizard(
+                            api: widget.api,
+                            requireEvidence: widget.requireEvidence,
+                          ),
                         ),
                       ).then((_) => setState(() => _keyCountFuture = _loadKeyCount())),
               icon: const Icon(Icons.add_circle_outline_rounded),

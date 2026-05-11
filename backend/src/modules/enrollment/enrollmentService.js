@@ -224,7 +224,7 @@ async function startEnrollment({
   logger.info('Enrollment started', { enrollmentId, imei: imei1.slice(-4) });
 
   // Return plaintext token to dealer app — dealer will type it into the user app
-  return { enrollment_id: enrollmentId, token };
+  return { enrollment_id: enrollmentId, device_id: device.id, token };
 }
 
 /**

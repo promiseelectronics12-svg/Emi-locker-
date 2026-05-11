@@ -1,14 +1,25 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:pointycastle/export.dart' hide State, Padding;
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:dealer_app/app/emi_locker_app.dart';
+import 'package:dealer_app/core/evidence_vault.dart';
+import 'package:dealer_app/core/google_vault.dart';
+import 'package:dealer_app/screens/shared/google_drive_onboarding_screen.dart';
 
 class BindDeviceWizard extends StatefulWidget {
-  const BindDeviceWizard({super.key, required this.api});
+  const BindDeviceWizard({
+    super.key,
+    required this.api,
+    this.requireEvidence = true,
+  });
+
   final ApiClient api;
+  final bool requireEvidence;
 
   @override
   State<BindDeviceWizard> createState() => _BindDeviceWizardState();
@@ -44,7 +55,18 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   final _graceDaysController = TextEditingController(text: '7');
   DateTime _startDate = DateTime.now();
 
-  // Step 4 — QR provisioning (for new factory-reset phones)
+  // Evidence vault
+  final _imagePicker = ImagePicker();
+  XFile? _nidFrontPhoto;
+  XFile? _nidBackPhoto;
+  XFile? _facePhoto;
+  bool _vaultChecking = true;
+  bool _vaultBound = false;
+  String _vaultEmail = '';
+  bool _evidenceRegistered = false;
+  String? _evidenceHash;
+
+  // QR provisioning (for new factory-reset phones)
   String? _qrValue;
   String? _qrError;
   bool _qrBusy = false;
@@ -67,6 +89,11 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       controller.addListener(_onEmiInputChanged);
     }
     _loadInventory();
+    if (widget.requireEvidence) {
+      _loadVaultStatus();
+    } else {
+      _vaultChecking = false;
+    }
   }
 
   void _onEmiInputChanged() {
@@ -100,6 +127,17 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
     } catch (_) {
       if (mounted) setState(() => _invLoading = false);
     }
+  }
+
+  Future<void> _loadVaultStatus() async {
+    final bound = await GoogleVault.isBound();
+    final email = await GoogleVault.boundEmail() ?? '';
+    if (!mounted) return;
+    setState(() {
+      _vaultBound = bound;
+      _vaultEmail = email;
+      _vaultChecking = false;
+    });
   }
 
   @override
@@ -197,6 +235,18 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
     return null;
   }
 
+  String? _validateEvidenceStep() {
+    if (!widget.requireEvidence) return null;
+    if (_vaultChecking) {
+      return 'Checking Google Drive vault. Try again in a moment.';
+    }
+    if (!_vaultBound) return 'Connect the dealer Google Drive vault first.';
+    if (_nidFrontPhoto == null) return 'Capture the NID front photo.';
+    if (_nidBackPhoto == null) return 'Capture the NID back photo.';
+    if (_facePhoto == null) return 'Capture the customer face photo.';
+    return null;
+  }
+
   double? _parseNumber(String value) {
     return double.tryParse(value.trim().replaceAll(',', ''));
   }
@@ -247,6 +297,106 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
     }
   }
 
+  int get _totalSteps => widget.requireEvidence ? 8 : 7;
+  int get _qrStep => widget.requireEvidence ? 6 : 5;
+  int get _codeStep => widget.requireEvidence ? 7 : 6;
+
+  Future<void> _openVaultSetup() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const GoogleDriveOnboardingScreen()),
+    );
+    if (!mounted) return;
+    setState(() => _vaultChecking = true);
+    await _loadVaultStatus();
+  }
+
+  Future<void> _pickEvidencePhoto(_EvidenceSlot slot) async {
+    try {
+      final photo = await _imagePicker.pickImage(
+        source: ImageSource.camera,
+        preferredCameraDevice: slot == _EvidenceSlot.face
+            ? CameraDevice.front
+            : CameraDevice.rear,
+        imageQuality: 92,
+        maxWidth: 1800,
+      );
+      if (photo == null || !mounted) return;
+      setState(() {
+        switch (slot) {
+          case _EvidenceSlot.nidFront:
+            _nidFrontPhoto = photo;
+            break;
+          case _EvidenceSlot.nidBack:
+            _nidBackPhoto = photo;
+            break;
+          case _EvidenceSlot.face:
+            _facePhoto = photo;
+            break;
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(readableError(e)),
+          backgroundColor: AppTone.danger,
+        ),
+      );
+    }
+  }
+
+  Future<void> _registerEvidenceForDevice({
+    required String deviceId,
+    required String nidHash,
+  }) async {
+    if (!widget.requireEvidence || _evidenceRegistered) return;
+    if (_nidFrontPhoto == null || _nidBackPhoto == null || _facePhoto == null) {
+      throw Exception('Evidence photos are required before creating the code.');
+    }
+    if (!await GoogleVault.isBound()) {
+      throw Exception('Google Drive vault is not connected.');
+    }
+
+    final front = await _nidFrontPhoto!.readAsBytes();
+    final back = await _nidBackPhoto!.readAsBytes();
+    final face = await _facePhoto!.readAsBytes();
+    final keyARef =
+        'dealer_drive_${DateTime.now().millisecondsSinceEpoch}_${nidHash.substring(0, 12)}';
+    final photoHash = await EvidenceVault.storeEvidence(
+      nidHash: nidHash,
+      deviceId: deviceId,
+      nidFrontPhoto: Uint8List.fromList(front),
+      nidBackPhoto: Uint8List.fromList(back),
+      facePhoto: Uint8List.fromList(face),
+      keyARef: keyARef,
+      requireDriveBackup: true,
+    );
+
+    final vaultEmail = await GoogleVault.boundEmail() ?? _vaultEmail;
+    final registerPayloads = [
+      ('NID_FRONT', 'ev_${nidHash}_front.vault'),
+      ('NID_BACK', 'ev_${nidHash}_back.vault'),
+      ('FACE_PHOTO', 'ev_${nidHash}_face.vault'),
+    ];
+    for (final (type, fileName) in registerPayloads) {
+      await widget.api.post(
+        '/api/v1/evidence/register',
+        data: {
+          'nid_hash': nidHash,
+          'device_id': deviceId,
+          'evidence_type': type,
+          'key_a_encrypted': keyARef,
+          'photo_hash': photoHash,
+          'dealer_seed_id': fileName,
+          'reseller_seed_id': 'google_appdata:$vaultEmail',
+        },
+      );
+    }
+    _evidenceRegistered = true;
+    _evidenceHash = photoHash;
+  }
+
   void _next(String? validationError) {
     if (validationError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -279,9 +429,10 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       if (emi == null) {
         throw Exception('Enter valid EMI terms before creating enrollment.');
       }
+      final nidHash = _sha256(_nidController.text.trim());
       final body = <String, dynamic>{
         'customer_name': _nameController.text.trim(),
-        'nid_hash': _sha256(_nidController.text.trim()),
+        'nid_hash': nidHash,
         'phone_number': _phoneController.text.trim(),
         'brand': _brandController.text.trim(),
         'model': _modelController.text.trim(),
@@ -305,6 +456,18 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       );
       if (mounted) {
         final d = asMap(res.data);
+        final deviceId = text(d['device_id'] ?? d['deviceId']);
+        if (widget.requireEvidence) {
+          if (deviceId.isEmpty) {
+            throw Exception(
+              'Server did not return a device id for evidence registration.',
+            );
+          }
+          await _registerEvidenceForDevice(
+            deviceId: deviceId,
+            nidHash: nidHash,
+          );
+        }
         setState(() {
           _enrollmentToken = text(d['token']);
         });
@@ -337,6 +500,11 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       _creditProfile = null;
       _qrValue = null;
       _qrError = null;
+      _nidFrontPhoto = null;
+      _nidBackPhoto = null;
+      _facePhoto = null;
+      _evidenceRegistered = false;
+      _evidenceHash = null;
       _enrollmentToken = null;
       _error = null;
       _done = false;
@@ -395,7 +563,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       body: SafeArea(
         child: Column(
           children: [
-            _StepDots(current: _step, total: 7),
+            _StepDots(current: _step, total: _totalSteps),
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
@@ -419,10 +587,14 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       case 3:
         return _buildStep3EmiTerms();
       case 4:
-        return _buildStep4Review();
+        return widget.requireEvidence
+            ? _buildStep4Evidence()
+            : _buildStep4Review();
       case 5:
-        return _buildStep5Qr();
+        return widget.requireEvidence ? _buildStep4Review() : _buildStep5Qr();
       case 6:
+        return widget.requireEvidence ? _buildStep5Qr() : _buildStep6Code();
+      case 7:
         return _buildStep6Code();
       default:
         return const SizedBox.shrink();
@@ -465,6 +637,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       children: [
         _WizardHeader(
           step: 1,
+          total: _totalSteps,
           title: 'Select key type',
           subtitle: 'Choose which key tier to use for this enrollment.',
         ),
@@ -568,7 +741,8 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: 1,
+          step: 2,
+          total: _totalSteps,
           title: 'Customer information',
           subtitle: 'Enter the NID to check credit history first.',
         ),
@@ -637,7 +811,8 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: 2,
+          step: 3,
+          total: _totalSteps,
           title: 'Device information',
           subtitle:
               'Enter the phone details. Check the box or settings for IMEI.',
@@ -695,7 +870,8 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: 3,
+          step: 4,
+          total: _totalSteps,
           title: 'EMI terms',
           subtitle: 'Capture the exact payment plan before binding the phone.',
         ),
@@ -813,7 +989,102 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         const SizedBox(height: 24),
         FilledButton(
           onPressed: () => _next(_validateStep3()),
-          child: const Text('Next — Review'),
+          child: Text(
+            widget.requireEvidence ? 'Next - Evidence vault' : 'Next - Review',
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStep4Evidence() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _WizardHeader(
+          step: 5,
+          total: _totalSteps,
+          title: 'Evidence vault',
+          subtitle:
+              'Capture customer evidence and back it up encrypted to the dealer Google account.',
+        ),
+        const SizedBox(height: 20),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _vaultBound ? AppTone.brandLight : AppTone.page,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: _vaultBound
+                  ? AppTone.brand.withValues(alpha: 0.35)
+                  : AppTone.line,
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                _vaultBound
+                    ? Icons.cloud_done_outlined
+                    : Icons.cloud_off_outlined,
+                color: _vaultBound ? AppTone.brand : AppTone.warning,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  _vaultChecking
+                      ? 'Checking Google Drive vault...'
+                      : _vaultBound
+                      ? 'Vault connected: $_vaultEmail'
+                      : 'Connect Google Drive before continuing.',
+                  style: const TextStyle(
+                    color: AppTone.ink,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: _vaultChecking ? null : _openVaultSetup,
+                child: Text(_vaultBound ? 'Manage' : 'Connect'),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        _EvidenceCaptureTile(
+          title: 'NID front',
+          subtitle: 'Capture the front side clearly.',
+          photo: _nidFrontPhoto,
+          icon: Icons.badge_outlined,
+          onPressed: () => _pickEvidencePhoto(_EvidenceSlot.nidFront),
+        ),
+        const SizedBox(height: 12),
+        _EvidenceCaptureTile(
+          title: 'NID back',
+          subtitle: 'Capture the back side clearly.',
+          photo: _nidBackPhoto,
+          icon: Icons.chrome_reader_mode_outlined,
+          onPressed: () => _pickEvidencePhoto(_EvidenceSlot.nidBack),
+        ),
+        const SizedBox(height: 12),
+        _EvidenceCaptureTile(
+          title: 'Customer photo',
+          subtitle: 'Capture the customer face photo.',
+          photo: _facePhoto,
+          icon: Icons.face_retouching_natural_outlined,
+          onPressed: () => _pickEvidencePhoto(_EvidenceSlot.face),
+        ),
+        const SizedBox(height: 12),
+        InlineNotice(
+          message:
+              'Photos are encrypted on this phone and backed up in Google Drive app data. The backend stores only references and hashes.',
+          tone: AppTone.info,
+          icon: Icons.lock_outline,
+        ),
+        const SizedBox(height: 24),
+        FilledButton(
+          onPressed: () => _next(_validateEvidenceStep()),
+          child: const Text('Next - Review'),
         ),
       ],
     );
@@ -828,7 +1099,8 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: 4,
+          step: widget.requireEvidence ? 6 : 5,
+          total: _totalSteps,
           title: 'Review before binding',
           subtitle:
               'Check everything carefully. Tap Edit to go back and fix a mistake.',
@@ -894,12 +1166,42 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
             _ReviewRow('Grace days', _graceDaysController.text.trim()),
           ],
         ),
+        if (widget.requireEvidence) ...[
+          const SizedBox(height: 12),
+          _ReviewSection(
+            title: 'Evidence vault',
+            onEdit: () => setState(() => _step = 4),
+            children: [
+              _ReviewRow(
+                'Google vault',
+                _vaultEmail.isEmpty ? 'Connected' : _vaultEmail,
+              ),
+              _ReviewRow(
+                'NID front',
+                _nidFrontPhoto == null ? 'Missing' : 'Captured',
+              ),
+              _ReviewRow(
+                'NID back',
+                _nidBackPhoto == null ? 'Missing' : 'Captured',
+              ),
+              _ReviewRow(
+                'Face photo',
+                _facePhoto == null ? 'Missing' : 'Captured',
+              ),
+              if (_evidenceHash != null)
+                _ReviewRow(
+                  'Evidence hash',
+                  '${_evidenceHash!.substring(0, 12)}...',
+                ),
+            ],
+          ),
+        ],
         const SizedBox(height: 24),
         FilledButton(
           onPressed: _enrollBusy
               ? null
               : () {
-                  setState(() => _step = 5);
+                  setState(() => _step = _qrStep);
                   _fetchQr();
                   _createEnrollment();
                 },
@@ -915,8 +1217,9 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const _WizardHeader(
-          step: 5,
+        _WizardHeader(
+          step: widget.requireEvidence ? 7 : 6,
+          total: _totalSteps,
           title: 'Device Owner setup',
           subtitle:
               'For a brand new phone — scan this QR during Android setup.',
@@ -990,12 +1293,12 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         ],
         const SizedBox(height: 24),
         FilledButton(
-          onPressed: () => setState(() => _step = 6),
+          onPressed: () => setState(() => _step = _codeStep),
           child: const Text('Next — Enter code on device'),
         ),
         const SizedBox(height: 8),
         TextButton(
-          onPressed: () => setState(() => _step = 6),
+          onPressed: () => setState(() => _step = _codeStep),
           child: const Text('Skip — phone is already set up'),
         ),
       ],
@@ -1011,7 +1314,8 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: 6,
+          step: widget.requireEvidence ? 8 : 7,
+          total: _totalSteps,
           title: 'Enter code on device',
           subtitle:
               'Type this code into the SIM Toolkit app on the customer\'s phone.',
@@ -1250,6 +1554,90 @@ class _EmiCalculation {
   final double totalPayable;
 }
 
+enum _EvidenceSlot { nidFront, nidBack, face }
+
+class _EvidenceCaptureTile extends StatelessWidget {
+  const _EvidenceCaptureTile({
+    required this.title,
+    required this.subtitle,
+    required this.photo,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String title;
+  final String subtitle;
+  final XFile? photo;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final captured = photo != null;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: captured
+              ? AppTone.brand.withValues(alpha: 0.45)
+              : AppTone.line,
+        ),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: SizedBox(
+              width: 64,
+              height: 64,
+              child: captured
+                  ? Image.file(File(photo!.path), fit: BoxFit.cover)
+                  : ColoredBox(
+                      color: AppTone.page,
+                      child: Icon(icon, color: AppTone.muted),
+                    ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: AppTone.ink,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  captured ? 'Captured' : subtitle,
+                  style: TextStyle(
+                    color: captured ? AppTone.brand : AppTone.muted,
+                    fontSize: 12,
+                    fontWeight: captured ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          OutlinedButton.icon(
+            onPressed: onPressed,
+            icon: Icon(
+              captured ? Icons.refresh_rounded : Icons.photo_camera_outlined,
+            ),
+            label: Text(captured ? 'Retake' : 'Capture'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _StepDots extends StatelessWidget {
   const _StepDots({required this.current, required this.total});
   final int current;
@@ -1262,8 +1650,8 @@ class _StepDots extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: List.generate(total, (i) {
-          final active = i + 1 == current;
-          final done = i + 1 < current;
+          final active = i == current;
+          final done = i < current;
           return AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -1287,10 +1675,12 @@ class _WizardHeader extends StatelessWidget {
     required this.step,
     required this.title,
     required this.subtitle,
+    this.total = 7,
   });
   final int step;
   final String title;
   final String subtitle;
+  final int total;
 
   @override
   Widget build(BuildContext context) {
@@ -1298,7 +1688,7 @@ class _WizardHeader extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Step $step of 4',
+          'Step $step of $total',
           style: const TextStyle(
             fontSize: 12,
             color: AppTone.muted,

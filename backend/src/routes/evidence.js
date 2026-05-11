@@ -29,7 +29,22 @@ router.post(
 
     // Verify this device belongs to the requesting dealer
     const deviceCheck = await db.query(
-      `SELECT id FROM devices WHERE id = $1 AND dealer_id = $2`,
+      `SELECT dev.id
+       FROM devices dev
+       LEFT JOIN dealers device_dealer ON device_dealer.id = dev.dealer_id
+       LEFT JOIN enrollments pending_enrollment
+         ON pending_enrollment.device_id = dev.id
+        AND pending_enrollment.status = 'pending'
+       LEFT JOIN dealers enrollment_dealer
+         ON enrollment_dealer.id = pending_enrollment.dealer_id
+       WHERE dev.id = $1
+         AND (
+           dev.dealer_id = $2
+           OR device_dealer.user_id = $2
+           OR pending_enrollment.dealer_id = $2
+           OR enrollment_dealer.user_id = $2
+         )
+       LIMIT 1`,
       [device_id, req.user.id]
     );
     if (deviceCheck.rows.length === 0) {
