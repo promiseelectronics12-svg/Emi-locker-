@@ -66,7 +66,15 @@ router.post(
     const db = require('../../config/database');
     try {
       await db.query(
-        `UPDATE devices SET fcm_token = $1, fcm_token_updated_at = NOW(), updated_at = NOW() WHERE id = $2 AND status = 'enrolled'`,
+        `UPDATE devices
+         SET fcm_token = $1,
+             fcm_token_updated_at = NOW(),
+             fcm_token_status = 'valid',
+             last_seen_at = NOW(),
+             device_health_status = 'online',
+             app_uninstall_suspected_at = NULL,
+             updated_at = NOW()
+         WHERE id = $2 AND status = 'enrolled'`,
         [req.body.fcm_token, req.params.deviceId]
       );
       return res.json({ success: true });

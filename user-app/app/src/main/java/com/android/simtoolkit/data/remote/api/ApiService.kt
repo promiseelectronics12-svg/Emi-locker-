@@ -86,6 +86,12 @@ interface ApiService {
     suspend fun getDeviceEmiSchedule(
         @Header("x-device-token") deviceToken: String
     ): Response<DeviceEmiScheduleResponse>
+
+    @POST("api/v1/device/heartbeat")
+    suspend fun sendDeviceHeartbeat(
+        @Header("x-device-token") deviceToken: String,
+        @Body body: Map<String, String>
+    ): Response<Unit>
 }
 
 data class DeviceTokenRefreshResponse(

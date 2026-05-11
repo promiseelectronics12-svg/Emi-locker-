@@ -70,7 +70,18 @@ async function sendToDevice(fcmToken, payload) {
   } catch (error) {
     const err = error;
     console.error('FCM send error:', { code: err.code, message: err.message });
-    return { messageId: '', success: false };
+    const invalidToken = [
+      'messaging/registration-token-not-registered',
+      'messaging/invalid-registration-token',
+      'messaging/invalid-argument',
+    ].includes(err.code);
+    return {
+      messageId: '',
+      success: false,
+      code: err.code || '',
+      error: err.message || 'FCM send failed',
+      invalidToken,
+    };
   }
 }
 

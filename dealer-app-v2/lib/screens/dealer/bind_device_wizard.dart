@@ -1714,7 +1714,7 @@ class _WizardHeader extends StatelessWidget {
   }
 }
 
-class _Field extends StatelessWidget {
+class _Field extends StatefulWidget {
   const _Field({
     required this.controller,
     required this.label,
@@ -1731,20 +1731,73 @@ class _Field extends StatelessWidget {
   final VoidCallback? onEditingComplete;
 
   @override
+  State<_Field> createState() => _FieldState();
+}
+
+class _FieldState extends State<_Field> {
+  final _focus = FocusNode();
+  bool _focused = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(() => setState(() => _focused = _focus.hasFocus));
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      keyboardType: keyboard,
-      maxLength: maxLength,
-      onEditingComplete: onEditingComplete,
-      decoration: InputDecoration(
-        labelText: label,
-        hintText: hint,
-        counterText: '',
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppTone.brand, width: 2),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: _focused
+            ? [
+                BoxShadow(
+                  color: AppTone.brand.withValues(alpha: 0.18),
+                  blurRadius: 16,
+                  spreadRadius: 1,
+                  offset: const Offset(0, 3),
+                ),
+              ]
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1),
+                ),
+              ],
+      ),
+      child: TextField(
+        controller: widget.controller,
+        focusNode: _focus,
+        keyboardType: widget.keyboard,
+        maxLength: widget.maxLength,
+        onEditingComplete: widget.onEditingComplete,
+        decoration: InputDecoration(
+          labelText: widget.label,
+          hintText: widget.hint,
+          counterText: '',
+          filled: true,
+          fillColor: _focused ? const Color(0xFFF0FDF9) : const Color(0xFFF8F9FA),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AppTone.brand, width: 2),
+          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
         ),
       ),
     );

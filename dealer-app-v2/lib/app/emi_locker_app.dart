@@ -315,24 +315,55 @@ class _EmiLockerAppState extends State<EmiLockerApp> {
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
-          fillColor: const Color(0xFFF3F4F6), // Soft gray background
-          isDense: true,
+          fillColor: const Color(0xFFF8F9FA),
+          isDense: false,
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 16,
-            vertical: 16,
+            vertical: 15,
           ),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide.none, // No border by default
+            borderSide: const BorderSide(color: Color(0xFFE5E7EB), width: 1),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide.none,
+            borderSide: const BorderSide(color: Color(0xFFE5E7EB), width: 1),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: AppTone.brand, width: 1.5),
+            borderSide: const BorderSide(color: AppTone.brand, width: 2),
           ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AppTone.danger, width: 1.5),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AppTone.danger, width: 2),
+          ),
+          labelStyle: TextStyle(
+            color: AppTone.muted,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+          floatingLabelStyle: TextStyle(
+            color: AppTone.brand,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+          hintStyle: const TextStyle(
+            color: Color(0xFFB0B8C4),
+            fontSize: 14,
+            fontWeight: FontWeight.w400,
+          ),
+          errorStyle: const TextStyle(
+            color: AppTone.danger,
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+          prefixIconColor: WidgetStateColor.resolveWith((states) =>
+            states.contains(WidgetState.focused) ? AppTone.brand : AppTone.muted),
+          suffixIconColor: AppTone.muted,
         ),
         filledButtonTheme: FilledButtonThemeData(
           style: FilledButton.styleFrom(
@@ -1425,14 +1456,23 @@ class _LightLoginInputState extends State<_LightLoginInput> {
     return AnimatedContainer(
       duration: _fast,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         boxShadow: focused
-            ? [BoxShadow(
-                color: AppTone.brand.withValues(alpha: 0.12),
-                blurRadius: 12,
-                offset: const Offset(0, 3),
-              )]
-            : null,
+            ? [
+                BoxShadow(
+                  color: AppTone.brand.withValues(alpha: 0.18),
+                  blurRadius: 20,
+                  spreadRadius: 1,
+                  offset: const Offset(0, 4),
+                ),
+              ]
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
       ),
       child: TextField(
         controller: widget.controller,
@@ -1441,9 +1481,9 @@ class _LightLoginInputState extends State<_LightLoginInput> {
         keyboardType: widget.keyboardType,
         style: widget.obscure
             ? GoogleFonts.jetBrainsMono(
-                fontSize: 16,
+                fontSize: 15,
                 fontWeight: FontWeight.w600,
-                letterSpacing: 2.0,
+                letterSpacing: 2.5,
                 color: AppTone.ink,
               )
             : GoogleFonts.inter(
@@ -1458,34 +1498,44 @@ class _LightLoginInputState extends State<_LightLoginInput> {
             fontSize: 14,
             fontWeight: FontWeight.w500,
           ),
-          prefixIcon: Icon(
-            widget.icon,
+          floatingLabelStyle: TextStyle(
             color: focused ? AppTone.brand : AppTone.muted,
-            size: 20,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.2,
+          ),
+          prefixIcon: AnimatedSwitcher(
+            duration: _fast,
+            child: Icon(
+              widget.icon,
+              key: ValueKey(focused),
+              color: focused ? AppTone.brand : AppTone.muted,
+              size: 20,
+            ),
           ),
           suffixIcon: widget.obscure
               ? IconButton(
                   icon: Icon(
                     _obscured ? Icons.visibility_outlined : Icons.visibility_off_outlined,
                     size: 18,
-                    color: AppTone.muted,
+                    color: focused ? AppTone.brand : AppTone.muted,
                   ),
                   onPressed: () => setState(() => _obscured = !_obscured),
                 )
               : null,
           filled: true,
-          fillColor: const Color(0xFFF3F4F6),
+          fillColor: focused ? const Color(0xFFF0FDF9) : const Color(0xFFF8F9FA),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
             borderSide: const BorderSide(color: Color(0xFFE5E7EB), width: 1),
           ),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
             borderSide: const BorderSide(color: Color(0xFFE5E7EB), width: 1),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFF00A86B), width: 1.5),
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Color(0xFF00A86B), width: 2),
           ),
         ),
       ),
@@ -3598,13 +3648,28 @@ class DeviceTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final status = text(device['status'], fallback: 'unknown');
+    final connectionStatus =
+        text(device['device_connection_status'], fallback: 'unknown');
+    final customer = text(device['customer_name'], fallback: 'Customer not captured');
+    final lastSeen = _lastSeenLabel(device['last_seen_at']);
     return _InfoTile(
       icon: Icons.phone_android,
-      color: statusColor(status),
+      color: _connectionColor(connectionStatus),
       title: text(device['device_name'], fallback: 'Device'),
       subtitle:
-          '${text(device['brand'], fallback: 'Unknown brand')} ${text(device['model'])}\nIMEI: ${device['imei'] ?? 'unknown'}',
-      trailing: StatusPill(label: status, color: statusColor(status)),
+          '$customer\n${text(device['brand'], fallback: 'Unknown brand')} ${text(device['model'])} - IMEI: ${_last4(text(device['imei'], fallback: 'unknown'))}\n$lastSeen',
+      trailing: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          StatusPill(label: status, color: statusColor(status)),
+          const SizedBox(height: 6),
+          StatusPill(
+            label: _connectionLabel(connectionStatus),
+            color: _connectionColor(connectionStatus),
+          ),
+        ],
+      ),
       onTap: () => showModalBottomSheet<void>(
         context: context,
         showDragHandle: true,
@@ -3617,6 +3682,49 @@ class DeviceTile extends StatelessWidget {
       ),
     );
   }
+}
+
+String _last4(String value) {
+  if (value.length <= 4) return value;
+  return value.substring(value.length - 4);
+}
+
+String _connectionLabel(String status) {
+  switch (status.toLowerCase()) {
+    case 'online':
+      return 'Online';
+    case 'delayed':
+      return 'Delayed';
+    case 'offline':
+      return 'Offline';
+    case 'app_removed_suspected':
+      return 'App alert';
+    case 'never_seen':
+      return 'No ping';
+    default:
+      return 'Unknown';
+  }
+}
+
+Color _connectionColor(String status) {
+  switch (status.toLowerCase()) {
+    case 'online':
+      return AppTone.brand;
+    case 'delayed':
+      return AppTone.warning;
+    case 'offline':
+      return AppTone.muted;
+    case 'app_removed_suspected':
+      return AppTone.danger;
+    default:
+      return AppTone.info;
+  }
+}
+
+String _lastSeenLabel(dynamic value) {
+  final raw = text(value);
+  if (raw.isEmpty) return 'No app heartbeat yet';
+  return 'Last app heartbeat: ${formatDateTime(raw)}';
 }
 
 class _StatusFilterChips extends StatelessWidget {
@@ -3664,6 +3772,8 @@ class DeviceActions extends StatelessWidget {
     final id = text(device['id']);
     final status = text(device['status'], fallback: 'unknown');
     final lock = text(device['lock_level'], fallback: 'NONE');
+    final connectionStatus =
+        text(device['device_connection_status'], fallback: 'unknown');
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -3688,6 +3798,26 @@ class DeviceActions extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 12),
+                if (connectionStatus == 'app_removed_suspected') ...[
+                  const _InlineNotice(
+                    message:
+                        'App alert: push delivery says this app token is no longer valid. Treat this as uninstall/tamper suspected, not a normal offline state.',
+                    tone: AppTone.danger,
+                    icon: Icons.warning_amber_rounded,
+                  ),
+                  const SizedBox(height: 12),
+                ] else if (connectionStatus == 'offline' ||
+                    connectionStatus == 'delayed') ...[
+                  _InlineNotice(
+                    message:
+                        'Device is ${_connectionLabel(connectionStatus).toLowerCase()}. Last heartbeat: ${formatDateTime(device['last_seen_at'])}.',
+                    tone: connectionStatus == 'delayed'
+                        ? AppTone.warning
+                        : AppTone.muted,
+                    icon: Icons.signal_wifi_connected_no_internet_4_outlined,
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 _SoftPanel(
                   child: Wrap(
                     spacing: 12,
@@ -3721,6 +3851,14 @@ class DeviceActions extends StatelessWidget {
                       _DetailFact(
                         'Customer',
                         text(device['customer_name'], fallback: 'Not captured'),
+                      ),
+                      _DetailFact(
+                        'Connection',
+                        _connectionLabel(connectionStatus),
+                      ),
+                      _DetailFact(
+                        'Last heartbeat',
+                        formatDateTime(device['last_seen_at']),
                       ),
                     ],
                   ),
@@ -7029,6 +7167,7 @@ class _LocationDialogState extends State<LocationDialog> {
   DateTime? _cooldownUntil;
   String? _pullId;
   Map<String, dynamic>? _location;
+  bool _locationIsPrevious = false;
   int _pollAttempts = 0;
 
   @override
@@ -7044,6 +7183,7 @@ class _LocationDialogState extends State<LocationDialog> {
     _pollTimer = null;
     setState(() {
       _location = null;
+      _locationIsPrevious = false;
       _pullId = null;
       _pollAttempts = 0;
     });
@@ -7095,7 +7235,7 @@ class _LocationDialogState extends State<LocationDialog> {
         }
       }
 
-      if (match == null) {
+      if (match == null && _pullId == null) {
         for (final row in rows) {
           if (text(row['latitude']).isNotEmpty &&
               text(row['longitude']).isNotEmpty) {
@@ -7111,6 +7251,7 @@ class _LocationDialogState extends State<LocationDialog> {
         _pollTimer = null;
         setState(() {
           _location = match;
+          _locationIsPrevious = false;
           message = 'Location received.';
         });
         _startCooldown();
@@ -7120,8 +7261,21 @@ class _LocationDialogState extends State<LocationDialog> {
       if (_pollAttempts >= 30) {
         _pollTimer?.cancel();
         _pollTimer = null;
+        Map<String, dynamic>? previous;
+        for (final row in rows) {
+          final candidate = asMap(row);
+          if (text(candidate['latitude']).isNotEmpty &&
+              text(candidate['longitude']).isNotEmpty) {
+            previous = candidate;
+            break;
+          }
+        }
         setState(() {
-          message = 'No location response within 60 seconds.';
+          _location = previous;
+          _locationIsPrevious = previous != null;
+          message = previous == null
+              ? 'No fresh response within 60 seconds. Device may be offline.'
+              : 'No fresh response within 60 seconds. Showing last known location.';
         });
       } else {
         setState(() {
@@ -7166,6 +7320,7 @@ class _LocationDialogState extends State<LocationDialog> {
     final latValue = double.tryParse(lat);
     final lngValue = double.tryParse(lng);
     final accuracy = double.tryParse(text(location?['accuracy'])) ?? 0;
+    final statusTone = _locationIsPrevious ? AppTone.warning : AppTone.brand;
     final cooldownSeconds = _cooldownUntil == null
         ? 0
         : _cooldownUntil!.difference(DateTime.now()).inSeconds.clamp(0, 10);
@@ -7220,6 +7375,18 @@ class _LocationDialogState extends State<LocationDialog> {
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Text(message, style: AppText.body(color: AppTone.muted)),
           ),
+          if (_locationIsPrevious) ...[
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: _InlineNotice(
+                message:
+                    'This is a previous location, not a live response. Last reported: ${formatDateTime(location?['timestamp'])}.',
+                tone: AppTone.warning,
+                icon: Icons.history_toggle_off_rounded,
+              ),
+            ),
+          ],
           if (_pollTimer != null && location == null) ...[
             const SizedBox(height: 10),
             const Padding(
@@ -7241,7 +7408,11 @@ class _LocationDialogState extends State<LocationDialog> {
                   Marker(
                     markerId: const MarkerId('device-location'),
                     position: LatLng(latValue, lngValue),
-                    infoWindow: const InfoWindow(title: 'Device location'),
+                    infoWindow: InfoWindow(
+                      title: _locationIsPrevious
+                          ? 'Last known location'
+                          : 'Device location',
+                    ),
                   ),
                 },
                 circles: {
@@ -7250,9 +7421,9 @@ class _LocationDialogState extends State<LocationDialog> {
                       circleId: const CircleId('accuracy'),
                       center: LatLng(latValue, lngValue),
                       radius: accuracy,
-                      strokeColor: AppTone.brand,
+                      strokeColor: statusTone,
                       strokeWidth: 2,
-                      fillColor: AppTone.brand.withValues(alpha: 0.14),
+                      fillColor: statusTone.withValues(alpha: 0.14),
                     ),
                 },
                 zoomControlsEnabled: false,
@@ -7276,7 +7447,7 @@ class _LocationDialogState extends State<LocationDialog> {
                     value: '${text(location['accuracy'], fallback: '?')} m',
                   ),
                   _LocationValue(
-                    label: 'Time',
+                    label: _locationIsPrevious ? 'Last report' : 'Time',
                     value: formatDateTime(location['timestamp']),
                   ),
                 ],
@@ -9825,7 +9996,7 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
 
 // ── Supporting widgets ────────────────────────────────────────────────────────
 
-class _WizardField extends StatelessWidget {
+class _WizardField extends StatefulWidget {
   const _WizardField({
     required this.label,
     required this.controller,
@@ -9846,39 +10017,94 @@ class _WizardField extends StatelessWidget {
   final int maxLines;
 
   @override
+  State<_WizardField> createState() => _WizardFieldState();
+}
+
+class _WizardFieldState extends State<_WizardField> {
+  final _focus = FocusNode();
+  bool _focused = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(() => setState(() => _focused = _focus.hasFocus));
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: const TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w600, color: AppTone.ink)),
+        AnimatedDefaultTextStyle(
+          duration: _fast,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: _focused ? AppTone.accent : AppTone.ink,
+          ),
+          child: Text(widget.label),
+        ),
         const SizedBox(height: 6),
-        TextField(
-          controller: controller,
-          keyboardType: keyboardType,
-          obscureText: obscure,
-          maxLines: obscure ? 1 : maxLines,
-          decoration: InputDecoration(
-            hintText: hint,
-            prefixIcon: Icon(icon, size: 20),
-            suffixIcon: suffixIcon,
-            filled: true,
-            fillColor: AppTone.surface,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppTone.line),
+        AnimatedContainer(
+          duration: _fast,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: _focused
+                ? [
+                    BoxShadow(
+                      color: AppTone.accent.withValues(alpha: 0.15),
+                      blurRadius: 16,
+                      spreadRadius: 1,
+                      offset: const Offset(0, 3),
+                    ),
+                  ]
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
+                    ),
+                  ],
+          ),
+          child: TextField(
+            controller: widget.controller,
+            focusNode: _focus,
+            keyboardType: widget.keyboardType,
+            obscureText: widget.obscure,
+            maxLines: widget.obscure ? 1 : widget.maxLines,
+            style: GoogleFonts.inter(
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+              color: AppTone.ink,
             ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppTone.line),
+            decoration: InputDecoration(
+              hintText: widget.hint,
+              prefixIcon: Icon(widget.icon, size: 20,
+                  color: _focused ? AppTone.accent : AppTone.muted),
+              suffixIcon: widget.suffixIcon,
+              filled: true,
+              fillColor: _focused ? AppTone.accentLight : AppTone.surface,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: AppTone.line),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: AppTone.line),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: AppTone.accent, width: 2),
+              ),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
             ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppTone.accent, width: 1.5),
-            ),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           ),
         ),
       ],
@@ -11109,7 +11335,7 @@ class _InfoTileState extends State<_InfoTile> {
                       Text(
                         widget.subtitle,
                         overflow: TextOverflow.ellipsis,
-                        maxLines: 2,
+                        maxLines: 3,
                         style: const TextStyle(
                           color: AppTone.muted,
                           height: 1.35,
@@ -11875,18 +12101,14 @@ String readableError(Object? error) {
     final serverMessage = text(data['message'] ?? data['error']);
     if (serverMessage.isNotEmpty) return serverMessage;
 
-    final baseUrl = text(
-      error.requestOptions.baseUrl,
-      fallback: 'the API server',
-    );
     switch (error.type) {
       case DioExceptionType.connectionTimeout:
-        return 'Could not connect to $baseUrl before the request timed out. Check that the API is running and reachable from Chrome.';
+        return 'Could not connect before the request timed out. Please check your internet connection and try again.';
       case DioExceptionType.sendTimeout:
       case DioExceptionType.receiveTimeout:
-        return 'The API request to $baseUrl took too long. Please try again after the server finishes waking up.';
+        return 'The request took too long. Please try again in a moment.';
       case DioExceptionType.connectionError:
-        return 'Could not reach $baseUrl from this browser. Check the API URL and CORS settings.';
+        return 'Could not reach the service. Please check your internet connection and try again.';
       case DioExceptionType.badCertificate:
         return 'The API certificate could not be trusted by this browser.';
       case DioExceptionType.cancel:

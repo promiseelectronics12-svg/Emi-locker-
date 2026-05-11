@@ -153,7 +153,27 @@ router.get('/devices', asyncHandler(async (req, res) => {
             lr.reason_code AS latest_lock_reason,
             lr.note AS latest_lock_note,
             lr.status AS latest_lock_request_status,
-            lr.created_at AS latest_lock_request_at
+            lr.created_at AS latest_lock_request_at,
+            CASE
+              WHEN d.fcm_token_status = 'invalid' OR d.app_uninstall_suspected_at IS NOT NULL THEN 'app_removed_suspected'
+              WHEN d.last_seen_at IS NULL THEN 'never_seen'
+              WHEN d.last_seen_at < NOW() - INTERVAL '150 minutes' THEN 'offline'
+              WHEN d.last_seen_at < NOW() - INTERVAL '75 minutes' THEN 'delayed'
+              ELSE 'online'
+            END AS device_connection_status,
+            d.last_seen_at,
+            d.device_health_status,
+            d.fcm_token_status,
+            d.app_uninstall_suspected_at,
+            CASE
+              WHEN d.last_location_at IS NULL THEN TRUE
+              WHEN d.last_location_at < NOW() - INTERVAL '15 minutes' THEN TRUE
+              ELSE FALSE
+            END AS location_is_stale,
+            CASE
+              WHEN d.last_location_at IS NULL THEN NULL
+              ELSE FLOOR(EXTRACT(EPOCH FROM (NOW() - d.last_location_at)) / 60)::int
+            END AS last_location_age_minutes
      FROM devices d
      LEFT JOIN users u ON u.id = d.owner_id
      LEFT JOIN LATERAL (

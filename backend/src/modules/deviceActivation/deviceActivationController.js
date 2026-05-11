@@ -37,10 +37,16 @@ async function preRegisterDevice(req, res) {
     // Upsert: create or update device record by IMEI with FCM token.
     // Status is 'pending' until dealer completes enrollment.
     await db.query(
-      `INSERT INTO devices (imei, fcm_token, brand, model, android_id, status, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, 'pending', NOW(), NOW())
+      `INSERT INTO devices (imei, fcm_token, brand, model, android_id, status,
+                            fcm_token_status, last_seen_at, device_health_status,
+                            created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, 'pending', 'valid', NOW(), 'online', NOW(), NOW())
        ON CONFLICT (imei) DO UPDATE
          SET fcm_token  = EXCLUDED.fcm_token,
+             fcm_token_status = 'valid',
+             last_seen_at = NOW(),
+             device_health_status = 'online',
+             app_uninstall_suspected_at = NULL,
              updated_at = NOW()
              ${brand    ? ", brand = EXCLUDED.brand"     : ""}
              ${model    ? ", model = EXCLUDED.model"     : ""}

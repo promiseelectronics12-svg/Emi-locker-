@@ -140,6 +140,17 @@ class LocationService {
         };
         const result = await fcmService.sendToDevice(device.fcm_token, payload);
         fcmDelivered = result.success;
+        if (result.invalidToken) {
+          await db.query(
+            `UPDATE devices
+             SET fcm_token_status = 'invalid',
+                 app_uninstall_suspected_at = COALESCE(app_uninstall_suspected_at, NOW()),
+                 device_health_status = 'app_removed_suspected',
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [deviceId]
+          );
+        }
       } catch (err) {
         logger.warn(`FCM delivery failed for location pull on device ${deviceId}: ${err.message}`);
       }
@@ -241,7 +252,14 @@ class LocationService {
 
       await client.query(
         `UPDATE devices SET last_location_lat = $1, last_location_lng = $2, last_location_time = $3,
-         last_location_at = NOW(), battery_level = $4, updated_at = NOW() WHERE id = $5`,
+         last_location_at = NOW(),
+         last_seen_at = NOW(),
+         device_health_status = 'online',
+         fcm_token_status = CASE WHEN fcm_token IS NULL THEN fcm_token_status ELSE 'valid' END,
+         app_uninstall_suspected_at = NULL,
+         battery_level = $4,
+         updated_at = NOW()
+         WHERE id = $5`,
         [lat, lon, timestamp, battery_level || null, deviceId]
       );
 

@@ -112,6 +112,32 @@ class AutoLockScheduler @Inject constructor(
         )
     }
 
+    fun scheduleDeviceHeartbeat() {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+
+        val periodicHeartbeat = PeriodicWorkRequestBuilder<DeviceHeartbeatWorker>(1, TimeUnit.HOURS)
+            .setConstraints(constraints)
+            .build()
+
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            "DeviceHeartbeatWork",
+            ExistingPeriodicWorkPolicy.KEEP,
+            periodicHeartbeat
+        )
+
+        val immediateHeartbeat = OneTimeWorkRequestBuilder<DeviceHeartbeatWorker>()
+            .setConstraints(constraints)
+            .build()
+
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "DeviceHeartbeatImmediate",
+            ExistingWorkPolicy.REPLACE,
+            immediateHeartbeat
+        )
+    }
+
     fun triggerImmediateCheck() {
         val workRequest = OneTimeWorkRequestBuilder<LockWorker>()
             .build()

@@ -68,4 +68,26 @@ router.get('/emi-schedule', validateDeviceToken, async (req, res) => {
   }
 });
 
+router.post('/heartbeat', validateDeviceToken, async (req, res) => {
+  try {
+    const source = String(req.body?.source || 'user_app').slice(0, 64);
+    const appVersion = String(req.body?.app_version || '').slice(0, 64);
+    await db.query(
+      `UPDATE devices
+       SET last_seen_at = NOW(),
+           last_heartbeat_source = $2,
+           device_health_status = 'online',
+           fcm_token_status = CASE WHEN fcm_token IS NULL THEN fcm_token_status ELSE 'valid' END,
+           app_uninstall_suspected_at = NULL,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [req.deviceAuth.sub, appVersion ? `${source}:${appVersion}` : source]
+    );
+    return res.json({ success: true, server_time: new Date().toISOString() });
+  } catch (error) {
+    logger.error('Device heartbeat failed', { error: error.message });
+    return res.status(500).json({ success: false, error: 'Failed to record heartbeat' });
+  }
+});
+
 module.exports = router;

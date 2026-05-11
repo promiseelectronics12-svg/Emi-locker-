@@ -38,6 +38,7 @@ class EMILockerApp : Application(), Configuration.Provider {
         Log.d(TAG, "EMILockerApp onCreate")
 
         autoLockScheduler.schedulePeriodicCheck()
+        autoLockScheduler.scheduleDeviceHeartbeat()
 
         // Silently register device metadata + FCM token with the server.
         appScope.launch {
