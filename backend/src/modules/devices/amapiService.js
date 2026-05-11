@@ -170,9 +170,9 @@ class AMAPIService {
 
   async createEnrollmentToken(enterpriseId, options = {}) {
     const token = {
-      allowsPersonalUsage: 'DISALLOW_PERSONAL_USAGE',
       duration: options.duration || '86400s',
-      ownership: 'DEVICE_OWNER',
+      allowPersonalUsage: options.allowPersonalUsage || 'PERSONAL_USAGE_DISALLOWED',
+      oneTimeOnly: options.oneTimeOnly ?? true,
     };
 
     if (options.user) {

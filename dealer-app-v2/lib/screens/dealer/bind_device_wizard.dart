@@ -45,6 +45,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
 
   // Step 4 — QR provisioning (for new factory-reset phones)
   String? _qrValue;
+  String? _qrError;
   bool _qrBusy = false;
 
   // Step 5 — Show 6-digit code
@@ -241,6 +242,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       _selectedTier = 'standard';
       _creditProfile = null;
       _qrValue = null;
+      _qrError = null;
       _enrollmentToken = null;
       _error = null;
       _done = false;
@@ -249,13 +251,18 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   }
 
   Future<void> _fetchQr() async {
-    setState(() { _qrBusy = true; _qrValue = null; });
+    setState(() { _qrBusy = true; _qrValue = null; _qrError = null; });
     try {
       final res = await widget.api.post('/api/v1/dealer/enrollment-qr');
       final d = asMap(res.data);
       if (mounted) setState(() => _qrValue = text(d['qr_value']));
-    } catch (_) {
-      if (mounted) setState(() => _qrValue = '');
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _qrValue = '';
+          _qrError = readableError(e);
+        });
+      }
     } finally {
       if (mounted) setState(() => _qrBusy = false);
     }
@@ -717,10 +724,18 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
             ),
           ),
         ] else ...[
-          const InlineNotice(
-            message: 'QR setup not available. Use the 6-digit code on the next screen instead.',
+          InlineNotice(
+            message: _qrError == null
+                ? 'QR setup not available. Use the 6-digit code on the next screen instead.'
+                : 'QR setup failed: $_qrError. Use the 6-digit code on the next screen or retry QR setup.',
             tone: AppTone.warning,
             icon: Icons.warning_amber_rounded,
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: _qrBusy ? null : _fetchQr,
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('Retry QR setup'),
           ),
         ],
         const SizedBox(height: 24),
