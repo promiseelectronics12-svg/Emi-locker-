@@ -3465,7 +3465,11 @@ class DealerDevices extends StatelessWidget {
           children: [
             Section(
               title: 'Device list',
-              child: DealerDeviceList(api: api, devices: devices),
+              child: DealerDeviceList(
+                api: api,
+                devices: devices,
+                onDevicesChanged: reload,
+              ),
             ),
           ],
         );
@@ -3475,9 +3479,15 @@ class DealerDevices extends StatelessWidget {
 }
 
 class DealerDeviceList extends StatefulWidget {
-  const DealerDeviceList({super.key, required this.api, required this.devices});
+  const DealerDeviceList({
+    super.key,
+    required this.api,
+    required this.devices,
+    this.onDevicesChanged,
+  });
   final ApiClient api;
   final List<Map<String, dynamic>> devices;
+  final Future<void> Function()? onDevicesChanged;
 
   @override
   State<DealerDeviceList> createState() => _DealerDeviceListState();
@@ -3558,7 +3568,11 @@ class _DealerDeviceListState extends State<DealerDeviceList> {
         else
           Column(
             children: filtered
-                .map((device) => DeviceTile(api: widget.api, device: device))
+                .map((device) => DeviceTile(
+                      api: widget.api,
+                      device: device,
+                      onDeviceChanged: widget.onDevicesChanged,
+                    ))
                 .toList(),
           ),
       ],
@@ -3567,9 +3581,15 @@ class _DealerDeviceListState extends State<DealerDeviceList> {
 }
 
 class DeviceTile extends StatelessWidget {
-  const DeviceTile({super.key, required this.api, required this.device});
+  const DeviceTile({
+    super.key,
+    required this.api,
+    required this.device,
+    this.onDeviceChanged,
+  });
   final ApiClient api;
   final Map<String, dynamic> device;
+  final Future<void> Function()? onDeviceChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -3585,7 +3605,11 @@ class DeviceTile extends StatelessWidget {
         context: context,
         showDragHandle: true,
         isScrollControlled: true,
-        builder: (_) => DeviceActions(api: api, device: device),
+        builder: (_) => DeviceActions(
+          api: api,
+          device: device,
+          onDeviceChanged: onDeviceChanged,
+        ),
       ),
     );
   }
@@ -3621,9 +3645,15 @@ class _StatusFilterChips extends StatelessWidget {
 }
 
 class DeviceActions extends StatelessWidget {
-  const DeviceActions({super.key, required this.api, required this.device});
+  const DeviceActions({
+    super.key,
+    required this.api,
+    required this.device,
+    this.onDeviceChanged,
+  });
   final ApiClient api;
   final Map<String, dynamic> device;
+  final Future<void> Function()? onDeviceChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -3709,12 +3739,15 @@ class DeviceActions extends StatelessWidget {
                             onPressed: id.isEmpty
                                 ? null
                                 : () async {
-                                    final submitted = await showDialog<bool>(
+                                    final result = await showDialog<Map<String, dynamic>>(
                                       context: context,
                                       builder: (_) =>
                                           LockDialog(api: api, deviceId: id),
                                     );
-                                    if (submitted == true && context.mounted) {
+                                    if (result != null) {
+                                      await onDeviceChanged?.call();
+                                    }
+                                    if (result != null && context.mounted) {
                                       Navigator.pop(context);
                                     }
                                   },
@@ -6833,11 +6866,13 @@ class _LockDialogState extends State<LockDialog> {
   final note = TextEditingController();
   bool _busy = false;
   String _status = '';
+  bool _success = false;
 
   Future<void> submit() async {
     if (_busy) return;
     setState(() {
       _busy = true;
+      _success = false;
       _status = 'Submitting lock request. Please wait...';
     });
     try {
@@ -6851,23 +6886,23 @@ class _LockDialogState extends State<LockDialog> {
       ).timeout(const Duration(seconds: 20));
       final root = asMap(response.data);
       final data = asMap(root['data']);
-      final decision = text(data['decision'], fallback: 'submitted');
       final lockLevel = text(data['lockLevel'], fallback: '');
       final fcm = asMap(asMap(data['delivery'])['fcm']);
       final fcmOk = fcm['success'] == true;
       if (mounted) {
         setState(() {
+          _success = true;
           _status = fcmOk
-              ? 'Request approved. Command sent to the phone. Status will refresh shortly.'
-              : 'Request approved. Backend updated status, but phone delivery is still pending.';
+              ? 'Device locked successfully. Command delivered to the phone.'
+              : 'Device marked locked. Phone delivery is still pending.';
         });
-        await Future<void>.delayed(const Duration(milliseconds: 700));
+        await Future<void>.delayed(const Duration(milliseconds: 500));
         if (!mounted) return;
         final messenger = ScaffoldMessenger.of(context);
-        Navigator.pop(context, true);
+        Navigator.pop(context, data);
         final suffix = lockLevel.isEmpty ? '' : ' ($lockLevel)';
         messenger.showSnackBar(
-          SnackBar(content: Text('Lock request $decision$suffix. Device status is refreshing.')),
+          SnackBar(content: Text('Device locked successfully$suffix.')),
         );
       }
     } catch (e) {
@@ -6940,8 +6975,8 @@ class _LockDialogState extends State<LockDialog> {
               const SizedBox(height: 10),
               InlineNotice(
                 message: _status,
-                tone: AppTone.info,
-                icon: Icons.sync_rounded,
+                tone: _success ? AppTone.brand : AppTone.info,
+                icon: _success ? Icons.check_circle_outline : Icons.sync_rounded,
               ),
             ],
           ],
