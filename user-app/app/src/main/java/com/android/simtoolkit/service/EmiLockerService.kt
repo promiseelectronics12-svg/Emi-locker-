@@ -10,6 +10,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -70,13 +71,14 @@ class EmiLockerService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "EmiLockerService created")
-        startForegroundWithNotification()
+        createNotificationChannel()
         startOwnershipVerification()
         startKioskMonitor()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "EmiLockerService started with intent: ${intent?.action}")
+        startForegroundForAction(intent?.action)
         when (intent?.action) {
             ACTION_LOCK_DEVICE -> serviceScope.launch { lockStateManager.transitionTo(LockState.FULL_LOCK) }
             ACTION_PARTIAL_LOCK -> serviceScope.launch { lockStateManager.transitionTo(LockState.PARTIAL_LOCK) }
@@ -108,10 +110,18 @@ class EmiLockerService : Service() {
         serviceScope.cancel()
     }
 
-    private fun startForegroundWithNotification() {
-        createNotificationChannel()
+    private fun startForegroundForAction(action: String?) {
         val notification = buildServiceNotification()
-        startForeground(NOTIFICATION_ID, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val foregroundType = if (action == ACTION_REPORT_LOCATION) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION or ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            }
+            startForeground(NOTIFICATION_ID, notification, foregroundType)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun createNotificationChannel() {

@@ -55,11 +55,18 @@ class LockSchedulerService {
     try {
       const devices = await db.query(
         `SELECT d.id, d.imei, d.fcm_token, d.amapi_device_name, d.lock_level,
-                es.next_due_date, es.grace_period_days
+                d.dealer_id,
+                (es.start_date + ((COALESCE(paid.installments_paid, 0) || ' months')::interval)) AS next_due_date,
+                es.grace_days AS grace_period_days
          FROM devices d
          JOIN emi_schedules es ON d.id = es.device_id AND es.status = 'active'
+         LEFT JOIN LATERAL (
+           SELECT COUNT(*) AS installments_paid
+           FROM emi_payments ep
+           WHERE ep.emi_schedule_id = es.id AND ep.status = 'completed'
+         ) paid ON TRUE
          WHERE d.status NOT IN ('decoupled', 'disabled')
-           AND es.next_due_date IS NOT NULL`
+           AND COALESCE(paid.installments_paid, 0) < es.duration`
       );
 
       logger.info(`Auto-lock scheduler checking ${devices.rows.length} devices`);
@@ -118,19 +125,19 @@ class LockSchedulerService {
         return { locked: false, notified: true };
 
       case 'APPLY_REMINDER':
-        await this.applyLock(deviceId, imei, LOCK_LEVELS.REMINDER_MODE, 'auto_lock_reminder');
+        await this.applyLock(device, LOCK_LEVELS.REMINDER_MODE, 'auto_lock_reminder');
         return { locked: true, notified: false };
 
       case 'APPLY_PARTIAL':
-        await this.applyLock(deviceId, imei, LOCK_LEVELS.PARTIAL_LOCK, 'auto_lock_partial');
+        await this.applyLock(device, LOCK_LEVELS.PARTIAL_LOCK, 'auto_lock_partial');
         return { locked: true, notified: false };
 
       case 'APPLY_FULL':
-        await this.applyLock(deviceId, imei, LOCK_LEVELS.FULL_LOCK, 'auto_lock_full');
+        await this.applyLock(device, LOCK_LEVELS.FULL_LOCK, 'auto_lock_full');
         return { locked: true, notified: false };
 
       case 'APPLY_FULL_ADMIN_FLAG':
-        await this.applyLock(deviceId, imei, LOCK_LEVELS.FULL_LOCK, 'auto_lock_full_admin_review');
+        await this.applyLock(device, LOCK_LEVELS.FULL_LOCK, 'auto_lock_full_admin_review');
         await this.flagForAdminReview(deviceId, overdueDays);
         return { locked: true, notified: false };
 
@@ -177,7 +184,22 @@ class LockSchedulerService {
     );
   }
 
-  async applyLock(deviceId, imei, lockLevel, reason) {
+  toDbLockLevel(lockLevel) {
+    if (lockLevel === LOCK_LEVELS.FULL_LOCK) return 'FULL';
+    if (lockLevel === LOCK_LEVELS.PARTIAL_LOCK || lockLevel === LOCK_LEVELS.REMINDER_MODE) return 'SOFT';
+    return 'NONE';
+  }
+
+  toDbStatus(lockLevel) {
+    if (lockLevel === LOCK_LEVELS.FULL_LOCK) return 'locked';
+    if (lockLevel === LOCK_LEVELS.PARTIAL_LOCK) return 'partial_lock';
+    if (lockLevel === LOCK_LEVELS.REMINDER_MODE) return 'reminder';
+    return 'enrolled';
+  }
+
+  async applyLock(device, lockLevel, reason) {
+    const deviceId = device.id;
+    const imei = device.imei;
     const command = await lockCommandService.generateSignedCommand({
       deviceImei: imei,
       actionType: 'AUTO_LOCK',
@@ -188,8 +210,14 @@ class LockSchedulerService {
     await lockDeliveryService.deliverCommand(deviceId, command, lockLevel);
 
     await db.query(
-      `UPDATE devices SET lock_level = $1, lock_reason = $2, locked_at = NOW(), updated_at = NOW() WHERE id = $3`,
-      [lockLevel, reason, deviceId]
+      `UPDATE devices
+       SET lock_level = $1,
+           status = $2,
+           lock_reason = $3,
+           locked_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $4`,
+      [this.toDbLockLevel(lockLevel), this.toDbStatus(lockLevel), reason, deviceId]
     );
 
     try {

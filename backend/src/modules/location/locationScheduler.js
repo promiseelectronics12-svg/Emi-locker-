@@ -3,7 +3,7 @@ const db = require('../../config/database');
 const logger = require('../../utils/logger');
 const locationService = require('./locationService');
 
-const FULL_LOCK_LEVEL = 7;
+const FULL_LOCK_LEVELS = ['FULL', 'FULL_LOCK', 'WIPE'];
 
 class LocationSchedulerService {
   constructor() {
@@ -40,9 +40,9 @@ class LocationSchedulerService {
         `SELECT d.id, d.imei, d.serial_number, d.fcm_token, d.dealer_id
          FROM devices d
          WHERE d.status = 'locked'
-           AND d.lock_level >= $1
+           AND d.lock_level = ANY($1::text[])
            AND d.status != 'decoupled'`,
-        [FULL_LOCK_LEVEL]
+        [FULL_LOCK_LEVELS]
       );
 
       logger.info(`Checking ${result.rows.length} devices in Full Lock for auto-location`);
@@ -71,7 +71,7 @@ class LocationSchedulerService {
   }
 
   async handleDeviceLockChange(deviceId, lockLevel) {
-    if (lockLevel >= FULL_LOCK_LEVEL) {
+    if (FULL_LOCK_LEVELS.includes(lockLevel)) {
       logger.info(`Device ${deviceId} entered Full Lock — scheduling auto-location`);
       await locationService.scheduleAutoLocation(deviceId);
     } else {
@@ -86,9 +86,9 @@ class LocationSchedulerService {
         `SELECT d.id, d.imei, d.fcm_token, d.lock_level
          FROM devices d
          WHERE d.status = 'locked'
-           AND d.lock_level >= $1
+           AND d.lock_level = ANY($1::text[])
            AND d.status != 'decoupled'`,
-        [FULL_LOCK_LEVEL]
+        [FULL_LOCK_LEVELS]
       );
 
       for (const device of result.rows) {

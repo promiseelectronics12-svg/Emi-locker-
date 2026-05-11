@@ -8,7 +8,7 @@ const Queue = require('bull');
 const crypto = require('crypto');
 
 const REDIS_URL = process.env.BULL_REDIS_URL || process.env.UPSTASH_REDIS_URL || process.env.REDIS_URL || 'redis://localhost:6379';
-const AUTO_LOCK_LEVEL = 7;
+const AUTO_LOCATION_LOCK_LEVELS = new Set(['FULL', 'FULL_LOCK', 'WIPE']);
 
 class LocationService {
   getLocationPullQueue() {
@@ -586,8 +586,8 @@ class LocationService {
         return;
       }
 
-      const currentLockLevel = device.lock_level || 0;
-      if (currentLockLevel < AUTO_LOCK_LEVEL) {
+      const currentLockLevel = device.lock_level || 'NONE';
+      if (!AUTO_LOCATION_LOCK_LEVELS.has(currentLockLevel)) {
         logger.info(`Device ${deviceId} not in Full Lock — skipping auto-location`);
         await this.cancelAutoLocation(deviceId);
         return;

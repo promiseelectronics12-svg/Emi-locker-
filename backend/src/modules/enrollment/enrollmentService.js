@@ -15,6 +15,24 @@ function createDeviceToken({ deviceId, dealerId, resellerId }) {
   );
 }
 
+function createOfflineUnlockSecret() {
+  return crypto.randomBytes(20).toString('base64');
+}
+
+function createCustomerEmail({ nidHash, phoneNumber }) {
+  const fingerprint = crypto
+    .createHash('sha256')
+    .update(`${nidHash || ''}:${phoneNumber || ''}`)
+    .digest('hex')
+    .slice(0, 20);
+  return `customer.${fingerprint}@emi-locker.local`;
+}
+
+function truncateNullable(value, maxLength) {
+  if (value === undefined || value === null) return null;
+  return String(value).slice(0, maxLength);
+}
+
 function generateSixDigitToken() {
   return String(crypto.randomInt(100000, 999999));
 }
@@ -261,6 +279,8 @@ async function confirmFromDevice({ code, imei }) {
   let committedDealerIdentity;
   let consumedKey;
   let createdSchedule;
+  let customer;
+  let offlineUnlockSecret;
 
   try {
     await client.query('BEGIN');
@@ -307,6 +327,34 @@ async function confirmFromDevice({ code, imei }) {
     }
 
     consumedKey = keyRow.rows[0];
+    offlineUnlockSecret = createOfflineUnlockSecret();
+
+    const customerResult = await client.query(
+      `INSERT INTO users (email, name, phone, nid, role, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, 'customer', 'active', NOW(), NOW())
+       ON CONFLICT (email) DO UPDATE SET
+         name = EXCLUDED.name,
+         phone = EXCLUDED.phone,
+         nid = EXCLUDED.nid,
+         updated_at = NOW()
+       RETURNING id`,
+      [
+        createCustomerEmail({
+          nidHash: committedEnrollment.nid_hash,
+          phoneNumber: committedEnrollment.phone_number,
+        }),
+        committedEnrollment.customer_name,
+        committedEnrollment.phone_number,
+        truncateNullable(committedEnrollment.nid_hash, 50),
+      ]
+    );
+    customer = customerResult.rows[0];
+
+    const dealerPhoneResult = await client.query(
+      `SELECT phone FROM dealers WHERE id = $1 LIMIT 1`,
+      [committedDealerIdentity.dealerRecordId]
+    );
+    const dealerPhone = dealerPhoneResult.rows[0]?.phone || null;
 
     await client.query(
       `UPDATE activation_keys
@@ -326,6 +374,11 @@ async function confirmFromDevice({ code, imei }) {
            dealer_id         = $4,
            reseller_id       = COALESCE($5, reseller_id),
            activation_key_id = $6,
+           owner_id          = $7,
+           device_name       = COALESCE(device_name, $8),
+           dealer_phone      = COALESCE(dealer_phone, $9),
+           totp_secret       = COALESCE(totp_secret, $10),
+           enrolled_at       = COALESCE(enrolled_at, NOW()),
            updated_at        = NOW()
        WHERE id = $1`,
       [
@@ -334,7 +387,11 @@ async function confirmFromDevice({ code, imei }) {
         committedEnrollment.model,
         committedDealerIdentity.dealerRecordId,
         consumedKey.reseller_id || committedDealerIdentity.resellerId,
-        consumedKey.id
+        consumedKey.id,
+        customer.id,
+        [committedEnrollment.brand, committedEnrollment.model].filter(Boolean).join(' ') || null,
+        dealerPhone,
+        offlineUnlockSecret
       ]
     );
 
@@ -385,6 +442,7 @@ async function confirmFromDevice({ code, imei }) {
     success: true,
     device_id: committedEnrollment.dev_id,
     device_token: deviceToken,
+    offline_unlock_secret: offlineUnlockSecret,
     emi_schedule: formatSchedule(createdSchedule)
   };
 }

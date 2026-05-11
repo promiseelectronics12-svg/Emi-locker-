@@ -97,6 +97,7 @@ class MainActivity : AppCompatActivity() {
 
         startEmiLockerService()
         refreshFcmRegistration()
+        refreshDeviceSecrets()
         refreshEmiSchedule()
         setupRecyclerViews()
         setupClickListeners()
@@ -128,6 +129,29 @@ class MainActivity : AppCompatActivity() {
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to refresh EMI schedule: ${e.message}")
+            }
+        }
+    }
+
+    private fun refreshDeviceSecrets() {
+        lifecycleScope.launch {
+            try {
+                val deviceId = withContext(Dispatchers.IO) {
+                    preferencesManager.activatedDeviceId.first()
+                } ?: return@launch
+                val response = withContext(Dispatchers.IO) {
+                    apiService.refreshDeviceToken(deviceId, emptyMap())
+                }
+                if (response.isSuccessful && response.body()?.success == true) {
+                    response.body()?.deviceToken?.takeIf { it.isNotBlank() }?.let {
+                        preferencesManager.saveDeviceToken(it)
+                    }
+                    response.body()?.offlineUnlockSecret?.takeIf { it.isNotBlank() }?.let {
+                        preferencesManager.saveOfflineUnlockSecret(it)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to refresh device secrets: ${e.message}")
             }
         }
     }

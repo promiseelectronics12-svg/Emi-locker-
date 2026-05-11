@@ -97,12 +97,12 @@ router.post(
       if (imei) {
         const imeiHash = require('crypto').createHash('sha256').update(String(imei)).digest('hex');
         result = await db.query(
-          `SELECT id, dealer_id, reseller_id FROM devices WHERE id = $1 AND imei_hash = $2 AND status = 'enrolled'`,
+          `SELECT id, dealer_id, reseller_id, totp_secret FROM devices WHERE id = $1 AND imei_hash = $2 AND status = 'enrolled'`,
           [deviceId, imeiHash]
         );
       } else {
         result = await db.query(
-          `SELECT id, dealer_id, reseller_id FROM devices WHERE id = $1 AND status = 'enrolled'`,
+          `SELECT id, dealer_id, reseller_id, totp_secret FROM devices WHERE id = $1 AND status = 'enrolled'`,
           [deviceId]
         );
       }
@@ -121,7 +121,11 @@ router.post(
         { expiresIn: process.env.DEVICE_TOKEN_EXPIRES_IN || '30d' }
       );
 
-      return res.json({ success: true, device_token: deviceToken });
+      return res.json({
+        success: true,
+        device_token: deviceToken,
+        offline_unlock_secret: device.totp_secret || null,
+      });
     } catch (e) {
       return res.status(500).json({ error: 'Token refresh failed' });
     }

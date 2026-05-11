@@ -360,6 +360,9 @@ class AuthActivity : ComponentActivity() {
         if (result?.success == true && !result.deviceId.isNullOrBlank()) {
             val token = result.deviceToken ?: result.deviceId
             preferencesManager.saveDeviceActivation(result.deviceId, token)
+            result.offlineUnlockSecret?.takeIf { it.isNotBlank() }?.let {
+                preferencesManager.saveOfflineUnlockSecret(it)
+            }
             syncEmiSchedule(result.emiSchedule)
             deviceRegistrationService.registerFcmForDevice(result.deviceId)
             return ActivationOutcome(true, "Device bound. Starting setup.")

@@ -145,8 +145,12 @@ class EmiLockerFcmService : FirebaseMessagingService() {
                     try {
                         val refreshResp = apiService.refreshDeviceToken(deviceId, emptyMap())
                         if (refreshResp.isSuccessful && refreshResp.body()?.success == true) {
-                            val fresh = refreshResp.body()!!.deviceToken!!
+                            val body = refreshResp.body()!!
+                            val fresh = body.deviceToken!!
                             preferencesManager.saveDeviceToken(fresh)
+                            body.offlineUnlockSecret?.takeIf { it.isNotBlank() }?.let {
+                                preferencesManager.saveOfflineUnlockSecret(it)
+                            }
                             deviceToken = fresh
                             Log.d(TAG, "GET_LOCATION: token refreshed successfully")
                         } else {

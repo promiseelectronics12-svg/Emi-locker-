@@ -85,6 +85,31 @@
         android:textSize="16sp"
         android:textStyle="bold" />
 
+    <EditText
+        android:id="@+id/etFullLockOfflineOtp"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:layout_marginBottom="8dp"
+        android:backgroundTint="@color/white"
+        android:gravity="center"
+        android:hint="Offline unlock code"
+        android:inputType="number"
+        android:maxLength="6"
+        android:textColor="@color/white"
+        android:textColorHint="#BBFFFFFF"
+        android:textSize="18sp" />
+
+    <Button
+        android:id="@+id/btnFullLockOfflineUnlock"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:layout_marginBottom="12dp"
+        android:backgroundTint="@color/white"
+        android:text="Unlock with OTP"
+        android:textColor="@color/state_full_lock"
+        android:textSize="15sp"
+        android:textStyle="bold" />
+
     <Button
         android:id="@+id/btnFullLockEmergency999"
         android:layout_width="match_parent"

@@ -65,6 +65,18 @@ function generateGraceHOTP(base32Secret, timeWindow, graceHours) {
   return generateHOTP(base32Secret, timeWindow * 10 + idx);
 }
 
+async function checkOtpRateLimit(key, limit, ttlSeconds) {
+  try {
+    const redis = require('../config/redis');
+    const attempts = await redis.incr(key);
+    if (attempts === 1) await redis.expire(key, ttlSeconds);
+    return attempts <= limit;
+  } catch (error) {
+    console.warn('OTP rate limiter unavailable; allowing request:', error.message);
+    return true;
+  }
+}
+
 const DEFAULT_SETTINGS = {
   offline_grace_hours: 72,
   warning_threshold_hours: 12,
@@ -131,6 +143,8 @@ router.get('/devices', asyncHandler(async (req, res) => {
 
   const result = await db.query(
     `SELECT d.*,
+            COALESCE(u.name, e.customer_name) AS customer_name,
+            COALESCE(u.phone, e.phone_number) AS customer_phone,
             es.id AS emi_schedule_id,
             es.status AS emi_status,
             es.duration AS emi_duration,
@@ -141,6 +155,14 @@ router.get('/devices', asyncHandler(async (req, res) => {
             lr.status AS latest_lock_request_status,
             lr.created_at AS latest_lock_request_at
      FROM devices d
+     LEFT JOIN users u ON u.id = d.owner_id
+     LEFT JOIN LATERAL (
+       SELECT customer_name, phone_number
+       FROM enrollments
+       WHERE device_id = d.id
+       ORDER BY created_at DESC
+       LIMIT 1
+     ) e ON TRUE
      LEFT JOIN emi_schedules es ON es.device_id = d.id AND es.status = 'active'
      LEFT JOIN LATERAL (
        SELECT reason_code, note, status, created_at
@@ -347,11 +369,9 @@ router.post('/devices/:deviceId/paut/sms-otp',
     const timeWindow = Math.floor(Date.now() / (30 * 60 * 1000));
 
     // Rate limit: max 3 OTP requests per device per 30-minute window
-    const redis = require('../config/redis');
     const rateLimitKey = `sms_otp:${req.params.deviceId}:${timeWindow}`;
-    const attempts = await redis.incr(rateLimitKey);
-    if (attempts === 1) await redis.expire(rateLimitKey, 30 * 60);
-    if (attempts > 3)
+    const allowed = await checkOtpRateLimit(rateLimitKey, 3, 30 * 60);
+    if (!allowed)
       return res.status(429).json(buildErrorResponse(429, 'RATE_LIMITED', 'Too many OTP requests. Try again in 30 minutes.'));
 
     // Generate grace-encoded HOTP (each duration produces a unique code)
@@ -501,9 +521,9 @@ router.get('/devices/:deviceId/lock-detail',
 
     const result = await db.query(
       `SELECT d.id, d.imei, d.model, d.brand, d.status, d.lock_level,
-              d.grace_expires_at, d.dealer_phone,
-              u.name  AS customer_name,
-              u.phone AS customer_phone,
+              d.grace_expires_at, d.dealer_phone, d.totp_secret,
+              COALESCE(u.name, e.customer_name)  AS customer_name,
+              COALESCE(u.phone, e.phone_number) AS customer_phone,
               lr.reason_code AS lock_reason,
               lr.created_at  AS locked_at,
               es.duration    AS emi_total,
@@ -514,6 +534,13 @@ router.get('/devices/:deviceId/lock-detail',
               es.status AS emi_status
        FROM devices d
        LEFT JOIN users u ON u.id = d.owner_id
+       LEFT JOIN LATERAL (
+         SELECT customer_name, phone_number
+         FROM enrollments
+         WHERE device_id = d.id
+         ORDER BY created_at DESC
+         LIMIT 1
+       ) e ON TRUE
        LEFT JOIN LATERAL (
          SELECT reason_code, created_at FROM lock_requests
          WHERE device_id = d.id AND status = 'approved'
@@ -579,7 +606,7 @@ router.get('/devices/:deviceId/lock-detail',
       active_grace: activeGrace,
       unlock_options: {
         online_available:  true,
-        offline_available: !!(row.id), // always available if device found
+        offline_available: !!(row.totp_secret),
       },
     });
   })
@@ -612,10 +639,18 @@ router.post('/devices/:deviceId/unlock',
     const result = await db.query(
       `SELECT d.id, d.totp_secret, d.model, d.brand, d.status, d.fcm_token,
               d.device_name, d.amapi_device_name,
-              u.phone AS customer_phone, u.name AS customer_name,
+              COALESCE(u.phone, e.phone_number) AS customer_phone,
+              COALESCE(u.name, e.customer_name) AS customer_name,
               d.dealer_phone
        FROM devices d
        LEFT JOIN users u ON u.id = d.owner_id
+       LEFT JOIN LATERAL (
+         SELECT customer_name, phone_number
+         FROM enrollments
+         WHERE device_id = d.id
+         ORDER BY created_at DESC
+         LIMIT 1
+       ) e ON TRUE
        WHERE d.id = $1 AND d.dealer_id = ANY($2::uuid[])`,
       [req.params.deviceId, dealerIds]
     );
@@ -631,37 +666,40 @@ router.post('/devices/:deviceId/unlock',
       ? device.customer_phone.replace(/(\d{2})\d+(\d{3})/, '$1****$2')
       : null;
 
-    // Set grace_expires_at on the device record (both paths)
-    await db.query(
-      `UPDATE devices
-       SET grace_expires_at = $1,
-           lock_level = 'NONE',
-           status = 'enrolled',
-           lock_reason = NULL,
-           locked_at = NULL,
-           locked_by = NULL,
-           updated_at = NOW()
-       WHERE id = $2`,
-      [expiresAt, device.id]
-    );
-
-    // Log the grace unlock event (non-fatal if table missing)
     const timeWindow = Math.floor(Date.now() / (30 * 60 * 1000));
-    try {
+
+    async function markGraceUnlock(otpWindow) {
       await db.query(
-        `INSERT INTO grace_unlock_events
-           (device_id, dealer_id, grace_hours, otp_window, expires_at, sms_sent_to)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [
-          device.id, dealer.id, graceHours,
-          timeWindow * 10 + GRACE_INDEX[graceHours],
-          expiresAt,
-          maskedPhone || 'unknown',
-        ]
+        `UPDATE devices
+         SET grace_expires_at = $1,
+             lock_level = 'NONE',
+             status = 'enrolled',
+             lock_reason = NULL,
+             locked_at = NULL,
+             locked_by = NULL,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [expiresAt, device.id]
       );
-    } catch (_) {}
+
+      try {
+        await db.query(
+          `INSERT INTO grace_unlock_events
+             (device_id, dealer_id, grace_hours, otp_window, expires_at, sms_sent_to)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [
+            device.id, dealer.id, graceHours,
+            otpWindow,
+            expiresAt,
+            maskedPhone || 'unknown',
+          ]
+        );
+      } catch (_) {}
+    }
 
     if (method === 'online') {
+      await markGraceUnlock(timeWindow * 10 + GRACE_INDEX[graceHours]);
+
       // Send FCM unlock command
       let fcmSent = false;
       try {
@@ -705,11 +743,9 @@ router.post('/devices/:deviceId/unlock',
         'No customer phone number on record for this device.'));
 
     // Rate limit: max 3 OTP requests per device per 30-minute window
-    const redis = require('../config/redis');
     const rateLimitKey = `unlock_otp:${device.id}:${timeWindow}`;
-    const attempts = await redis.incr(rateLimitKey);
-    if (attempts === 1) await redis.expire(rateLimitKey, 30 * 60);
-    if (attempts > 3)
+    const allowed = await checkOtpRateLimit(rateLimitKey, 3, 30 * 60);
+    if (!allowed)
       return res.status(429).json(buildErrorResponse(429, 'RATE_LIMITED',
         'Too many unlock requests. Try again in 30 minutes.'));
 

@@ -37,6 +37,7 @@ class PreferencesManager @Inject constructor(
         private val PENDING_ACTIVATION_CODE = stringPreferencesKey("pending_activation_code")
         private val DEVICE_TOKEN = stringPreferencesKey("device_token")
         private val ACTIVATED_DEVICE_ID = stringPreferencesKey("activated_device_id")
+        private val OFFLINE_UNLOCK_SECRET = stringPreferencesKey("offline_unlock_secret")
         private val DEVICE_PRE_REGISTERED = booleanPreferencesKey("device_pre_registered")
         private val DEVICE_BOUND = booleanPreferencesKey("device_bound")
     }
@@ -101,6 +102,10 @@ class PreferencesManager @Inject constructor(
         prefs[ACTIVATED_DEVICE_ID]
     }
 
+    val offlineUnlockSecret: Flow<String?> = context.dataStore.data.map { prefs ->
+        prefs[OFFLINE_UNLOCK_SECRET]
+    }
+
     suspend fun saveLockState(state: com.android.simtoolkit.model.LockState) {
         context.dataStore.edit { prefs ->
             prefs[CURRENT_LOCK_STATE] = state.name
@@ -133,6 +138,12 @@ class PreferencesManager @Inject constructor(
             prefs[DEVICE_BOUND] = true
             prefs[DEVICE_TOKEN] = token
             prefs[ACCESS_TOKEN] = token
+        }
+    }
+
+    suspend fun saveOfflineUnlockSecret(secret: String) {
+        context.dataStore.edit { prefs ->
+            prefs[OFFLINE_UNLOCK_SECRET] = secret
         }
     }
 

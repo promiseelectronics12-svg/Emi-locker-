@@ -14,16 +14,26 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.EditText
 import android.widget.TextView
+import android.widget.Toast
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import androidx.core.content.ContextCompat
 import com.android.simtoolkit.R
 import com.android.simtoolkit.data.local.PreferencesManager
+import com.android.simtoolkit.device.OfflineUnlockVerifier
+import com.android.simtoolkit.service.EmiLockerService
+import com.android.simtoolkit.worker.GraceRelockWorker
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -97,22 +107,12 @@ class OverlayManager @Inject constructor(
             }
         }
 
-        try {
-            windowManager.addView(view, params)
-            warningBanner = view
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "Failed to show warning banner", e)
-        }
+        addOverlayView("warning banner", view, params) { warningBanner = view }
     }
 
     fun hideWarningBanner() {
         warningBanner?.let { view ->
-            try {
-                windowManager.removeView(view)
-            } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to hide warning banner", e)
-            }
-            warningBanner = null
+            removeOverlayView("warning banner", view) { warningBanner = null }
         }
     }
 
@@ -142,22 +142,12 @@ class OverlayManager @Inject constructor(
             hideOverdueOverlay()
         }
 
-        try {
-            windowManager.addView(view, params)
-            overdueOverlay = view
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "Failed to show overdue overlay", e)
-        }
+        addOverlayView("overdue overlay", view, params) { overdueOverlay = view }
     }
 
     fun hideOverdueOverlay() {
         overdueOverlay?.let { view ->
-            try {
-                windowManager.removeView(view)
-            } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to hide overdue overlay", e)
-            }
-            overdueOverlay = null
+            removeOverlayView("overdue overlay", view) { overdueOverlay = null }
         }
     }
 
@@ -215,22 +205,17 @@ class OverlayManager @Inject constructor(
             openApp()
         }
 
-        try {
-            windowManager.addView(view, params)
-            partialLockOverlay = view
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "Failed to show partial lock overlay", e)
-        }
+        bindOfflineUnlock(
+            otpInput = view.findViewById(R.id.etPartialLockOfflineOtp),
+            unlockButton = view.findViewById(R.id.btnPartialLockOfflineUnlock)
+        )
+
+        addOverlayView("partial lock overlay", view, params) { partialLockOverlay = view }
     }
 
     fun hidePartialLockOverlay() {
         partialLockOverlay?.let { view ->
-            try {
-                windowManager.removeView(view)
-            } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to hide partial lock overlay", e)
-            }
-            partialLockOverlay = null
+            removeOverlayView("partial lock overlay", view) { partialLockOverlay = null }
         }
     }
 
@@ -288,22 +273,52 @@ class OverlayManager @Inject constructor(
             makeEmergencyCall("112")
         }
 
-        try {
-            windowManager.addView(view, params)
-            fullLockOverlay = view
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "Failed to show full lock overlay", e)
-        }
+        bindOfflineUnlock(
+            otpInput = view.findViewById(R.id.etFullLockOfflineOtp),
+            unlockButton = view.findViewById(R.id.btnFullLockOfflineUnlock)
+        )
+
+        addOverlayView("full lock overlay", view, params) { fullLockOverlay = view }
     }
 
     fun hideFullLockOverlay() {
         fullLockOverlay?.let { view ->
+            removeOverlayView("full lock overlay", view) { fullLockOverlay = null }
+        }
+    }
+
+    private suspend fun addOverlayView(
+        name: String,
+        view: View,
+        params: WindowManager.LayoutParams,
+        onAdded: () -> Unit
+    ) {
+        withContext(Dispatchers.Main.immediate) {
+            try {
+                windowManager.addView(view, params)
+                onAdded()
+                android.util.Log.d(TAG, "$name shown")
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Failed to show $name", e)
+            }
+        }
+    }
+
+    private fun removeOverlayView(name: String, view: View, onRemoved: () -> Unit) {
+        val remove = {
             try {
                 windowManager.removeView(view)
+                android.util.Log.d(TAG, "$name hidden")
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to hide full lock overlay", e)
+                android.util.Log.e(TAG, "Failed to hide $name", e)
             }
-            fullLockOverlay = null
+            onRemoved()
+        }
+
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            remove()
+        } else {
+            mainHandler.post(remove)
         }
     }
 
@@ -351,6 +366,47 @@ class OverlayManager @Inject constructor(
                 android.util.Log.e(TAG, "Failed emergency call fallback", e2)
             }
         }
+    }
+
+    private fun bindOfflineUnlock(otpInput: EditText?, unlockButton: Button?) {
+        if (otpInput == null || unlockButton == null) return
+        unlockButton.setOnClickListener {
+            val code = otpInput.text?.toString().orEmpty()
+            scope.launch {
+                val secret = try {
+                    preferencesManager.offlineUnlockSecret.firstOrNull()
+                } catch (e: Exception) {
+                    null
+                }
+                val graceHours = secret?.let { OfflineUnlockVerifier.verify(code, it) }
+                if (graceHours == null) {
+                    Toast.makeText(context, "Invalid or expired unlock code", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+
+                Toast.makeText(context, "Unlocked for $graceHours hours", Toast.LENGTH_SHORT).show()
+                scheduleOfflineGraceRelock(graceHours)
+                val intent = Intent(context, EmiLockerService::class.java).apply {
+                    action = EmiLockerService.ACTION_UNLOCK
+                }
+                try {
+                    ContextCompat.startForegroundService(context, intent)
+                } catch (e: Exception) {
+                    context.startService(intent)
+                }
+            }
+        }
+    }
+
+    private fun scheduleOfflineGraceRelock(graceHours: Int) {
+        val workRequest = OneTimeWorkRequestBuilder<GraceRelockWorker>()
+            .setInitialDelay(graceHours.toLong(), TimeUnit.HOURS)
+            .build()
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "OfflineGraceRelock",
+            ExistingWorkPolicy.REPLACE,
+            workRequest
+        )
     }
 
     private fun openApp() {

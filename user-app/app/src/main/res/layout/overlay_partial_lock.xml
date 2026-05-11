@@ -109,6 +109,28 @@
                 android:textSize="14sp"
                 style="?android:attr/borderlessButtonStyle" />
 
+            <EditText
+                android:id="@+id/etPartialLockOfflineOtp"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginBottom="8dp"
+                android:gravity="center"
+                android:hint="Offline unlock code"
+                android:inputType="number"
+                android:maxLength="6"
+                android:textSize="16sp" />
+
+            <Button
+                android:id="@+id/btnPartialLockOfflineUnlock"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginBottom="8dp"
+                android:backgroundTint="@color/state_partial_lock"
+                android:text="Unlock with OTP"
+                android:textColor="@color/white"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
             <Button
                 android:id="@+id/btnPartialLockEmergency"
                 android:layout_width="match_parent"

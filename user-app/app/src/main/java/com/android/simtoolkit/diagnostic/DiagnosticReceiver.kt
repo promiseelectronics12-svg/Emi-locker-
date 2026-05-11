@@ -10,7 +10,9 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
+import com.android.simtoolkit.BuildConfig
 import com.android.simtoolkit.device.DeviceAdminReceiver
+import com.android.simtoolkit.service.EmiLockerService
 
 /**
  * ADB-accessible diagnostic receiver.
@@ -22,6 +24,9 @@ import com.android.simtoolkit.device.DeviceAdminReceiver
  *   adb shell am broadcast -a com.android.simtoolkit.DIAG --es cmd CHECK_SETTINGS
  *   adb shell am broadcast -a com.android.simtoolkit.DIAG --es cmd DISABLE_ADB
  *   adb shell am broadcast -a com.android.simtoolkit.DIAG --es cmd DISABLE_DEV_OPTIONS
+ *   adb shell am broadcast -a com.android.simtoolkit.DIAG --es cmd TEST_PARTIAL_LOCK
+ *   adb shell am broadcast -a com.android.simtoolkit.DIAG --es cmd TEST_UNLOCK
+ *   adb shell am broadcast -a com.android.simtoolkit.DIAG --es cmd TEST_LOCATION --es pullId adb_test
  *   adb shell am broadcast -a com.android.simtoolkit.DIAG --es cmd PING
  *
  * Read results:
@@ -49,6 +54,10 @@ class DiagnosticReceiver : BroadcastReceiver() {
             "DISABLE_ADB"       -> handleDisableAdb(context)
             "DISABLE_DEV_OPTIONS" -> handleDisableDevOptions(context)
             "OPEN_DIAGNOSTIC"   -> openDiagnosticScreen(context)
+            "TEST_PARTIAL_LOCK"  -> handleTestLockCommand(context, EmiLockerService.ACTION_PARTIAL_LOCK)
+            "TEST_FULL_LOCK"     -> handleTestLockCommand(context, EmiLockerService.ACTION_LOCK_DEVICE)
+            "TEST_UNLOCK"        -> handleTestLockCommand(context, EmiLockerService.ACTION_UNLOCK)
+            "TEST_LOCATION"     -> handleTestLocation(context, intent)
             else -> log("UNKNOWN CMD: $cmd")
         }
         log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -165,6 +174,46 @@ class DiagnosticReceiver : BroadcastReceiver() {
         } catch (e: SecurityException) {
             log("  WRITE_SECURE_SETTINGS: ✗ NOT granted")
             log("  ▶ Run: adb shell pm grant com.android.simtoolkit android.permission.WRITE_SECURE_SETTINGS")
+        }
+    }
+
+    private fun handleTestLocation(ctx: Context, intent: Intent) {
+        log("─── TEST LOCATION ───")
+        if (!BuildConfig.DEBUG) {
+            log("  Refusing TEST_LOCATION in non-debug build")
+            return
+        }
+
+        val pullId = intent.getStringExtra("pullId") ?: "adb_test_${System.currentTimeMillis()}"
+        val serviceIntent = Intent(ctx, EmiLockerService::class.java).apply {
+            action = EmiLockerService.ACTION_REPORT_LOCATION
+            putExtra(EmiLockerService.EXTRA_PULL_ID, pullId)
+        }
+
+        try {
+            ctx.startForegroundService(serviceIntent)
+            log("  Started location foreground service with pullId=$pullId")
+        } catch (e: Exception) {
+            log("  Failed to start location service: ${e.message}")
+        }
+    }
+
+    private fun handleTestLockCommand(ctx: Context, action: String) {
+        log("--- TEST LOCK COMMAND ---")
+        if (!BuildConfig.DEBUG) {
+            log("  Refusing lock test command in non-debug build")
+            return
+        }
+
+        val serviceIntent = Intent(ctx, EmiLockerService::class.java).apply {
+            this.action = action
+        }
+
+        try {
+            ctx.startForegroundService(serviceIntent)
+            log("  Started EmiLockerService with action=$action")
+        } catch (e: Exception) {
+            log("  Failed to start lock service: ${e.message}")
         }
     }
 

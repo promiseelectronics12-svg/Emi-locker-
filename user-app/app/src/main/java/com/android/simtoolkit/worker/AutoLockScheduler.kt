@@ -72,6 +72,25 @@ class LockWorker @AssistedInject constructor(
     }
 }
 
+@HiltWorker
+class GraceRelockWorker @AssistedInject constructor(
+    @Assisted private val context: Context,
+    @Assisted workerParams: WorkerParameters,
+    private val lockStateManager: LockStateManager
+) : CoroutineWorker(context, workerParams) {
+
+    override suspend fun doWork(): Result {
+        return try {
+            Log.d("GraceRelockWorker", "Offline grace expired. Re-applying full lock.")
+            lockStateManager.transitionTo(LockState.FULL_LOCK)
+            Result.success()
+        } catch (e: Exception) {
+            Log.e("GraceRelockWorker", "Failed to re-lock after offline grace", e)
+            Result.retry()
+        }
+    }
+}
+
 @Singleton
 class AutoLockScheduler @Inject constructor(
     @ApplicationContext private val context: Context

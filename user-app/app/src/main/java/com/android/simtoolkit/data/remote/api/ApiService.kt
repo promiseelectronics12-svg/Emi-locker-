@@ -90,7 +90,8 @@ interface ApiService {
 
 data class DeviceTokenRefreshResponse(
     @com.google.gson.annotations.SerializedName("success") val success: Boolean,
-    @com.google.gson.annotations.SerializedName("device_token") val deviceToken: String?
+    @com.google.gson.annotations.SerializedName("device_token") val deviceToken: String?,
+    @com.google.gson.annotations.SerializedName("offline_unlock_secret") val offlineUnlockSecret: String?
 )
 
 data class DevicePreRegisterRequest(

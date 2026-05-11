@@ -37,6 +37,7 @@ data class BindingConfirmResponse(
     @SerializedName("success") val success: Boolean,
     @SerializedName("device_id") val deviceId: String?,
     @SerializedName("device_token") val deviceToken: String?,
+    @SerializedName("offline_unlock_secret") val offlineUnlockSecret: String?,
     @SerializedName("emi_schedule") val emiSchedule: EmiScheduleDto?
 )
 

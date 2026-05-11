@@ -6848,7 +6848,7 @@ class _LockDialogState extends State<LockDialog> {
           'reason': reason,
           'note': note.text,
         },
-      );
+      ).timeout(const Duration(seconds: 20));
       final root = asMap(response.data);
       final data = asMap(root['data']);
       final decision = text(data['decision'], fallback: 'submitted');
@@ -6871,7 +6871,12 @@ class _LockDialogState extends State<LockDialog> {
         );
       }
     } catch (e) {
-      if (mounted) snack(context, readableError(e));
+      if (mounted) {
+        setState(() {
+          _status = 'The request did not finish. Please refresh device status before trying again.';
+        });
+        snack(context, readableError(e));
+      }
     } finally {
       if (mounted) {
         setState(() => _busy = false);
