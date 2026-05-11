@@ -4059,10 +4059,19 @@ class DealerKeys extends StatefulWidget {
 }
 
 class _DealerKeysState extends State<DealerKeys> {
-  late Future<Map<String, dynamic>> _invFuture = _loadInventory();
-  late Future<List<Map<String, dynamic>>> _keysFuture = _loadKeys();
   String _tierFilter = 'all';
   StreamSubscription<SseEvent>? _sseSub;
+
+  // Cached data — never null after first load, so Page.children never swap types.
+  Map<String, dynamic> _inv = {};
+  bool _firstLoad = true;
+  bool _reloading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetch();
+  }
 
   @override
   void didChangeDependencies() {
@@ -4072,7 +4081,7 @@ class _DealerKeysState extends State<DealerKeys> {
     if (stream == null) return;
     _sseSub = stream.listen((event) {
       if (mounted && const {'key_request_approved', 'grace_expired'}.contains(event.type)) {
-        _reload();
+        _fetch();
       }
     });
   }
@@ -4083,105 +4092,98 @@ class _DealerKeysState extends State<DealerKeys> {
     super.dispose();
   }
 
-  Future<Map<String, dynamic>> _loadInventory() async {
-    final res = await widget.api.get('/api/v1/dealer/keys/inventory');
-    return asMap(res.data);
+  Future<void> _fetch() async {
+    if (_reloading) return;
+    if (mounted) setState(() => _reloading = true);
+    try {
+      final res = await widget.api.get('/api/v1/dealer/keys/inventory');
+      if (mounted) setState(() {
+        _inv = asMap(res.data);
+        _firstLoad = false;
+        _reloading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() { _firstLoad = false; _reloading = false; });
+    }
   }
 
-  Future<List<Map<String, dynamic>>> _loadKeys() async {
-    final res = await widget.api.get('/api/v1/keys/my-keys');
-    return asList(asMap(res.data), 'keys');
-  }
+  Future<void> _reload() => _fetch();
 
-  Future<void> _reload() async {
-    setState(() {
-      _invFuture = _loadInventory();
-      _keysFuture = _loadKeys();
-    });
+  int _tierInt(String tier, String field) {
+    final t = asMap(_inv[tier]);
+    return int.tryParse(t[field]?.toString() ?? '0') ?? 0;
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<dynamic>>(
-      future: Future.wait([_invFuture, _keysFuture]),
-      builder: (context, snap) {
-        final loading = snap.connectionState == ConnectionState.waiting;
-        final inv = snap.hasData ? asMap(snap.data![0]) : <String, dynamic>{};
-        final keys = snap.hasData ? List<Map<String, dynamic>>.from(snap.data![1] as List) : <Map<String, dynamic>>[];
+    final totalAssigned = _tierInt('standard', 'assigned') +
+        _tierInt('premium', 'assigned') +
+        _tierInt('vip', 'assigned');
+    final totalActivated = _tierInt('standard', 'activated') +
+        _tierInt('premium', 'activated') +
+        _tierInt('vip', 'activated');
 
-        final totalAssigned = _tierInt(inv, 'standard', 'assigned') +
-            _tierInt(inv, 'premium', 'assigned') +
-            _tierInt(inv, 'vip', 'assigned');
-        final totalActivated = _tierInt(inv, 'standard', 'activated') +
-            _tierInt(inv, 'premium', 'activated') +
-            _tierInt(inv, 'vip', 'activated');
-
-        return Page(
-          title: 'Dealer keys',
-          subtitle: loading
-              ? 'Loading…'
-              : '$totalAssigned ready for activation, $totalActivated used by devices',
-          reload: _reload,
-          children: [
-            if (loading)
-              const Center(child: CircularProgressIndicator())
-            else ...[
-              // Tier cards row — NotificationListener prevents horizontal scroll
-              // events from bubbling to the page-level pull-to-refresh handler
-              RepaintBoundary(
-                child: NotificationListener<ScrollNotification>(
-                  onNotification: (_) => true,
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    physics: const ClampingScrollPhysics(),
-                    child: Row(
-                      children: [
-                        _KeyTierCard(
-                          tier: 'standard',
-                          assigned: _tierInt(inv, 'standard', 'assigned'),
-                          quota: _tierInt(inv, 'standard', 'quota'),
-                          selected: _tierFilter == 'standard',
-                          onTap: () => setState(() => _tierFilter = _tierFilter == 'standard' ? 'all' : 'standard'),
-                        ),
-                        const SizedBox(width: 12),
-                        _KeyTierCard(
-                          tier: 'premium',
-                          assigned: _tierInt(inv, 'premium', 'assigned'),
-                          quota: _tierInt(inv, 'premium', 'quota'),
-                          selected: _tierFilter == 'premium',
-                          onTap: () => setState(() => _tierFilter = _tierFilter == 'premium' ? 'all' : 'premium'),
-                        ),
-                        const SizedBox(width: 12),
-                        _KeyTierCard(
-                          tier: 'vip',
-                          assigned: _tierInt(inv, 'vip', 'assigned'),
-                          quota: _tierInt(inv, 'vip', 'quota'),
-                          selected: _tierFilter == 'vip',
-                          onTap: () => setState(() => _tierFilter = _tierFilter == 'vip' ? 'all' : 'vip'),
-                        ),
-                      ],
+    return Page(
+      title: 'Dealer keys',
+      subtitle: _firstLoad
+          ? 'Loading…'
+          : '$totalAssigned ready · $totalActivated used',
+      reload: _reload,
+      children: [
+        if (_firstLoad)
+          const Center(child: CircularProgressIndicator())
+        else ...[
+          // Subtle reload indicator — doesn't swap widget types, no animation restart
+          if (_reloading)
+            const LinearProgressIndicator(minHeight: 2),
+          RepaintBoundary(
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (_) => true,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const ClampingScrollPhysics(),
+                child: Row(
+                  children: [
+                    _KeyTierCard(
+                      tier: 'standard',
+                      assigned: _tierInt('standard', 'assigned'),
+                      quota: _tierInt('standard', 'quota'),
+                      selected: _tierFilter == 'standard',
+                      onTap: () => setState(() => _tierFilter = _tierFilter == 'standard' ? 'all' : 'standard'),
                     ),
-                  ),
+                    const SizedBox(width: 12),
+                    _KeyTierCard(
+                      tier: 'premium',
+                      assigned: _tierInt('premium', 'assigned'),
+                      quota: _tierInt('premium', 'quota'),
+                      selected: _tierFilter == 'premium',
+                      onTap: () => setState(() => _tierFilter = _tierFilter == 'premium' ? 'all' : 'premium'),
+                    ),
+                    const SizedBox(width: 12),
+                    _KeyTierCard(
+                      tier: 'vip',
+                      assigned: _tierInt('vip', 'assigned'),
+                      quota: _tierInt('vip', 'quota'),
+                      selected: _tierFilter == 'vip',
+                      onTap: () => setState(() => _tierFilter = _tierFilter == 'vip' ? 'all' : 'vip'),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 16),
-              Section(
-                title: 'Activation capacity',
-                child: RepaintBoundary(
-                  child: _KeyCapacitySummary(inv: inv, tierFilter: _tierFilter),
-                ),
-              ),
-            ],
-          ],
-        );
-      },
+            ),
+          ),
+          const SizedBox(height: 16),
+          Section(
+            title: 'Activation capacity',
+            child: RepaintBoundary(
+              child: _KeyCapacitySummary(inv: _inv, tierFilter: _tierFilter),
+            ),
+          ),
+        ],
+      ],
     );
   }
 
-  int _tierInt(Map<String, dynamic> inv, String tier, String field) {
-    final t = asMap(inv[tier]);
-    return int.tryParse(t[field]?.toString() ?? '0') ?? 0;
-  }
 }
 
 // ── Key Capacity Summary ──────────────────────────────────────────────────────
@@ -4907,6 +4909,8 @@ class _PadtSupportPanelState extends State<_PadtSupportPanel> {
                 '${text(d['device_name'] ?? d['model'], fallback: 'Device')} — ${text(d['imei'], fallback: '')}';
             return Text(label, overflow: TextOverflow.ellipsis, maxLines: 1);
           }).toList(),
+          itemHeight: 56,
+          menuMaxHeight: 280,
           items: devices.map((d) {
             final name = text(d['device_name'] ?? d['model'], fallback: 'Device');
             final imei = text(d['imei'], fallback: '');
@@ -4914,11 +4918,11 @@ class _PadtSupportPanelState extends State<_PadtSupportPanel> {
               value: text(d['id']),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(name, style: AppText.bodyBold(), overflow: TextOverflow.ellipsis),
+                  Text(name, style: AppText.bodyBold(), overflow: TextOverflow.ellipsis, maxLines: 1),
                   if (imei.isNotEmpty)
-                    Text(imei, style: AppText.mono(size: 11, color: AppTone.muted), overflow: TextOverflow.ellipsis),
+                    Text(imei, style: AppText.mono(size: 11, color: AppTone.muted), overflow: TextOverflow.ellipsis, maxLines: 1),
                 ],
               ),
             );
