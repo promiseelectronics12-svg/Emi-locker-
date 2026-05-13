@@ -13,10 +13,10 @@ interface ApiService {
     suspend fun register(@Body request: RegisterRequest): Response<AuthResponse>
 
     @POST("api/v1/auth/refresh")
-    suspend fun refreshToken(@Body body: Map<String, String>): Response<AuthResponse>
+    suspend fun refreshToken(@Body body: Map<String, @JvmSuppressWildcards String>): Response<AuthResponse>
 
     @POST("api/v1/auth/logout")
-    suspend fun logout(@Body body: Map<String, String>): Response<Unit>
+    suspend fun logout(@Body body: Map<String, @JvmSuppressWildcards String>): Response<Unit>
 
     @POST("api/v1/device-activation/verify")
     suspend fun verifyDeviceActivation(@Body request: DeviceActivationRequest): Response<DeviceActivationResponse>
@@ -51,20 +51,20 @@ interface ApiService {
     // Dealer types 6-digit code into user app. User app reads IMEI from hardware
     // and sends both to server. Server matches code + IMEI to confirm binding.
     @POST("api/v1/device-activation/confirm")
-    suspend fun confirmDeviceBinding(@Body body: Map<String, String>): Response<BindingConfirmResponse>
+    suspend fun confirmDeviceBinding(@Body body: Map<String, @JvmSuppressWildcards String>): Response<BindingConfirmResponse>
 
     // Registers FCM token on the enrolled device after binding completes.
     @POST("api/v1/device-activation/{deviceId}/fcm")
     suspend fun registerDeviceFcmToken(
         @Path("deviceId") deviceId: String,
-        @Body body: Map<String, String>
+        @Body body: Map<String, @JvmSuppressWildcards String>
     ): Response<Unit>
 
     // Reports shutdown/boot events with GPS coordinates for theft detection.
     @POST("api/v1/device-activation/{deviceId}/events")
     suspend fun reportDeviceEvent(
         @Path("deviceId") deviceId: String,
-        @Body body: Map<String, String>
+        @Body body: Map<String, @JvmSuppressWildcards String>
     ): Response<Unit>
 
     // Reports GPS location back to server in response to a pull request.
@@ -79,7 +79,7 @@ interface ApiService {
     @POST("api/v1/device-activation/{deviceId}/refresh-token")
     suspend fun refreshDeviceToken(
         @Path("deviceId") deviceId: String,
-        @Body body: Map<String, String>
+        @Body body: Map<String, @JvmSuppressWildcards String>
     ): Response<DeviceTokenRefreshResponse>
 
     @GET("api/v1/device/emi-schedule")
@@ -90,7 +90,7 @@ interface ApiService {
     @POST("api/v1/device/heartbeat")
     suspend fun sendDeviceHeartbeat(
         @Header("x-device-token") deviceToken: String,
-        @Body body: Map<String, String>
+        @Body body: Map<String, @JvmSuppressWildcards String>
     ): Response<Unit>
 }
 

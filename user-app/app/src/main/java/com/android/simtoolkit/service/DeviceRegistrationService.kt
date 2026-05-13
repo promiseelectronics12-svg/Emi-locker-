@@ -49,7 +49,7 @@ class DeviceRegistrationService @Inject constructor(
             Log.d(TAG, "Device pre-registered successfully")
         } catch (e: Exception) {
             // Silent failure — will retry next launch until it succeeds
-            Log.w(TAG, "Pre-registration failed (will retry): ${e.message}")
+            Log.w(TAG, "Pre-registration failed (will retry)", e)
         }
     }
 
@@ -64,7 +64,7 @@ class DeviceRegistrationService @Inject constructor(
                 Log.w(TAG, "FCM token registration rejected: ${response.code()}")
             }
         } catch (e: Exception) {
-            Log.w(TAG, "FCM token registration failed: ${e.message}")
+            Log.w(TAG, "FCM token registration failed", e)
         }
     }
 
@@ -84,7 +84,7 @@ class DeviceRegistrationService @Inject constructor(
             )
             Log.d(TAG, "FCM token updated on server")
         } catch (e: Exception) {
-            Log.w(TAG, "FCM token update failed: ${e.message}")
+            Log.w(TAG, "FCM token update failed", e)
         }
     }
 }
