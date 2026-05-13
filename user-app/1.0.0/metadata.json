@@ -3,9 +3,9 @@
     "versionName":  "1.0.0",
     "versionCode":  1,
     "apk":  "user-app/1.0.0/emi-locker-user-1.0.0-release.apk",
-    "sha256":  "8d78c7b833c0df46bd20c2829c957ef66e339e3d96f846b2357e83c690440a6c",
-    "provisioningChecksum":  "jXjHuDPA30a9IMKCnJV-9m4znj2W-EayNX6DxpBECmw",
+    "sha256":  "1b986711c6e45703b55c9ffe4149a537508245ea53c1721afb90cada0f52286a",
+    "provisioningChecksum":  "G5hnEcbkVwO1XJ_-QUmlN1CCRepTwXIa-5DK2g9SKGo",
     "certificateSha256":  "571b0a553b2b99e12af5485b2e6256eb3878b060cc4446fd827734489b4f6cc6",
-    "builtAt":  "2026-05-14T00:00:00+06:00",
-    "notes":  "Adds Android 12+ Device Owner provisioning callbacks, Retrofit URL normalization, wildcard-safe request bodies, and disables release minification until Retrofit keep rules are audited."
+    "builtAt":  "2026-05-14T03:45:44+06:00",
+    "notes":  "Uses a typed activation confirmation body to prevent Retrofit generic reflection crashes during Device Owner setup."
 }
