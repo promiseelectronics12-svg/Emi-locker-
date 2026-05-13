@@ -16,6 +16,9 @@
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <!-- IMEI reading for device binding — DPM.getImei() used on Android 10+ when Device Owner -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
 
     <!-- Overlay setup is tested through the normal Android settings screen. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -31,6 +34,9 @@
 
     <!-- Camera (for potential verification) -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
 
     <!-- Vibration for notifications -->
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -177,15 +183,7 @@
             android:exported="false"
             android:screenOrientation="portrait"
             android:launchMode="singleTask"
-            android:lockTaskMode="if_whitelisted">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data
-                    android:scheme="emi"
-                    android:host="dealer-contact" />
-            </intent-filter>
-        </activity>
+            android:lockTaskMode="if_whitelisted" />
 
         <!-- Agreement Detail Activity — for viewing EMI agreement PDF -->
         <activity
@@ -202,16 +200,6 @@
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize" />
 
-
-        <!-- Overlay Activity for lock screens -->
-        <activity
-            android:name=".overlay.OverlayActivity"
-            android:exported="false"
-            android:launchMode="singleInstance"
-            android:screenOrientation="portrait"
-            android:theme="@style/Theme.EmiLocker.Overlay"
-            android:excludeFromRecents="true"
-            android:noHistory="true" />
 
         <!-- FCM Default Channel -->
         <meta-data

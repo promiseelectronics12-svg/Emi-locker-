@@ -30,6 +30,7 @@ app/release/
 *.log
 
 # Keys - NEVER commit
+keystore/
 key.properties
 keystore.properties
 upload-keystore.jks

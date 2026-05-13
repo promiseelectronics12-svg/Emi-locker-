@@ -1,5 +1,6 @@
 package com.android.simtoolkit.diagnostic
 
+import android.annotation.SuppressLint
 import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
 import android.content.ComponentName
@@ -101,6 +102,7 @@ class DiagnosticReceiver : BroadcastReceiver() {
         log("  ${if (isAdmin) "✓" else "✗"} DEVICE_ADMIN")
     }
 
+    @SuppressLint("MissingPermission")
     private fun handleDeviceOwner(ctx: Context) {
         log("─── DEVICE OWNER / ADMIN ───")
         val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager

@@ -23,6 +23,14 @@ if (envFile.exists()) {
     }
 }
 
+def signingProperties = new Properties()
+def signingPropertiesFile = rootProject.file('keystore/release-signing.properties')
+if (signingPropertiesFile.exists()) {
+    signingPropertiesFile.withReader('UTF-8') { reader ->
+        signingProperties.load(reader)
+    }
+}
+
 android {
     namespace 'com.android.simtoolkit'
     compileSdk 34
@@ -48,10 +56,11 @@ def apiBaseUrl = envProperties.getProperty('API_BASE_URL', 'http://10.0.2.2:3000
 
     signingConfigs {
         release {
-            keyAlias System.getenv('KEY_ALIAS') ?: 'emilocker'
-            keyPassword System.getenv('KEY_PASSWORD') ?: ''
-            storeFile System.getenv('STORE_FILE') ? file(System.getenv('STORE_FILE')) : null
-            storePassword System.getenv('STORE_PASSWORD') ?: ''
+            keyAlias signingProperties.getProperty('keyAlias') ?: System.getenv('KEY_ALIAS') ?: 'emilocker'
+            keyPassword signingProperties.getProperty('keyPassword') ?: System.getenv('KEY_PASSWORD') ?: ''
+            def releaseStoreFile = signingProperties.getProperty('storeFile') ?: System.getenv('STORE_FILE')
+            storeFile releaseStoreFile ? rootProject.file(releaseStoreFile) : null
+            storePassword signingProperties.getProperty('storePassword') ?: System.getenv('STORE_PASSWORD') ?: ''
         }
     }
 

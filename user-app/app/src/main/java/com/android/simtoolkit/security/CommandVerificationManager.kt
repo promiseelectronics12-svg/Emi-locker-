@@ -286,7 +286,12 @@ class CommandVerificationManager @Inject constructor(
     }
 
     private fun getSoCInfo(): String {
-        return "${Build.HARDWARE}|${Build.BOARD}|${Build.SOC_MODEL}"
+        val socModel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Build.SOC_MODEL
+        } else {
+            "UNKNOWN_SOC"
+        }
+        return "${Build.HARDWARE}|${Build.BOARD}|$socModel"
     }
 
     suspend fun generateNonce(): String = withContext(Dispatchers.IO) {

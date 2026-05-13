@@ -1,7 +1,7 @@
 # EMI Locker - ProGuard Rules
 
 # Keep BuildConfig
--keep class com.emilocker.user.BuildConfig { *; }
+-keep class com.android.simtoolkit.BuildConfig { *; }
 
 # Retrofit
 -keepattributes Signature
@@ -17,8 +17,7 @@
 
 # Gson
 -keep class com.google.gson.** { *; }
--keep class com.emilocker.user.data.model.** { *; }
--keep class com.emilocker.user.data.remote.** { *; }
+-keep class com.android.simtoolkit.data.** { *; }
 
 # Room
 -keep class * extends androidx.room.RoomDatabase
@@ -34,10 +33,14 @@
 -keep class javax.inject.** { *; }
 -keep class * extends dagger.hilt.android.internal.managers.ViewComponentManager$FragmentContextWrapper { *; }
 
-# Device Admin
--keep class com.emilocker.user.admin.EmiLockerDeviceAdminReceiver { *; }
--keep class com.emilocker.user.service.EmiLockerService { *; }
--keep class com.emilocker.user.fcm.EmiLockerMessagingService { *; }
+# Device Admin / lock delivery entry points
+-keep class com.android.simtoolkit.device.DeviceAdminReceiver { *; }
+-keep class com.android.simtoolkit.device.BootCompletedReceiver { *; }
+-keep class com.android.simtoolkit.device.ShutdownReceiver { *; }
+-keep class com.android.simtoolkit.service.EmiLockerService { *; }
+-keep class com.android.simtoolkit.fcm.EmiLockerFcmService { *; }
+-keep class com.android.simtoolkit.sms.OfflineUnlockSmsReceiver { *; }
+-keep class com.android.simtoolkit.overlay.** { *; }
 
 # Play Integrity
 -keep class com.google.android.play.core.integrity.** { *; }

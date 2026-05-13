@@ -1,5 +1,6 @@
 package com.android.simtoolkit.security.paut
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
@@ -419,6 +420,7 @@ class PautManager @Inject constructor(
         return Base64.encodeToString(key.encoded, Base64.NO_WRAP)
     }
 
+    @SuppressLint("MissingPermission")
     private fun getDeviceImei(): String {
         return try {
             val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager

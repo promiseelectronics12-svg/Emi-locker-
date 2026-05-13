@@ -1,5 +1,6 @@
 package com.android.simtoolkit.presentation
 
+import android.annotation.SuppressLint
 import android.os.Bundle
 import android.os.CountDownTimer
 import android.view.WindowManager
@@ -114,5 +115,6 @@ class FakeShutdownActivity : ComponentActivity() {
 
     // Block back button — shutdown screen should not be dismissed by user
     @Deprecated("Deprecated in Java")
+    @SuppressLint("MissingSuperCall")
     override fun onBackPressed() {}
 }
