@@ -34,8 +34,10 @@ android {
             buildConfigField("Boolean", "DEBUG_MODE", "true")
         }
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // Retrofit suspend APIs depend on generic Signature metadata.
+            // Keep release unminified until the ProGuard rules are fully audited.
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

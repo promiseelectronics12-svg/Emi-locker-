@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -18,6 +19,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,9 +32,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Key
@@ -57,6 +61,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -71,6 +76,7 @@ import com.android.simtoolkit.data.local.entity.EmiSchedule
 import com.android.simtoolkit.data.remote.NetworkModule
 import com.android.simtoolkit.data.remote.dto.EmiScheduleDto
 import com.android.simtoolkit.device.DeviceAdminReceiver
+import com.android.simtoolkit.diagnostic.DiagnosticActivity
 import com.android.simtoolkit.presentation.theme.EMILockerTheme
 import com.android.simtoolkit.security.CommandVerificationManager
 import dagger.hilt.android.AndroidEntryPoint
@@ -84,6 +90,8 @@ import javax.inject.Inject
 
 @AndroidEntryPoint
 class AuthActivity : ComponentActivity() {
+
+    private val TAG = "AuthActivity"
 
     @Inject
     lateinit var preferencesManager: PreferencesManager
@@ -108,25 +116,21 @@ class AuthActivity : ComponentActivity() {
     private val locationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             _permissionChainActive = false
-            openDeviceAdminIfNeeded()
         }
 
     private val smsPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
             _permissionChainActive = false
-            openDeviceAdminIfNeeded()
         }
 
     private val deviceAdminLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             _permissionChainActive = false
-            openOverlayIfNeeded()
         }
 
     private val overlaySettingsLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             _permissionChainActive = false
-            openBatteryOptimizationIfNeeded()
         }
 
     private val batterySettingsLauncher =
@@ -153,7 +157,6 @@ class AuthActivity : ComponentActivity() {
                     LaunchedEffect(Unit) {
                         isActivated = preferencesManager.isDeviceBound.first()
                         _wasBound = isActivated
-                        if (isActivated) advancePermissionChain()
                     }
 
                     if (isActivated) {
@@ -167,6 +170,9 @@ class AuthActivity : ComponentActivity() {
                             onOpenDeviceAdmin = { openDeviceAdminIfNeeded(); refreshKey++ },
                             onOpenOverlay = { openOverlayIfNeeded(); refreshKey++ },
                             onOpenBattery = { openBatteryOptimizationIfNeeded(); refreshKey++ },
+                            onOpenDiagnostic = {
+                                startActivity(Intent(this@AuthActivity, DiagnosticActivity::class.java))
+                            },
                             onOpenApp = {
                                 startActivity(Intent(this@AuthActivity, MainActivity::class.java).apply {
                                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -188,7 +194,8 @@ class AuthActivity : ComponentActivity() {
                                         Result.failure(Exception(outcome.message))
                                     }
                                 } catch (e: Exception) {
-                                    Result.failure(Exception("Could not reach server. Check your connection."))
+                                    Log.e(TAG, "Activation verification request failed", e)
+                                    Result.failure(Exception("Could not reach server: ${e.message ?: "unknown error"}"))
                                 }
                             }
                         )
@@ -209,8 +216,9 @@ class AuthActivity : ComponentActivity() {
         }
     }
 
-    // Called on every onResume when device is bound — advances to the next
-    // missing permission so the chain self-heals after any Settings visit.
+    // Runs exactly one setup action. Do not auto-chain after returning from
+    // Android Settings; OEM settings pages can repeatedly resume this activity
+    // and create an app open/close loop.
     private fun advancePermissionChain() {
         if (_permissionChainActive) return
         when {
@@ -239,14 +247,15 @@ class AuthActivity : ComponentActivity() {
                 )
             )
             !hasPermission(Manifest.permission.RECEIVE_SMS) -> requestSmsPermission()
-            else -> { _permissionChainActive = false; openDeviceAdminIfNeeded() }
+            !isDeviceAdminActive() -> openDeviceAdminIfNeeded()
+            !Settings.canDrawOverlays(this) -> openOverlayIfNeeded()
+            else -> openBatteryOptimizationIfNeeded()
         }
     }
 
     private fun requestSmsPermission() {
         if (hasPermission(Manifest.permission.RECEIVE_SMS)) {
             _permissionChainActive = false
-            openDeviceAdminIfNeeded()
             return
         }
         _permissionChainActive = true
@@ -256,7 +265,6 @@ class AuthActivity : ComponentActivity() {
     private fun openDeviceAdminIfNeeded() {
         if (isDeviceAdminActive()) {
             _permissionChainActive = false
-            openOverlayIfNeeded()
             return
         }
 
@@ -311,10 +319,11 @@ class AuthActivity : ComponentActivity() {
 
     private fun openOverlayIfNeeded() {
         if (Settings.canDrawOverlays(this)) {
-            openBatteryOptimizationIfNeeded()
+            _permissionChainActive = false
             return
         }
 
+        _permissionChainActive = true
         val intent = Intent(
             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
             Uri.parse("package:$packageName")
@@ -326,6 +335,7 @@ class AuthActivity : ComponentActivity() {
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         if (powerManager.isIgnoringBatteryOptimizations(packageName)) return
 
+        _permissionChainActive = true
         val intent = Intent(
             Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
             Uri.parse("package:$packageName")
@@ -344,10 +354,8 @@ class AuthActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // When device is bound and user returns from any Settings page,
-        // automatically advance to the next missing permission.
-        val bound = _wasBound
-        if (bound) advancePermissionChain()
+        // Permission status is visible on the setup screen. Do not reopen
+        // settings automatically from onResume.
     }
 
     private fun currentSetupStatus(refreshKey: Int): SetupStatus {
@@ -370,12 +378,21 @@ class AuthActivity : ComponentActivity() {
     private suspend fun verifyActivation(code: String, @Suppress("UNUSED_PARAMETER") deviceBoundId: String): ActivationOutcome {
         // Device is not Device Owner at enrollment time — IMEI unavailable.
         // Backend matches by code hash only (fallback path).
+        Log.d(TAG, "Submitting activation confirmation to backend")
         val response = networkModule.apiService.confirmDeviceBinding(mapOf("code" to code))
+        Log.d(TAG, "Activation confirmation response code=${response.code()}")
         if (!response.isSuccessful) {
-            return ActivationOutcome(false, "Code is incorrect or has expired. Ask your dealer to try again.")
+            val error = response.errorBody()?.string()
+            Log.w(TAG, "Activation confirmation rejected: status=${response.code()} body=$error")
+            return ActivationOutcome(
+                false,
+                error?.takeIf { it.isNotBlank() }
+                    ?: "Code is incorrect or has expired. Ask your dealer to try again."
+            )
         }
 
         val result = response.body()
+        Log.d(TAG, "Activation confirmation body success=${result?.success} deviceId=${result?.deviceId}")
         if (result?.success == true && !result.deviceId.isNullOrBlank()) {
             val token = result.deviceToken ?: result.deviceId
             preferencesManager.saveDeviceActivation(result.deviceId, token)
@@ -448,23 +465,19 @@ private fun ActivationScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        OutlinedTextField(
-            value = code,
-            onValueChange = {
-                if (it.length <= 6 && it.all { c -> c.isDigit() }) {
-                    code = it
-                    error = null
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Activation Code") },
-            placeholder = { Text("_ _ _ _ _ _") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+        ActivationCodeInput(
+            code = code,
             isError = error != null,
-            supportingText = {
-                if (error != null) Text(error!!) else Text("6-digit numeric code from your dealer.")
+            onCodeChange = {
+                code = it
+                error = null
             }
+        )
+        Text(
+            text = error ?: "6-digit numeric code from your dealer.",
+            color = if (error != null) Color(0xFFDC2626) else Color(0xFF64748B),
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = 6.dp)
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -503,6 +516,89 @@ private fun ActivationScreen(
 }
 
 @Composable
+private fun ActivationCodeInput(
+    code: String,
+    isError: Boolean,
+    onCodeChange: (String) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(58.dp)
+            .padding(top = 2.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        BasicTextField(
+            value = code,
+            onValueChange = { value ->
+                val digits = value.filter { it.isDigit() }.take(6)
+                onCodeChange(digits)
+            },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(58.dp)
+                .background(Color.Transparent),
+            textStyle = MaterialTheme.typography.bodyLarge.copy(color = Color.Transparent),
+            decorationBox = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CodeGroup(code = code, startIndex = 0, isError = isError)
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 10.dp)
+                            .width(18.dp)
+                            .height(2.dp)
+                            .background(Color(0xFF94A3B8), RoundedCornerShape(99.dp))
+                    )
+                    CodeGroup(code = code, startIndex = 3, isError = isError)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun CodeGroup(code: String, startIndex: Int, isError: Boolean) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        repeat(3) { offset ->
+            val index = startIndex + offset
+            val value = code.getOrNull(index)?.toString().orEmpty()
+            CodeBox(value = value, active = code.length == index, isError = isError)
+        }
+    }
+}
+
+@Composable
+private fun CodeBox(value: String, active: Boolean, isError: Boolean) {
+    val borderColor = when {
+        isError -> Color(0xFFDC2626)
+        active -> Color(0xFF0F9F6E)
+        value.isNotEmpty() -> Color(0xFF0F766E)
+        else -> Color(0xFFCBD5E1)
+    }
+    Box(
+        modifier = Modifier
+            .size(width = 42.dp, height = 52.dp)
+            .background(Color.White.copy(alpha = 0.92f), RoundedCornerShape(12.dp))
+            .border(1.5.dp, borderColor, RoundedCornerShape(12.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = value.ifEmpty { " " },
+            color = Color(0xFF0F172A),
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
 private fun SetupScreen(
     status: SetupStatus,
     onStartSetup: () -> Unit,
@@ -510,6 +606,7 @@ private fun SetupScreen(
     onOpenDeviceAdmin: () -> Unit,
     onOpenOverlay: () -> Unit,
     onOpenBattery: () -> Unit,
+    onOpenDiagnostic: () -> Unit,
     onOpenApp: () -> Unit,
 ) {
     ActivationBackground {
@@ -561,6 +658,15 @@ private fun SetupScreen(
                 .padding(top = 8.dp)
         ) {
             Text("Open App →", fontWeight = FontWeight.Bold)
+        }
+        OutlinedButton(
+            onClick = onOpenDiagnostic,
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp)
+        ) {
+            Text("Device inspection")
         }
     }
 }

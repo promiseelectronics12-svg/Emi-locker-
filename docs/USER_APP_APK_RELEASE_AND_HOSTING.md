@@ -9,10 +9,10 @@ Last verified: 2026-05-14
 - Version: `1.0.0`
 - Version code: `1`
 - Build type: signed, minified release APK
-- APK size: `4,998,632` bytes
+- APK size: `4,998,472` bytes
 - Signing certificate SHA-256: `571b0a553b2b99e12af5485b2e6256eb3878b060cc4446fd827734489b4f6cc6`
-- APK SHA-256: `df3319ab8d2f6f37a4be5bac5c3ee377b0af92be7cfb8a59161ba401807c118e`
-- Android provisioning package checksum: `3zMZq40vbzekvlusXD7jd7Cvkr58-4pZFhukAYB8EY4`
+- APK SHA-256: `8d78c7b833c0df46bd20c2829c957ef66e339e3d96f846b2357e83c690440a6c`
+- Android provisioning package checksum: `jXjHuDPA30a9IMKCnJV-9m4znj2W-EayNX6DxpBECmw`
 
 ## Local Private Signing Files
 
@@ -47,7 +47,7 @@ For self-hosted Device Owner provisioning, the QR code should include the packag
 {
   "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": "com.android.simtoolkit/com.android.simtoolkit.device.DeviceAdminReceiver",
   "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": "https://raw.githubusercontent.com/promiseelectronics12-svg/Emi-locker-/apk-releases/user-app/1.0.0/emi-locker-user-1.0.0-release.apk",
-  "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM": "3zMZq40vbzekvlusXD7jd7Cvkr58-4pZFhukAYB8EY4",
+  "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM": "jXjHuDPA30a9IMKCnJV-9m4znj2W-EayNX6DxpBECmw",
   "android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED": true,
   "android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE": {
     "api_base_url": "https://emi-locker-erkt.onrender.com"
@@ -75,4 +75,5 @@ cd "D:\EMI APP\user-app"
   `GET_PROVISIONING_MODE` and `ADMIN_POLICY_COMPLIANCE`
 - Retrofit base URL is normalized with a trailing slash before API creation
 - Kotlin `Map` request bodies suppress wildcards for Retrofit/Gson release builds
+- Release minification is disabled until Retrofit suspend API keep rules are fully audited
 - GitHub raw APK URL: HTTP 200
