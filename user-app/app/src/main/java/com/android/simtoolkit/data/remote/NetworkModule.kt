@@ -87,8 +87,13 @@ class NetworkModule @Inject constructor(
         return builder.build()
     }
 
+    private fun normalizedBaseUrl(): String {
+        val baseUrl = BuildConfig.API_BASE_URL.trim()
+        return if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
+    }
+
     private val retrofit = Retrofit.Builder()
-        .baseUrl(BuildConfig.API_BASE_URL)
+        .baseUrl(normalizedBaseUrl())
         .client(getOkHttpClient())
         .addConverterFactory(GsonConverterFactory.create())
         .build()

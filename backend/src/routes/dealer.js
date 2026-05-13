@@ -70,7 +70,7 @@ const GRACE_INDEX = { 2: 1, 4: 2, 8: 3, 24: 4 };
 
 const DEFAULT_USER_APP_APK_URL =
   'https://raw.githubusercontent.com/promiseelectronics12-svg/Emi-locker-/apk-releases/user-app/1.0.0/emi-locker-user-1.0.0-release.apk';
-const DEFAULT_USER_APP_APK_CHECKSUM = 'HBan5SNWXS2gcENqxd13fXapIfJMig67qBj7h9pbeGA';
+const DEFAULT_USER_APP_APK_CHECKSUM = 'VHxicVA-9FtoucEv8HZzj2CPZa6Mv2ApD7KWbBJVgF0';
 const USER_APP_PACKAGE = 'com.android.simtoolkit';
 const USER_APP_ADMIN_RECEIVER = `${USER_APP_PACKAGE}/com.android.simtoolkit.device.DeviceAdminReceiver`;
 
