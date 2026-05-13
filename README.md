@@ -6,9 +6,9 @@ This branch stores downloadable APK artifacts only. Source code remains on `main
 
 - Package: `com.android.simtoolkit`
 - APK: `user-app/1.0.0/emi-locker-user-1.0.0-release.apk`
-- SHA-256: `a52063e91e1cee92581b3b557e633871138fd92cde14e78f1f89da8a216b60bf`
-- Android provisioning checksum: `pSBj6R4c7pJYGztVfmM4cROP2SzeFOePH4naiiFrYL8`
-- Notes: Adds local Device Owner decouple release handling.
+- SHA-256: `0dda575becabcced281a4ec4a7dc8bafb61702ec3e2d7d549f81199f48751bfd`
+- Android provisioning checksum: `DdpXW-yrzO0oGk7Ep9yLr7YXAuw-LX1Un4EZn0h1G_0`
+- Notes: Adds guarded Device Owner/Admin decouple release reporting; backend only marks decoupled after Android release succeeds.
 
 Direct raw download URL:
 `https://raw.githubusercontent.com/promiseelectronics12-svg/Emi-locker-/apk-releases/user-app/1.0.0/emi-locker-user-1.0.0-release.apk`
