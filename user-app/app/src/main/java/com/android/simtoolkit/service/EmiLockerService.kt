@@ -122,14 +122,24 @@ class EmiLockerService : Service() {
     }
 
     private suspend fun applyDecoupleAndReport() {
-        lockStateManager.transitionTo(LockState.NORMAL)
         val released = DeviceAdminReceiver.releaseDeviceManagement(this)
-        permissionHealthReporter.reportIfChanged(
-            "decouple_command",
-            force = true,
-            lockState = LockState.NORMAL
-        )
-        Log.d(TAG, "Decouple sequence complete. deviceManagementReleased=$released")
+        if (released) {
+            lockStateManager.transitionTo(LockState.NORMAL)
+            permissionHealthReporter.reportIfChanged(
+                "decouple_command",
+                force = true,
+                lockState = LockState.NORMAL
+            )
+            Log.d(TAG, "Decouple sequence complete. deviceManagementReleased=true")
+        } else {
+            val currentState = preferencesManager.getCurrentLockState()
+            permissionHealthReporter.reportIfChanged(
+                "decouple_failed",
+                force = true,
+                lockState = currentState
+            )
+            Log.e(TAG, "Decouple sequence failed. Backend will not mark device decoupled.")
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

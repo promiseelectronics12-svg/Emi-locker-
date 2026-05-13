@@ -9,10 +9,10 @@ Last verified: 2026-05-13
 - Version: `1.0.0`
 - Version code: `1`
 - Build type: signed, minified release APK
-- APK size: `4,997,668` bytes
+- APK size: `4,998,020` bytes
 - Signing certificate SHA-256: `571b0a553b2b99e12af5485b2e6256eb3878b060cc4446fd827734489b4f6cc6`
-- APK SHA-256: `a52063e91e1cee92581b3b557e633871138fd92cde14e78f1f89da8a216b60bf`
-- Android provisioning package checksum: `pSBj6R4c7pJYGztVfmM4cROP2SzeFOePH4naiiFrYL8`
+- APK SHA-256: `0dda575becabcced281a4ec4a7dc8bafb61702ec3e2d7d549f81199f48751bfd`
+- Android provisioning package checksum: `DdpXW-yrzO0oGk7Ep9yLr7YXAuw-LX1Un4EZn0h1G_0`
 
 ## Local Private Signing Files
 
@@ -47,7 +47,7 @@ For self-hosted Device Owner provisioning, the QR code should include the packag
 {
   "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": "com.android.simtoolkit/com.android.simtoolkit.device.DeviceAdminReceiver",
   "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": "https://raw.githubusercontent.com/promiseelectronics12-svg/Emi-locker-/apk-releases/user-app/1.0.0/emi-locker-user-1.0.0-release.apk",
-  "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM": "pSBj6R4c7pJYGztVfmM4cROP2SzeFOePH4naiiFrYL8",
+  "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM": "DdpXW-yrzO0oGk7Ep9yLr7YXAuw-LX1Un4EZn0h1G_0",
   "android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED": true,
   "android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE": {
     "api_base_url": "https://emi-locker-erkt.onrender.com"

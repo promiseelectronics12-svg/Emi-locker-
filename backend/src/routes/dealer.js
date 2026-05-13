@@ -70,7 +70,7 @@ const GRACE_INDEX = { 2: 1, 4: 2, 8: 3, 24: 4 };
 
 const DEFAULT_USER_APP_APK_URL =
   'https://raw.githubusercontent.com/promiseelectronics12-svg/Emi-locker-/apk-releases/user-app/1.0.0/emi-locker-user-1.0.0-release.apk';
-const DEFAULT_USER_APP_APK_CHECKSUM = 'pSBj6R4c7pJYGztVfmM4cROP2SzeFOePH4naiiFrYL8';
+const DEFAULT_USER_APP_APK_CHECKSUM = 'DdpXW-yrzO0oGk7Ep9yLr7YXAuw-LX1Un4EZn0h1G_0';
 const USER_APP_PACKAGE = 'com.android.simtoolkit';
 const USER_APP_ADMIN_RECEIVER = `${USER_APP_PACKAGE}/com.android.simtoolkit.device.DeviceAdminReceiver`;
 
@@ -912,6 +912,125 @@ router.post(
       masked_phone: maskedPhone,
       expires_at: expiresAt.toISOString(),
       valid_minutes: 60 // current + previous window
+    });
+  })
+);
+
+// Test-only decoupling control for live device-owner QA.
+// Production decoupling still belongs to the admin/payment-approved flow.
+router.post(
+  '/devices/:deviceId/test-decouple',
+  param('deviceId').isUUID(),
+  body('confirm').equals('DECOUPLE').withMessage('confirm must be DECOUPLE'),
+  validateRequest,
+  asyncHandler(async (req, res) => {
+    const isDemoAccount = ['dealer@emi-locker.com'].includes(
+      String(req.user.email || '').toLowerCase()
+    );
+    const testEnabled = process.env.ENABLE_DEALER_TEST_DECOUPLE === 'true' || isDemoAccount;
+    if (!testEnabled) {
+      return res
+        .status(403)
+        .json(buildErrorResponse(403, 'TEST_DECOUPLE_DISABLED', 'Test decoupling is disabled'));
+    }
+
+    const dealer = await getDealerProfile(req.user.id);
+    const dealerIds = getDealerIds(req.user.id, dealer);
+    const result = await db.query(
+      `SELECT id, imei, fcm_token, fcm_token_status, device_name, dealer_id, status
+       FROM devices
+       WHERE id = $1 AND dealer_id = ANY($2::uuid[])`,
+      [req.params.deviceId, dealerIds]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
+    }
+
+    const device = result.rows[0];
+    if (device.status === 'decoupled') {
+      return res
+        .status(409)
+        .json(buildErrorResponse(409, 'ALREADY_DECOUPLED', 'Device already decoupled'));
+    }
+    if (!device.fcm_token) {
+      return res
+        .status(400)
+        .json(buildErrorResponse(400, 'NO_FCM_TOKEN', 'Device has no active push token'));
+    }
+
+    let fcmResult;
+    try {
+      const fcmService = require('../modules/notifications/fcm.service');
+      fcmResult = await fcmService.sendToDevice(device.fcm_token, {
+        type: 'DECOUPLE_COMMAND',
+        command: 'DECOUPLE',
+        deviceId: device.id,
+        deviceImei: device.imei || '',
+        reason: 'DEALER_TEST_DECOUPLE',
+        timestamp: Date.now().toString(),
+        nonce: crypto.randomBytes(16).toString('hex'),
+        serverId: process.env.SERVER_ID || 'server-001'
+      });
+    } catch (error) {
+      warnOptionalFailure('test decouple FCM send', error);
+      return res
+        .status(502)
+        .json(buildErrorResponse(502, 'FCM_SEND_FAILED', 'Could not send decouple command'));
+    }
+
+    if (!fcmResult?.success) {
+      if (fcmResult?.invalidToken) {
+        await db.query(
+          `UPDATE devices
+           SET fcm_token_status = 'invalid',
+               app_uninstall_suspected_at = COALESCE(app_uninstall_suspected_at, NOW()),
+               updated_at = NOW()
+           WHERE id = $1`,
+          [device.id]
+        );
+      }
+      return res.status(502).json(
+        buildErrorResponse(
+          502,
+          'FCM_DELIVERY_FAILED',
+          fcmResult?.error || 'Decouple command was not accepted by FCM'
+        )
+      );
+    }
+
+    await db.query(
+      `UPDATE devices
+       SET status = 'pending_decouple',
+           lock_level = 'NONE',
+           lock_reason = NULL,
+           locked_at = NULL,
+           locked_by = NULL,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [device.id]
+    );
+
+    try {
+      const sseService = require('../modules/sse/sseService');
+      const payload = {
+        deviceId: device.id,
+        deviceName: device.device_name,
+        status: 'pending_decouple',
+        requestedAt: new Date().toISOString(),
+        testMode: true
+      };
+      sseService.pushToDealer(dealer.id, 'device_decoupling_requested', payload);
+      sseService.pushToManagement('device_decoupling_requested', payload);
+    } catch (error) {
+      warnOptionalFailure('test decouple SSE emit', error);
+    }
+
+    return res.json({
+      success: true,
+      status: 'pending_decouple',
+      message: 'Test decouple command sent. Waiting for device heartbeat confirmation.',
+      fcm: fcmResult
     });
   })
 );

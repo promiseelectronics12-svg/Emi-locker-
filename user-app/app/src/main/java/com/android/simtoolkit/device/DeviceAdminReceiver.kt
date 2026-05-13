@@ -56,16 +56,27 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
                     }
                     @Suppress("DEPRECATION")
                     dpm.clearDeviceOwnerApp(context.packageName)
-                    Log.d(TAG, "Device Owner cleared for decoupling")
-                    true
+                    val cleared = !dpm.isDeviceOwnerApp(context.packageName)
+                    if (cleared) {
+                        Log.d(TAG, "Device Owner cleared for decoupling")
+                    } else {
+                        Log.e(TAG, "Device Owner clear call returned but owner is still active")
+                    }
+                    cleared
                 } else {
                     if (dpm.isAdminActive(adminComponent)) {
                         dpm.removeActiveAdmin(adminComponent)
-                        Log.d(TAG, "Device Admin cleared for decoupling")
+                        val cleared = !dpm.isAdminActive(adminComponent)
+                        if (cleared) {
+                            Log.d(TAG, "Device Admin cleared for decoupling")
+                        } else {
+                            Log.e(TAG, "Device Admin remove call returned but admin is still active")
+                        }
+                        cleared
                     } else {
                         Log.d(TAG, "No active device management to clear")
+                        true
                     }
-                    true
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to release device management", e)
