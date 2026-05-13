@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const QRCode = require('qrcode');
 const { v4: uuidv4 } = require('uuid');
+const { OAuth2Client } = require('google-auth-library');
 const db = require('../../config/database');
 const logger = require('../../utils/logger');
 const emailService = require('../notifications/emailService');
@@ -35,6 +36,16 @@ const ACCOUNT_LOCK_WINDOW_SECONDS = 15 * 60;
 const ACCOUNT_LOCK_THRESHOLD = 5;
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const BCRYPT_ROUNDS = 12;
+const OTP_TTL_MINUTES = 10;
+const OTP_MAX_ATTEMPTS = 5;
+const PASSWORD_RESET_TOKEN_TTL_SECONDS = 10 * 60;
+const OTP_TYPES = {
+  DEVICE_LOGIN: 'DEVICE_LOGIN',
+  PASSWORD_RESET: 'PASSWORD_RESET'
+};
+
+let authSchemaReadyPromise = null;
+const googleClient = new OAuth2Client();
 
 function errorResponse(res, status, code, message, extra = {}) {
   return res.status(status).json({
@@ -45,7 +56,267 @@ function errorResponse(res, status, code, message, extra = {}) {
   });
 }
 
+function requestMeta(req) {
+  return {
+    ip: req.ip || req.headers['x-forwarded-for'] || null,
+    userAgent: req.get('user-agent') || null
+  };
+}
+
+function otpHash(otp) {
+  const secret = process.env.AUTH_OTP_SECRET || process.env.JWT_SECRET || 'emi-locker-dev-otp-secret';
+  return crypto.createHmac('sha256', secret).update(String(otp)).digest('hex');
+}
+
+function getGoogleClientIds() {
+  return [
+    process.env.GOOGLE_AUTH_CLIENT_IDS,
+    process.env.GOOGLE_WEB_CLIENT_ID,
+    process.env.GOOGLE_ANDROID_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_ID
+  ]
+    .filter(Boolean)
+    .flatMap((value) => String(value).split(','))
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+async function ensureAuthSchema() {
+  if (!authSchemaReadyPromise) {
+    authSchemaReadyPromise = db.query(`
+      CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+      CREATE TABLE IF NOT EXISTS user_google_accounts (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        google_sub TEXT NOT NULL UNIQUE,
+        google_email TEXT NOT NULL,
+        google_email_verified BOOLEAN DEFAULT FALSE,
+        bound_at TIMESTAMP DEFAULT NOW(),
+        last_used_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(user_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_user_google_accounts_user_id ON user_google_accounts(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_google_accounts_email ON user_google_accounts(google_email);
+
+      CREATE TABLE IF NOT EXISTS trusted_devices (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        device_fingerprint TEXT NOT NULL,
+        device_name TEXT,
+        last_used_at TIMESTAMP DEFAULT NOW(),
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(user_id, device_fingerprint)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_trusted_devices_user_id ON trusted_devices(user_id);
+
+      CREATE TABLE IF NOT EXISTS auth_otp_challenges (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        email TEXT NOT NULL,
+        type TEXT NOT NULL,
+        otp_hash TEXT NOT NULL,
+        device_fingerprint TEXT,
+        device_name TEXT,
+        ip_address TEXT,
+        user_agent TEXT,
+        attempts INTEGER DEFAULT 0,
+        max_attempts INTEGER DEFAULT ${OTP_MAX_ATTEMPTS},
+        expires_at TIMESTAMP NOT NULL,
+        consumed_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_auth_otp_user_type ON auth_otp_challenges(user_id, type);
+      CREATE INDEX IF NOT EXISTS idx_auth_otp_email_type ON auth_otp_challenges(email, type);
+      CREATE INDEX IF NOT EXISTS idx_auth_otp_device ON auth_otp_challenges(device_fingerprint);
+      CREATE INDEX IF NOT EXISTS idx_auth_otp_expires ON auth_otp_challenges(expires_at);
+    `);
+  }
+  return authSchemaReadyPromise;
+}
+
+async function createOtpChallenge({
+  userId,
+  email,
+  type,
+  otp,
+  deviceFingerprint = null,
+  deviceName = null,
+  meta = {}
+}) {
+  await ensureAuthSchema();
+  await db.query(
+    `UPDATE auth_otp_challenges
+     SET consumed_at = NOW()
+     WHERE email = $1
+       AND type = $2
+       AND consumed_at IS NULL`,
+    [email, type]
+  );
+  await db.query(
+    `INSERT INTO auth_otp_challenges (
+       user_id, email, type, otp_hash, device_fingerprint, device_name,
+       ip_address, user_agent, expires_at
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW() + INTERVAL '${OTP_TTL_MINUTES} minutes')`,
+    [
+      userId,
+      email,
+      type,
+      otpHash(otp),
+      deviceFingerprint,
+      deviceName,
+      meta.ip || null,
+      meta.userAgent || null
+    ]
+  );
+}
+
+async function consumeOtpChallenge({ email, type, otp, deviceFingerprint = null }) {
+  await ensureAuthSchema();
+  const result = await db.query(
+    `SELECT id, user_id, otp_hash, attempts, max_attempts, expires_at, device_name
+     FROM auth_otp_challenges
+     WHERE email = $1
+       AND type = $2
+       AND consumed_at IS NULL
+       AND ($3::text IS NULL OR device_fingerprint = $3)
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [email, type, deviceFingerprint]
+  );
+
+  if (result.rows.length === 0) {
+    return { ok: false, code: 'OTP_EXPIRED', message: 'Verification code expired or not found. Please request a new code.' };
+  }
+
+  const challenge = result.rows[0];
+  if (new Date(challenge.expires_at).getTime() < Date.now()) {
+    await db.query('UPDATE auth_otp_challenges SET consumed_at = NOW() WHERE id = $1', [challenge.id]);
+    return { ok: false, code: 'OTP_EXPIRED', message: 'Verification code expired. Please request a new code.' };
+  }
+
+  if (Number(challenge.attempts) >= Number(challenge.max_attempts)) {
+    return { ok: false, code: 'TOO_MANY_ATTEMPTS', message: 'Too many verification attempts. Request a new code.' };
+  }
+
+  if (otpHash(otp) !== challenge.otp_hash) {
+    await db.query('UPDATE auth_otp_challenges SET attempts = attempts + 1 WHERE id = $1', [challenge.id]);
+    return { ok: false, code: 'INVALID_OTP', message: 'Invalid verification code' };
+  }
+
+  await db.query(
+    'UPDATE auth_otp_challenges SET consumed_at = NOW(), attempts = attempts + 1 WHERE id = $1',
+    [challenge.id]
+  );
+
+  return {
+    ok: true,
+    userId: challenge.user_id,
+    deviceName: challenge.device_name
+  };
+}
+
+async function verifyGoogleIdToken(idToken) {
+  const audiences = getGoogleClientIds();
+  if (audiences.length === 0) {
+    const error = new Error('Google auth client IDs are not configured');
+    error.code = 'GOOGLE_AUTH_NOT_CONFIGURED';
+    throw error;
+  }
+
+  const ticket = await googleClient.verifyIdToken({
+    idToken,
+    audience: audiences
+  });
+  const payload = ticket.getPayload();
+  if (!payload?.sub || !payload?.email) {
+    const error = new Error('Google token is missing identity claims');
+    error.code = 'INVALID_GOOGLE_TOKEN';
+    throw error;
+  }
+  return {
+    sub: payload.sub,
+    email: payload.email.toLowerCase().trim(),
+    emailVerified: payload.email_verified === true,
+    name: payload.name || ''
+  };
+}
+
+async function isTrustedDevice(userId, deviceFingerprint) {
+  if (!deviceFingerprint) return false;
+  await ensureAuthSchema();
+  const trusted = await db.query(
+    'SELECT id FROM trusted_devices WHERE user_id = $1 AND device_fingerprint = $2',
+    [userId, deviceFingerprint]
+  );
+  if (trusted.rows.length === 0) return false;
+  await db.query(
+    'UPDATE trusted_devices SET last_used_at = NOW() WHERE user_id = $1 AND device_fingerprint = $2',
+    [userId, deviceFingerprint]
+  );
+  return true;
+}
+
+async function trustDevice(userId, deviceFingerprint, deviceName) {
+  await ensureAuthSchema();
+  await db.query(
+    `INSERT INTO trusted_devices (user_id, device_fingerprint, device_name)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (user_id, device_fingerprint)
+     DO UPDATE SET device_name = EXCLUDED.device_name, last_used_at = NOW()`,
+    [userId, deviceFingerprint, deviceName || 'Unknown device']
+  );
+}
+
+async function issueTokensOrDeviceChallenge(res, req, user, deviceFingerprint, deviceName) {
+  await ensureAuthSchema();
+  if (deviceFingerprint && await isTrustedDevice(user.id, deviceFingerprint)) {
+    return issueTokens(res, user);
+  }
+
+  const demoEmails = ['dealer@emi-locker.com', 'reseller@emi-locker.com'];
+  const allowDemoTrustBypass =
+    process.env.NODE_ENV === 'development' ||
+    process.env.ALLOW_DEMO_DEVICE_TRUST_BYPASS === 'true';
+  if (deviceFingerprint && allowDemoTrustBypass && demoEmails.includes(user.email)) {
+    await trustDevice(user.id, deviceFingerprint, deviceName || 'Demo Device');
+    return issueTokens(res, user);
+  }
+
+  if (deviceFingerprint) {
+    const otp = String(crypto.randomInt(100000, 999999));
+    await createOtpChallenge({
+      userId: user.id,
+      email: user.email,
+      type: OTP_TYPES.DEVICE_LOGIN,
+      otp,
+      deviceFingerprint,
+      deviceName: deviceName || 'Unknown device',
+      meta: requestMeta(req)
+    });
+
+    try {
+      await emailService.sendDeviceOtp(user.email, otp);
+    } catch (err) {
+      logger.error(`Failed to send device OTP email to ${user.email}: ${err.message}`);
+      return errorResponse(res, 500, 'EMAIL_SEND_FAILED', 'Failed to send verification email. Try again.');
+    }
+
+    logger.info(`Device OTP sent to ${user.email} for new device`);
+    return res.json({ requiresDeviceVerification: true, email: user.email });
+  }
+
+  return issueTokens(res, user);
+}
+
 async function login(req, res) {
+  await ensureAuthSchema();
   const { email, password, device_fingerprint, device_name } = req.body;
   const normalizedEmail = email.toLowerCase().trim();
 
@@ -96,55 +367,10 @@ async function login(req, res) {
 
   await clearFailedLoginAttempts(user.id);
 
-  // Device-trust flow (dealer/reseller apps send device_fingerprint)
   if (device_fingerprint) {
-    const trusted = await db.query(
-      'SELECT id FROM trusted_devices WHERE user_id = $1 AND device_fingerprint = $2',
-      [user.id, device_fingerprint]
-    );
-
-    if (trusted.rows.length > 0) {
-      // Known device — issue tokens immediately, no OTP needed
-      await db.query(
-        'UPDATE trusted_devices SET last_used_at = NOW() WHERE user_id = $1 AND device_fingerprint = $2',
-        [user.id, device_fingerprint]
-      );
-      return issueTokens(res, user);
-    }
-
-    // Demo accounts skip OTP — trust device immediately
-    const demoEmails = ['dealer@emi-locker.com', 'reseller@emi-locker.com'];
-    if (demoEmails.includes(normalizedEmail)) {
-      await db.query(
-        'INSERT INTO trusted_devices (user_id, device_fingerprint, device_name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
-        [user.id, device_fingerprint, device_name || 'Demo Device']
-      );
-      return issueTokens(res, user);
-    }
-
-    // New device — send email OTP
-    const otp = String(crypto.randomInt(100000, 999999));
-    const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
-    const redisKey = `device_otp:${user.id}:${device_fingerprint}`;
-    const redis = require('../../config/redis');
-    await redis.set(
-      redisKey,
-      JSON.stringify({ hash: otpHash, device_name: device_name || 'Unknown device', userId: user.id }),
-      'EX', 600
-    );
-
-    try {
-      await emailService.sendDeviceOtp(user.email, otp);
-    } catch (err) {
-      logger.error(`Failed to send device OTP email to ${user.email}: ${err.message}`);
-      return errorResponse(res, 500, 'EMAIL_SEND_FAILED', 'Failed to send verification email. Try again.');
-    }
-
-    logger.info(`Device OTP sent to ${normalizedEmail} for new device`);
-    return res.json({ requiresDeviceVerification: true });
+    return issueTokensOrDeviceChallenge(res, req, user, device_fingerprint, device_name);
   }
 
-  // Legacy TOTP flow (admin and old clients without device_fingerprint)
   const tempToken = uuidv4();
   await storeTempToken(tempToken, user.id, 5 * 60, {
     requires2FA: Boolean(user.totp_enabled && user.totp_secret)
@@ -158,7 +384,6 @@ async function login(req, res) {
     user: sanitizeUser(user)
   });
 }
-
 async function verify2FA(req, res) {
   const { tempToken, code, backupCode } = req.body;
 
@@ -649,13 +874,8 @@ async function invalidateAllUserSessions(userId) {
   const sessionIds = await redis.smembers(`user_sessions:${userId}`);
   const refreshIds = await redis.smembers(`userRefreshTokens:${userId}`);
 
-  for (const sessionId of sessionIds) {
-    await redis.del(`session:${sessionId}`);
-  }
-
-  for (const refreshId of refreshIds) {
-    await redis.del(`refresh:${refreshId}`);
-  }
+  await Promise.all(sessionIds.map((sessionId) => redis.del(`session:${sessionId}`)));
+  await Promise.all(refreshIds.map((refreshId) => redis.del(`refresh:${refreshId}`)));
 
   await redis.del(`user_sessions:${userId}`);
   await redis.del(`userRefreshTokens:${userId}`);
@@ -758,19 +978,220 @@ async function issueTokens(res, user) {
   });
 }
 
+async function googleStatus(req, res) {
+  await ensureAuthSchema();
+  const result = await db.query(
+    `SELECT google_email, google_email_verified, bound_at, last_used_at
+     FROM user_google_accounts
+     WHERE user_id = $1`,
+    [req.user.id]
+  );
+  const account = result.rows[0];
+  return res.json({
+    bound: Boolean(account),
+    google_email: account?.google_email || null,
+    google_email_verified: Boolean(account?.google_email_verified),
+    bound_at: account?.bound_at || null,
+    last_used_at: account?.last_used_at || null
+  });
+}
+
+async function bindGoogle(req, res) {
+  await ensureAuthSchema();
+  const { idToken } = req.body;
+  if (!idToken) {
+    return errorResponse(res, 400, 'GOOGLE_TOKEN_REQUIRED', 'Google ID token is required');
+  }
+
+  let googleUser;
+  try {
+    googleUser = await verifyGoogleIdToken(idToken);
+  } catch (error) {
+    logger.warn(`Google bind failed for user ${req.user.id}: ${error.message}`);
+    return errorResponse(
+      res,
+      error.code === 'GOOGLE_AUTH_NOT_CONFIGURED' ? 503 : 401,
+      error.code || 'INVALID_GOOGLE_TOKEN',
+      error.code === 'GOOGLE_AUTH_NOT_CONFIGURED'
+        ? 'Google sign-in is not configured yet.'
+        : 'Google account could not be verified.'
+    );
+  }
+
+  const owner = await db.query(
+    'SELECT user_id FROM user_google_accounts WHERE google_sub = $1 AND user_id <> $2',
+    [googleUser.sub, req.user.id]
+  );
+  if (owner.rows.length > 0) {
+    return errorResponse(res, 409, 'GOOGLE_ACCOUNT_IN_USE', 'This Google account is already bound to another EMI Locker account');
+  }
+
+  await db.query(
+    `INSERT INTO user_google_accounts (
+       user_id, google_sub, google_email, google_email_verified, bound_at, last_used_at
+     )
+     VALUES ($1, $2, $3, $4, NOW(), NOW())
+     ON CONFLICT (user_id)
+     DO UPDATE SET
+       google_sub = EXCLUDED.google_sub,
+       google_email = EXCLUDED.google_email,
+       google_email_verified = EXCLUDED.google_email_verified,
+       last_used_at = NOW(),
+       updated_at = NOW()`,
+    [req.user.id, googleUser.sub, googleUser.email, googleUser.emailVerified]
+  );
+
+  logger.info(`Google account bound for user ${req.user.id}: ${googleUser.email}`);
+  return res.json({
+    bound: true,
+    google_email: googleUser.email,
+    google_email_verified: googleUser.emailVerified
+  });
+}
+
+async function googleLogin(req, res) {
+  await ensureAuthSchema();
+  const { idToken, device_fingerprint, device_name } = req.body;
+  if (!idToken) {
+    return errorResponse(res, 400, 'GOOGLE_TOKEN_REQUIRED', 'Google ID token is required');
+  }
+
+  let googleUser;
+  try {
+    googleUser = await verifyGoogleIdToken(idToken);
+  } catch (error) {
+    logger.warn(`Google login failed: ${error.message}`);
+    return errorResponse(
+      res,
+      error.code === 'GOOGLE_AUTH_NOT_CONFIGURED' ? 503 : 401,
+      error.code || 'INVALID_GOOGLE_TOKEN',
+      error.code === 'GOOGLE_AUTH_NOT_CONFIGURED'
+        ? 'Google sign-in is not configured yet.'
+        : 'Google account could not be verified.'
+    );
+  }
+
+  const result = await db.query(
+    `SELECT u.id, u.email, u.name, u.phone, u.role, u.status
+     FROM user_google_accounts uga
+     JOIN users u ON u.id = uga.user_id
+     WHERE uga.google_sub = $1`,
+    [googleUser.sub]
+  );
+
+  if (result.rows.length === 0) {
+    return errorResponse(res, 401, 'GOOGLE_ACCOUNT_NOT_BOUND', 'This Google account is not linked to an EMI Locker account');
+  }
+
+  const user = result.rows[0];
+  if (!['dealer', 'reseller', 'admin'].includes(user.role)) {
+    return errorResponse(res, 403, 'ROLE_NOT_ALLOWED', 'Google login is not enabled for this account type');
+  }
+  if (user.status !== 'active') {
+    return errorResponse(res, 401, 'ACCOUNT_INACTIVE', 'Account is not active');
+  }
+
+  await db.query(
+    'UPDATE user_google_accounts SET last_used_at = NOW(), updated_at = NOW() WHERE google_sub = $1',
+    [googleUser.sub]
+  );
+
+  return issueTokensOrDeviceChallenge(res, req, user, device_fingerprint, device_name);
+}
+
+async function forgotPassword(req, res) {
+  await ensureAuthSchema();
+  const normalizedEmail = String(req.body.email || '').toLowerCase().trim();
+  const neutral = {
+    message: 'If this account exists, we sent a password reset code.'
+  };
+
+  if (!normalizedEmail) return res.json(neutral);
+
+  const result = await db.query(
+    `SELECT id, email, role, status
+     FROM users
+     WHERE email = $1`,
+    [normalizedEmail]
+  );
+
+  const user = result.rows[0];
+  if (!user || !['dealer', 'reseller', 'admin'].includes(user.role) || user.status !== 'active') {
+    logger.warn(`Password reset requested for unavailable account: ${normalizedEmail}`);
+    return res.json(neutral);
+  }
+
+  const otp = String(crypto.randomInt(100000, 999999));
+  await createOtpChallenge({
+    userId: user.id,
+    email: user.email,
+    type: OTP_TYPES.PASSWORD_RESET,
+    otp,
+    meta: requestMeta(req)
+  });
+
+  try {
+    await emailService.sendPasswordResetOtp(user.email, otp);
+  } catch (error) {
+    logger.error(`Failed to send password reset OTP to ${user.email}: ${error.message}`);
+    return errorResponse(res, 500, 'EMAIL_SEND_FAILED', 'Failed to send reset email. Try again.');
+  }
+
+  logger.info(`Password reset OTP sent to ${user.email}`);
+  return res.json(neutral);
+}
+
+async function verifyPasswordResetOtp(req, res) {
+  const normalizedEmail = String(req.body.email || '').toLowerCase().trim();
+  const otp = String(req.body.otp || '').trim();
+  if (!normalizedEmail || !otp) {
+    return errorResponse(res, 400, 'MISSING_FIELDS', 'email and otp are required');
+  }
+
+  const consumed = await consumeOtpChallenge({
+    email: normalizedEmail,
+    type: OTP_TYPES.PASSWORD_RESET,
+    otp
+  });
+  if (!consumed.ok) {
+    return errorResponse(res, consumed.code === 'TOO_MANY_ATTEMPTS' ? 429 : 401, consumed.code, consumed.message);
+  }
+
+  const resetToken = uuidv4();
+  await storeTempToken(resetToken, consumed.userId, PASSWORD_RESET_TOKEN_TTL_SECONDS, {
+    purpose: 'PASSWORD_RESET'
+  });
+
+  return res.json({ resetToken });
+}
+
+async function resetPassword(req, res) {
+  const { resetToken, newPassword } = req.body;
+  if (!resetToken || !newPassword) {
+    return errorResponse(res, 400, 'MISSING_FIELDS', 'resetToken and newPassword are required');
+  }
+
+  const tokenData = await getTempToken(resetToken);
+  if (!tokenData || tokenData.purpose !== 'PASSWORD_RESET') {
+    return errorResponse(res, 401, 'RESET_TOKEN_INVALID', 'Password reset session expired. Request a new code.');
+  }
+
+  const hashedPassword = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+  await db.query(
+    'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
+    [hashedPassword, tokenData.userId]
+  );
+  await deleteTempToken(resetToken);
+  await invalidateAllUserSessions(tokenData.userId);
+  logger.info(`Password reset completed for user ${tokenData.userId}`);
+  return res.json({ message: 'Password reset successfully. Please log in again.' });
+}
+
 async function verifyDeviceOtp(req, res) {
+  await ensureAuthSchema();
   const { email, device_fingerprint, otp } = req.body;
   if (!email || !device_fingerprint || !otp) {
     return errorResponse(res, 400, 'MISSING_FIELDS', 'email, device_fingerprint and otp are required');
-  }
-
-  // Rate-limit: 5 attempts per device fingerprint per hour
-  const redis = require('../../config/redis');
-  const rateLimitKey = `device_otp_attempts:${device_fingerprint}`;
-  const attempts = await redis.incr(rateLimitKey);
-  if (attempts === 1) await redis.expire(rateLimitKey, 3600);
-  if (attempts > 5) {
-    return errorResponse(res, 429, 'TOO_MANY_ATTEMPTS', 'Too many verification attempts. Try again later.');
   }
 
   const normalizedEmail = email.toLowerCase().trim();
@@ -786,34 +1207,32 @@ async function verifyDeviceOtp(req, res) {
     return errorResponse(res, 401, 'ACCOUNT_INACTIVE', 'Account is not active');
   }
 
-  const redisKey = `device_otp:${user.id}:${device_fingerprint}`;
-  const stored = await redis.get(redisKey);
-  if (!stored) {
-    return errorResponse(res, 401, 'OTP_EXPIRED', 'Verification code expired or not found. Please log in again.');
+  const consumed = await consumeOtpChallenge({
+    email: normalizedEmail,
+    type: OTP_TYPES.DEVICE_LOGIN,
+    otp,
+    deviceFingerprint: device_fingerprint
+  });
+
+  if (!consumed.ok) {
+    return errorResponse(
+      res,
+      consumed.code === 'TOO_MANY_ATTEMPTS' ? 429 : 401,
+      consumed.code,
+      consumed.message
+    );
   }
 
-  const { hash: storedHash, device_name } = JSON.parse(stored);
-  const otpHash = crypto.createHash('sha256').update(String(otp)).digest('hex');
-
-  if (otpHash !== storedHash) {
+  if (String(consumed.userId) !== String(user.id)) {
+    logger.warn(`Device OTP user mismatch for ${normalizedEmail}`);
     return errorResponse(res, 401, 'INVALID_OTP', 'Invalid verification code');
   }
 
-  // OTP correct — clear it, trust the device, issue tokens
-  await redis.del(redisKey);
-  await redis.del(rateLimitKey);
+  await trustDevice(user.id, device_fingerprint, consumed.deviceName || 'Unknown device');
 
-  await db.query(
-    `INSERT INTO trusted_devices (user_id, device_fingerprint, device_name)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (user_id, device_fingerprint) DO UPDATE SET last_used_at = NOW()`,
-    [user.id, device_fingerprint, device_name || 'Unknown device']
-  );
-
-  logger.info(`New device trusted for user ${user.email}: ${device_name}`);
+  logger.info(`New device trusted for user ${user.email}: ${consumed.deviceName || 'Unknown device'}`);
   return issueTokens(res, user);
 }
-
 async function listTrustedDevices(req, res) {
   const result = await db.query(
     `SELECT id, device_name, last_used_at, created_at
@@ -853,6 +1272,12 @@ module.exports = {
   registerDealer,
   registerReseller,
   getMe,
+  googleStatus,
+  bindGoogle,
+  googleLogin,
+  forgotPassword,
+  verifyPasswordResetOtp,
+  resetPassword,
   verifyDeviceOtp,
   listTrustedDevices,
   removeTrustedDevice,

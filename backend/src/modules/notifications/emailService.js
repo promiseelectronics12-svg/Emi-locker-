@@ -1,5 +1,3 @@
-'use strict';
-
 const { Resend } = require('resend');
 
 let _resend = null;
@@ -27,7 +25,28 @@ async function sendDeviceOtp(toEmail, otpCode) {
           If you did not attempt to log in, please change your password immediately.
         </p>
       </div>
-    `,
+    `
+  });
+}
+
+async function sendPasswordResetOtp(toEmail, otpCode) {
+  await getResend().emails.send({
+    from: FROM(),
+    to: toEmail,
+    subject: 'EMI Locker Password Reset Code',
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:auto">
+        <h2 style="color:#0D1117">Reset Your Password</h2>
+        <p>Use this code to reset your EMI Locker password.</p>
+        <p style="font-size:36px;font-weight:900;letter-spacing:8px;color:#00A86B;margin:24px 0">
+          ${otpCode}
+        </p>
+        <p>Enter this code in the app. It expires in <strong>10 minutes</strong>.</p>
+        <p style="color:#6B7280;font-size:13px">
+          If you did not request a password reset, you can ignore this email.
+        </p>
+      </div>
+    `
   });
 }
 
@@ -35,7 +54,7 @@ async function sendResellerInvite(toEmail, name, inviteUrl) {
   await getResend().emails.send({
     from: FROM(),
     to: toEmail,
-    subject: 'You\'ve been invited to join EMI Locker as a Reseller',
+    subject: "You've been invited to join EMI Locker as a Reseller",
     html: `
       <div style="font-family:sans-serif;max-width:520px;margin:auto">
         <h2 style="color:#0D1117">Welcome, ${name}!</h2>
@@ -47,8 +66,8 @@ async function sendResellerInvite(toEmail, name, inviteUrl) {
         </a>
         <p style="color:#6B7280;font-size:13px">This invite link expires in 48 hours.</p>
       </div>
-    `,
+    `
   });
 }
 
-module.exports = { sendDeviceOtp, sendResellerInvite };
+module.exports = { sendDeviceOtp, sendPasswordResetOtp, sendResellerInvite };

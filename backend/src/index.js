@@ -3,7 +3,12 @@ require('express-async-errors');
 
 // Prevent ioredis/Bull subscriber connection drops from crashing the process
 process.on('uncaughtException', (err) => {
-  if (err.message && (err.message.includes('ECONNRESET') || err.message.includes('MaxRetriesPerRequest') || err.message.includes('enableOfflineQueue'))) {
+  if (
+    err.message &&
+    (err.message.includes('ECONNRESET') ||
+      err.message.includes('MaxRetriesPerRequest') ||
+      err.message.includes('enableOfflineQueue'))
+  ) {
     console.warn('Suppressed Redis connection error (non-fatal):', err.message);
     return;
   }
@@ -14,20 +19,13 @@ process.on('unhandledRejection', (reason) => {
   console.error('Unhandled rejection:', reason);
 });
 
-// 1. Load environment config (fail fast if required vars missing)
-const { validateEnvironment } = require('./config/envValidator');
-validateEnvironment();
-
-// 2. Connect PostgreSQL
-const { pool } = require('./config/database');
-
-// 3. Connect Redis
-const redis = require('./config/redis');
-
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const morgan = require('morgan');
+const redis = require('./config/redis');
+const { pool } = require('./config/database');
+const { validateEnvironment } = require('./config/envValidator');
 const logger = require('./utils/logger');
 const errorHandler = require('./middleware/errorHandler');
 const routes = require('./routes');
@@ -39,6 +37,9 @@ const { initDecouplingModule } = require('./modules/decoupling');
 const { initKeyCronJobs } = require('./modules/keys/keyScheduler');
 const { initFraudCronJobs } = require('./modules/fraud');
 
+// Load environment config after imports but before opening network resources.
+validateEnvironment();
+
 const app = express();
 app.set('trust proxy', 1);
 
@@ -46,9 +47,10 @@ app.set('trust proxy', 1);
 app.use(helmet());
 const allowedOrigins = (process.env.CORS_ORIGINS || '')
   .split(',')
-  .map(o => o.trim())
+  .map((o) => o.trim())
   .filter(Boolean);
-const allowLocalhostCors = process.env.ALLOW_LOCALHOST_CORS === 'true' || process.env.NODE_ENV !== 'production';
+const allowLocalhostCors =
+  process.env.ALLOW_LOCALHOST_CORS === 'true' || process.env.NODE_ENV !== 'production';
 
 function isLoopbackOrigin(origin) {
   try {
@@ -59,22 +61,30 @@ function isLoopbackOrigin(origin) {
   }
 }
 
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin) || (allowLocalhostCors && isLoopbackOrigin(origin))) {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS: origin ${origin} not allowed`));
-    }
-  },
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (
+        !origin ||
+        allowedOrigins.includes(origin) ||
+        (allowLocalhostCors && isLoopbackOrigin(origin))
+      ) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS: origin ${origin} not allowed`));
+      }
+    },
+    credentials: true
+  })
+);
 app.use(express.json({ limit: '1mb' }));
-app.use(morgan('combined', { 
-  stream: { 
-    write: (message) => logger.info(message.trim()) 
-  } 
-}));
+app.use(
+  morgan('combined', {
+    stream: {
+      write: (message) => logger.info(message.trim())
+    }
+  })
+);
 
 /**
  * 5. Health check endpoint: GET /health
@@ -130,7 +140,7 @@ const startServer = async () => {
     initDecouplingModule();
     initKeyCronJobs();
     initFraudCronJobs();
-    
+
     logger.info('All module schedulers initialized');
 
     server = app.listen(PORT, () => {
@@ -147,7 +157,7 @@ startServer();
 // Graceful shutdown
 const gracefulShutdown = async (signal) => {
   logger.info(`${signal} received. Shutting down gracefully...`);
-  
+
   if (server) {
     server.close(async () => {
       try {
