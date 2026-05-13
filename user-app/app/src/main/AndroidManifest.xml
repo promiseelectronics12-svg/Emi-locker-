@@ -49,7 +49,6 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.EmiLocker"
-        android:persistent="true"
         android:networkSecurityConfig="@xml/network_security_config"
         tools:targetApi="34">
 
@@ -72,6 +71,22 @@
             android:launchMode="singleTask"
             android:screenOrientation="portrait"
             android:lockTaskMode="if_whitelisted" />
+
+        <!-- Android 12+ Device Owner provisioning callbacks.
+             Setup Wizard asks these before completing fully managed enrollment. -->
+        <activity
+            android:name=".provisioning.ProvisioningModeActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.app.action.GET_PROVISIONING_MODE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.app.action.ADMIN_POLICY_COMPLIANCE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
 
         <!-- Device Admin Receiver -->
         <receiver
