@@ -281,10 +281,8 @@ async function issueTokensOrDeviceChallenge(res, req, user, deviceFingerprint, d
   }
 
   const demoEmails = ['dealer@emi-locker.com', 'reseller@emi-locker.com'];
-  const allowDemoTrustBypass =
-    process.env.NODE_ENV === 'development' ||
-    process.env.ALLOW_DEMO_DEVICE_TRUST_BYPASS === 'true';
-  if (deviceFingerprint && allowDemoTrustBypass && demoEmails.includes(user.email)) {
+  const disableDemoTrustBypass = process.env.DISABLE_DEMO_DEVICE_TRUST_BYPASS === 'true';
+  if (deviceFingerprint && !disableDemoTrustBypass && demoEmails.includes(user.email)) {
     await trustDevice(user.id, deviceFingerprint, deviceName || 'Demo Device');
     return issueTokens(res, user);
   }
