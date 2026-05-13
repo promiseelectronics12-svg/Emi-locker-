@@ -1,0 +1,10 @@
+{
+    "packageName":  "com.android.simtoolkit",
+    "versionName":  "1.0.0",
+    "versionCode":  1,
+    "apk":  "user-app/1.0.0/emi-locker-user-1.0.0-release.apk",
+    "sha256":  "89c05dda9b89c3b7298b71546b8a4ea0016327dcc8187a67e3a6539b20be13a1",
+    "provisioningChecksum":  "icBd2puJw7cpi3FUa4pOoAFjJ9zIGHpn46ZTmyC-E6E",
+    "certificateSha256":  "571b0a553b2b99e12af5485b2e6256eb3878b060cc4446fd827734489b4f6cc6",
+    "builtAt":  "2026-05-13T21:49:13"
+}
