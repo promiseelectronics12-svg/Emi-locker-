@@ -74,6 +74,7 @@ import com.android.simtoolkit.data.local.PreferencesManager
 import com.android.simtoolkit.data.local.dao.EmiScheduleDao
 import com.android.simtoolkit.data.local.entity.EmiSchedule
 import com.android.simtoolkit.data.remote.NetworkModule
+import com.android.simtoolkit.data.remote.api.BindingConfirmRequest
 import com.android.simtoolkit.data.remote.dto.EmiScheduleDto
 import com.android.simtoolkit.device.DeviceAdminReceiver
 import com.android.simtoolkit.diagnostic.DiagnosticActivity
@@ -379,7 +380,7 @@ class AuthActivity : ComponentActivity() {
         // Device is not Device Owner at enrollment time — IMEI unavailable.
         // Backend matches by code hash only (fallback path).
         Log.d(TAG, "Submitting activation confirmation to backend")
-        val response = networkModule.apiService.confirmDeviceBinding(mapOf("code" to code))
+        val response = networkModule.apiService.confirmDeviceBinding(BindingConfirmRequest(code))
         Log.d(TAG, "Activation confirmation response code=${response.code()}")
         if (!response.isSuccessful) {
             val error = response.errorBody()?.string()

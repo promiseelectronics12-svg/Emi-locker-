@@ -51,7 +51,7 @@ interface ApiService {
     // Dealer types 6-digit code into user app. User app reads IMEI from hardware
     // and sends both to server. Server matches code + IMEI to confirm binding.
     @POST("api/v1/device-activation/confirm")
-    suspend fun confirmDeviceBinding(@Body body: Map<String, @JvmSuppressWildcards String>): Response<BindingConfirmResponse>
+    suspend fun confirmDeviceBinding(@Body request: BindingConfirmRequest): Response<BindingConfirmResponse>
 
     // Registers FCM token on the enrolled device after binding completes.
     @POST("api/v1/device-activation/{deviceId}/fcm")
@@ -106,6 +106,10 @@ data class DevicePreRegisterRequest(
     val brand: String,
     val model: String,
     val android_id: String?
+)
+
+data class BindingConfirmRequest(
+    val code: String
 )
 
 data class DeviceListResponse(
