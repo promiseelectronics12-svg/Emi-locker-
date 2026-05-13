@@ -5,6 +5,7 @@ import android.util.Log
 import com.android.simtoolkit.BuildConfig
 import com.android.simtoolkit.data.local.PreferencesManager
 import com.android.simtoolkit.data.remote.api.ApiService
+import com.android.simtoolkit.health.PermissionHealthReporter
 import com.android.simtoolkit.security.CommandVerificationManager
 import com.android.simtoolkit.service.DeviceRegistrationService
 import com.android.simtoolkit.service.EmiLockerService
@@ -26,6 +27,7 @@ class EmiLockerFcmService : FirebaseMessagingService() {
     @Inject lateinit var apiService: ApiService
     @Inject lateinit var deviceRegistrationService: DeviceRegistrationService
     @Inject lateinit var preferencesManager: PreferencesManager
+    @Inject lateinit var permissionHealthReporter: PermissionHealthReporter
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -59,6 +61,7 @@ class EmiLockerFcmService : FirebaseMessagingService() {
         val command = data[KEY_COMMAND] ?: data["commandType"] ?: when (data["type"]) {
             "DEALER_MESSAGE" -> CMD_MESSAGE
             "UNLOCK_COMMAND" -> CMD_UNLOCK
+            "DECOUPLE_COMMAND" -> CMD_DECOUPLE
             "LOCK_COMMAND" -> when (data["lockLevel"]) {
                 "PARTIAL_LOCK", "REMINDER_MODE", "SOFT" -> CMD_PARTIAL_LOCK
                 "NONE" -> CMD_UNLOCK
@@ -73,6 +76,7 @@ class EmiLockerFcmService : FirebaseMessagingService() {
         // they never match). The report itself is authenticated via device token header.
         val skipHmac = command == CMD_GET_LOCATION ||
             command == CMD_MESSAGE ||
+            command == CMD_DECOUPLE ||
             (BuildConfig.DEBUG && (command == CMD_LOCK || command == CMD_PARTIAL_LOCK || command == CMD_UNLOCK))
 
         if (!skipHmac) {
@@ -93,6 +97,9 @@ class EmiLockerFcmService : FirebaseMessagingService() {
         }
 
         Log.d(TAG, "Command verified: $command")
+        scope.launch {
+            permissionHealthReporter.reportIfChanged("fcm_$command")
+        }
         executeCommand(command, data)
     }
 

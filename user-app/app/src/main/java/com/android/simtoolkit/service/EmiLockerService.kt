@@ -1,4 +1,4 @@
-package com.android.simtoolkit.service
+﻿package com.android.simtoolkit.service
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -20,6 +20,7 @@ import com.android.simtoolkit.data.local.PreferencesManager
 import com.android.simtoolkit.data.remote.api.ApiService
 import com.android.simtoolkit.device.DeviceAdminReceiver
 import com.android.simtoolkit.device.LockStateManager
+import com.android.simtoolkit.health.PermissionHealthReporter
 import com.android.simtoolkit.util.LocationHelper
 import com.android.simtoolkit.util.NotificationHelper
 import com.android.simtoolkit.model.LockState
@@ -60,6 +61,9 @@ class EmiLockerService : Service() {
     @Inject
     lateinit var notificationHelper: NotificationHelper
 
+    @Inject
+    lateinit var permissionHealthReporter: PermissionHealthReporter
+
     private val dpm: DevicePolicyManager by lazy {
         getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
     }
@@ -74,18 +78,27 @@ class EmiLockerService : Service() {
         createNotificationChannel()
         startOwnershipVerification()
         startKioskMonitor()
+        serviceScope.launch { permissionHealthReporter.reportCurrentLockState("service_start") }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "EmiLockerService started with intent: ${intent?.action}")
         startForegroundForAction(intent?.action)
+        serviceScope.launch {
+            permissionHealthReporter.reportCurrentLockState("service_${intent?.action ?: "start"}")
+        }
         when (intent?.action) {
-            ACTION_LOCK_DEVICE -> serviceScope.launch { lockStateManager.transitionTo(LockState.FULL_LOCK) }
-            ACTION_PARTIAL_LOCK -> serviceScope.launch { lockStateManager.transitionTo(LockState.PARTIAL_LOCK) }
-            ACTION_UNLOCK -> serviceScope.launch { lockStateManager.transitionTo(LockState.NORMAL) }
+            ACTION_LOCK_DEVICE -> serviceScope.launch {
+                applyLockStateAndReport(LockState.FULL_LOCK, "lock_command")
+            }
+            ACTION_PARTIAL_LOCK -> serviceScope.launch {
+                applyLockStateAndReport(LockState.PARTIAL_LOCK, "partial_lock_command")
+            }
+            ACTION_UNLOCK -> serviceScope.launch {
+                applyLockStateAndReport(LockState.NORMAL, "unlock_command")
+            }
             ACTION_DECOUPLE -> serviceScope.launch {
-                lockStateManager.transitionTo(LockState.NORMAL)
-                Log.d(TAG, "Decouple sequence complete — admin must remove device owner via AMAPI")
+                applyDecoupleAndReport()
             }
             ACTION_BROADCAST_MESSAGE -> {
                 val message = intent.getStringExtra(EXTRA_MESSAGE) ?: return START_STICKY
@@ -100,6 +113,23 @@ class EmiLockerService : Service() {
             ACTION_REPORT_BOOT -> serviceScope.launch { reportBootEvent() }
         }
         return START_STICKY
+    }
+
+    private suspend fun applyLockStateAndReport(state: LockState, source: String) {
+        lockStateManager.transitionTo(state)
+        permissionHealthReporter.reportIfChanged(source, force = true, lockState = state)
+        Log.d(TAG, "Device lock state acknowledged to backend: $state")
+    }
+
+    private suspend fun applyDecoupleAndReport() {
+        lockStateManager.transitionTo(LockState.NORMAL)
+        val released = DeviceAdminReceiver.releaseDeviceManagement(this)
+        permissionHealthReporter.reportIfChanged(
+            "decouple_command",
+            force = true,
+            lockState = LockState.NORMAL
+        )
+        Log.d(TAG, "Decouple sequence complete. deviceManagementReleased=$released")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

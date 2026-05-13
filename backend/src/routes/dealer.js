@@ -9,7 +9,6 @@ const { validateRequest } = require('../middleware/validateRequest');
 const { buildErrorResponse } = require('../middleware/errorHandler');
 const smsService = require('../modules/notifications/sms.service');
 const { getDealerInventory } = require('../modules/keys/keyController');
-const amapiService = require('../modules/devices/amapiService');
 
 const router = express.Router();
 
@@ -19,10 +18,9 @@ router.use(requireRole('dealer'));
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 async function getDealerProfile(userId) {
-  const result = await db.query(
-    'SELECT * FROM dealers WHERE user_id = $1 OR id = $1 LIMIT 1',
-    [userId]
-  );
+  const result = await db.query('SELECT * FROM dealers WHERE user_id = $1 OR id = $1 LIMIT 1', [
+    userId
+  ]);
   return result.rows[0] || null;
 }
 
@@ -32,6 +30,17 @@ function getDealerIds(userId, dealer) {
   return ids;
 }
 
+function warnOptionalFailure(scope, error) {
+  console.warn(`[DealerRoute] ${scope} failed:`, error.message);
+}
+
+function getCreditRecommendation(tier) {
+  if (tier === 'GOLD') return 'Fast track — trusted customer';
+  if (tier === 'SILVER') return 'Standard process';
+  if (tier === 'BRONZE') return 'Verify carefully';
+  return 'High risk — additional deposit recommended';
+}
+
 /** Generates a 6-digit HOTP from a base32 secret and a counter. */
 function generateHOTP(base32Secret, counter) {
   const secret = Buffer.from(base32Secret, 'base64');
@@ -39,7 +48,7 @@ function generateHOTP(base32Secret, counter) {
   let tmp = counter;
   for (let i = 7; i >= 0; i--) {
     buf[i] = tmp & 0xff;
-    tmp = tmp >>> 8;
+    tmp >>>= 8;
   }
   const hmac = crypto.createHmac('sha1', secret).update(buf).digest();
   const offset = hmac[hmac.length - 1] & 0x0f;
@@ -58,6 +67,12 @@ function generateHOTP(base32Secret, counter) {
  * The device app tries all 4 indices to identify which duration was granted.
  */
 const GRACE_INDEX = { 2: 1, 4: 2, 8: 3, 24: 4 };
+
+const DEFAULT_USER_APP_APK_URL =
+  'https://raw.githubusercontent.com/promiseelectronics12-svg/Emi-locker-/apk-releases/user-app/1.0.0/emi-locker-user-1.0.0-release.apk';
+const DEFAULT_USER_APP_APK_CHECKSUM = 'pSBj6R4c7pJYGztVfmM4cROP2SzeFOePH4naiiFrYL8';
+const USER_APP_PACKAGE = 'com.android.simtoolkit';
+const USER_APP_ADMIN_RECEIVER = `${USER_APP_PACKAGE}/com.android.simtoolkit.device.DeviceAdminReceiver`;
 
 function generateGraceHOTP(base32Secret, timeWindow, graceHours) {
   const idx = GRACE_INDEX[graceHours];
@@ -84,46 +99,51 @@ const DEFAULT_SETTINGS = {
   default_lock_level: 'FULL',
   lock_screen_message: null,
   lock_screen_dealer_name: null,
-  lock_screen_dealer_phone: null,
+  lock_screen_dealer_phone: null
 };
 
 // ─── Existing routes ───────────────────────────────────────────────────────
 
-router.get('/stats', asyncHandler(async (req, res) => {
-  const dealer = await getDealerProfile(req.user.id);
-  const dealerIds = getDealerIds(req.user.id, dealer);
+router.get(
+  '/stats',
+  asyncHandler(async (req, res) => {
+    const dealer = await getDealerProfile(req.user.id);
+    const dealerIds = getDealerIds(req.user.id, dealer);
 
-  const stats = await db.query(
-    `SELECT
+    const stats = await db.query(
+      `SELECT
        COUNT(*)::int as total_devices,
        COUNT(*) FILTER (WHERE status = 'locked')::int as locked_devices,
        COUNT(*) FILTER (WHERE status = 'enrolled')::int as enrolled_devices,
        COUNT(*) FILTER (WHERE status = 'decoupled')::int as decoupled_devices
      FROM devices
      WHERE dealer_id = ANY($1::uuid[])`,
-    [dealerIds]
-  );
+      [dealerIds]
+    );
 
-  const keys = await db.query(
-    `SELECT
+    const keys = await db.query(
+      `SELECT
        COUNT(*) FILTER (WHERE status = 'assigned')::int as assigned_keys,
        COUNT(*) FILTER (WHERE status = 'activated')::int as activated_keys
      FROM activation_keys
      WHERE dealer_id = ANY($1::uuid[])`,
-    [dealerIds]
-  );
+      [dealerIds]
+    );
 
-  return res.json({ ...stats.rows[0], ...keys.rows[0] });
-}));
+    return res.json({ ...stats.rows[0], ...keys.rows[0] });
+  })
+);
 
 router.get('/keys/inventory', asyncHandler(getDealerInventory));
 
-router.get('/analytics', asyncHandler(async (req, res) => {
-  const dealer = await getDealerProfile(req.user.id);
-  const dealerIds = getDealerIds(req.user.id, dealer);
+router.get(
+  '/analytics',
+  asyncHandler(async (req, res) => {
+    const dealer = await getDealerProfile(req.user.id);
+    const dealerIds = getDealerIds(req.user.id, dealer);
 
-  const result = await db.query(
-    `SELECT
+    const result = await db.query(
+      `SELECT
        date_trunc('day', created_at)::date as day,
        COUNT(*)::int as devices_enrolled
      FROM devices
@@ -131,18 +151,21 @@ router.get('/analytics', asyncHandler(async (req, res) => {
        AND created_at > NOW() - INTERVAL '30 days'
      GROUP BY day
      ORDER BY day`,
-    [dealerIds]
-  );
+      [dealerIds]
+    );
 
-  return res.json({ series: result.rows });
-}));
+    return res.json({ series: result.rows });
+  })
+);
 
-router.get('/devices', asyncHandler(async (req, res) => {
-  const dealer = await getDealerProfile(req.user.id);
-  const dealerIds = getDealerIds(req.user.id, dealer);
+router.get(
+  '/devices',
+  asyncHandler(async (req, res) => {
+    const dealer = await getDealerProfile(req.user.id);
+    const dealerIds = getDealerIds(req.user.id, dealer);
 
-  const result = await db.query(
-    `SELECT d.*,
+    const result = await db.query(
+      `SELECT d.*,
             COALESCE(u.name, e.customer_name) AS customer_name,
             COALESCE(u.phone, e.phone_number) AS customer_phone,
             es.id AS emi_schedule_id,
@@ -156,6 +179,7 @@ router.get('/devices', asyncHandler(async (req, res) => {
             lr.created_at AS latest_lock_request_at,
             CASE
               WHEN d.fcm_token_status = 'invalid' OR d.app_uninstall_suspected_at IS NOT NULL THEN 'app_removed_suspected'
+              WHEN d.device_health_status = 'degraded' THEN 'protection_degraded'
               WHEN d.last_seen_at IS NULL THEN 'never_seen'
               WHEN d.last_seen_at < NOW() - INTERVAL '150 minutes' THEN 'offline'
               WHEN d.last_seen_at < NOW() - INTERVAL '75 minutes' THEN 'delayed'
@@ -163,6 +187,7 @@ router.get('/devices', asyncHandler(async (req, res) => {
             END AS device_connection_status,
             d.last_seen_at,
             d.device_health_status,
+            d.last_heartbeat_source,
             d.fcm_token_status,
             d.app_uninstall_suspected_at,
             CASE
@@ -193,26 +218,33 @@ router.get('/devices', asyncHandler(async (req, res) => {
      ) lr ON TRUE
      WHERE d.dealer_id = ANY($1::uuid[])
      ORDER BY d.created_at DESC`,
-    [dealerIds]
-  );
+      [dealerIds]
+    );
 
-  return res.json({ devices: result.rows, total: result.rows.length });
-}));
+    return res.json({ devices: result.rows, total: result.rows.length });
+  })
+);
 
 // ─── Dealer-level defaults ─────────────────────────────────────────────────
 
-router.get('/settings', asyncHandler(async (req, res) => {
-  const dealer = await getDealerProfile(req.user.id);
-  if (!dealer) return res.status(404).json(buildErrorResponse(404, 'DEALER_NOT_FOUND', 'Dealer profile not found'));
+router.get(
+  '/settings',
+  asyncHandler(async (req, res) => {
+    const dealer = await getDealerProfile(req.user.id);
+    if (!dealer)
+      return res
+        .status(404)
+        .json(buildErrorResponse(404, 'DEALER_NOT_FOUND', 'Dealer profile not found'));
 
-  const result = await db.query(
-    'SELECT * FROM dealer_defaults WHERE dealer_id = $1',
-    [dealer.id]
-  );
-  return res.json(result.rows[0] || { dealer_id: dealer.id, ...DEFAULT_SETTINGS });
-}));
+    const result = await db.query('SELECT * FROM dealer_defaults WHERE dealer_id = $1', [
+      dealer.id
+    ]);
+    return res.json(result.rows[0] || { dealer_id: dealer.id, ...DEFAULT_SETTINGS });
+  })
+);
 
-router.put('/settings',
+router.put(
+  '/settings',
   body('offline_grace_hours').optional().isInt({ min: 24, max: 168 }),
   body('warning_threshold_hours').optional().isInt({ min: 1, max: 48 }),
   body('checkin_interval_minutes').optional().isInt({ min: 60, max: 1440 }),
@@ -223,7 +255,10 @@ router.put('/settings',
   validateRequest,
   asyncHandler(async (req, res) => {
     const dealer = await getDealerProfile(req.user.id);
-    if (!dealer) return res.status(404).json(buildErrorResponse(404, 'DEALER_NOT_FOUND', 'Dealer profile not found'));
+    if (!dealer)
+      return res
+        .status(404)
+        .json(buildErrorResponse(404, 'DEALER_NOT_FOUND', 'Dealer profile not found'));
 
     const {
       offline_grace_hours = DEFAULT_SETTINGS.offline_grace_hours,
@@ -232,7 +267,7 @@ router.put('/settings',
       default_lock_level = DEFAULT_SETTINGS.default_lock_level,
       lock_screen_dealer_name = null,
       lock_screen_dealer_phone = null,
-      lock_screen_message = null,
+      lock_screen_message = null
     } = req.body;
 
     await db.query(
@@ -253,9 +288,13 @@ router.put('/settings',
          updated_at               = NOW()`,
       [
         dealer.id,
-        offline_grace_hours, warning_threshold_hours, checkin_interval_minutes,
-        default_lock_level, lock_screen_dealer_name, lock_screen_dealer_phone,
-        lock_screen_message,
+        offline_grace_hours,
+        warning_threshold_hours,
+        checkin_interval_minutes,
+        default_lock_level,
+        lock_screen_dealer_name,
+        lock_screen_dealer_phone,
+        lock_screen_message
       ]
     );
 
@@ -265,7 +304,8 @@ router.put('/settings',
 
 // ─── Per-device settings ───────────────────────────────────────────────────
 
-router.get('/devices/:deviceId/settings',
+router.get(
+  '/devices/:deviceId/settings',
   param('deviceId').isUUID(),
   validateRequest,
   asyncHandler(async (req, res) => {
@@ -277,17 +317,18 @@ router.get('/devices/:deviceId/settings',
       'SELECT id FROM devices WHERE id = $1 AND dealer_id = ANY($2::uuid[])',
       [req.params.deviceId, dealerIds]
     );
-    if (!device.rows.length) return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
+    if (!device.rows.length)
+      return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
 
-    const result = await db.query(
-      'SELECT * FROM dealer_device_settings WHERE device_id = $1',
-      [req.params.deviceId]
-    );
+    const result = await db.query('SELECT * FROM dealer_device_settings WHERE device_id = $1', [
+      req.params.deviceId
+    ]);
     return res.json(result.rows[0] || { device_id: req.params.deviceId, ...DEFAULT_SETTINGS });
   })
 );
 
-router.put('/devices/:deviceId/settings',
+router.put(
+  '/devices/:deviceId/settings',
   param('deviceId').isUUID(),
   body('offline_grace_hours').optional().isInt({ min: 24, max: 168 }),
   body('warning_threshold_hours').optional().isInt({ min: 1, max: 48 }),
@@ -305,7 +346,8 @@ router.put('/devices/:deviceId/settings',
       'SELECT id FROM devices WHERE id = $1 AND dealer_id = ANY($2::uuid[])',
       [req.params.deviceId, dealerIds]
     );
-    if (!device.rows.length) return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
+    if (!device.rows.length)
+      return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
 
     const {
       offline_grace_hours = DEFAULT_SETTINGS.offline_grace_hours,
@@ -314,7 +356,7 @@ router.put('/devices/:deviceId/settings',
       default_lock_level = DEFAULT_SETTINGS.default_lock_level,
       lock_screen_dealer_name = null,
       lock_screen_dealer_phone = null,
-      lock_screen_message = null,
+      lock_screen_message = null
     } = req.body;
 
     await db.query(
@@ -334,10 +376,15 @@ router.put('/devices/:deviceId/settings',
          lock_screen_message      = EXCLUDED.lock_screen_message,
          updated_at               = NOW()`,
       [
-        req.params.deviceId, dealer.id,
-        offline_grace_hours, warning_threshold_hours, checkin_interval_minutes,
-        default_lock_level, lock_screen_dealer_name, lock_screen_dealer_phone,
-        lock_screen_message,
+        req.params.deviceId,
+        dealer.id,
+        offline_grace_hours,
+        warning_threshold_hours,
+        checkin_interval_minutes,
+        default_lock_level,
+        lock_screen_dealer_name,
+        lock_screen_dealer_phone,
+        lock_screen_message
       ]
     );
 
@@ -357,9 +404,14 @@ router.put('/devices/:deviceId/settings',
 // Code encoding: counter = timeWindow * 10 + graceIndex (1=2h, 2=4h, 3=8h, 4=24h)
 // Valid for one 30-minute window from issue time.
 
-router.post('/devices/:deviceId/paut/sms-otp',
+router.post(
+  '/devices/:deviceId/paut/sms-otp',
   param('deviceId').isUUID(),
-  body('grace_hours').optional().isInt().custom(v => [2, 4, 8, 24].includes(Number(v))).withMessage('grace_hours must be 2, 4, 8, or 24'),
+  body('grace_hours')
+    .optional()
+    .isInt()
+    .custom((v) => [2, 4, 8, 24].includes(Number(v)))
+    .withMessage('grace_hours must be 2, 4, 8, or 24'),
   validateRequest,
   asyncHandler(async (req, res) => {
     const dealer = await getDealerProfile(req.user.id);
@@ -380,10 +432,22 @@ router.post('/devices/:deviceId/paut/sms-otp',
     const device = result.rows[0];
 
     if (!device.totp_secret)
-      return res.status(400).json(buildErrorResponse(400, 'NO_TOTP', 'Device does not have an offline unlock secret. Re-enroll the device to enable SMS unlock.'));
+      return res
+        .status(400)
+        .json(
+          buildErrorResponse(
+            400,
+            'NO_TOTP',
+            'Device does not have an offline unlock secret. Re-enroll the device to enable SMS unlock.'
+          )
+        );
 
     if (!device.customer_phone)
-      return res.status(400).json(buildErrorResponse(400, 'NO_PHONE', 'No customer phone number on record for this device.'));
+      return res
+        .status(400)
+        .json(
+          buildErrorResponse(400, 'NO_PHONE', 'No customer phone number on record for this device.')
+        );
 
     const graceHours = Number(req.body.grace_hours) || 4;
     const timeWindow = Math.floor(Date.now() / (30 * 60 * 1000));
@@ -392,7 +456,11 @@ router.post('/devices/:deviceId/paut/sms-otp',
     const rateLimitKey = `sms_otp:${req.params.deviceId}:${timeWindow}`;
     const allowed = await checkOtpRateLimit(rateLimitKey, 3, 30 * 60);
     if (!allowed)
-      return res.status(429).json(buildErrorResponse(429, 'RATE_LIMITED', 'Too many OTP requests. Try again in 30 minutes.'));
+      return res
+        .status(429)
+        .json(
+          buildErrorResponse(429, 'RATE_LIMITED', 'Too many OTP requests. Try again in 30 minutes.')
+        );
 
     // Generate grace-encoded HOTP (each duration produces a unique code)
     const otp = generateGraceHOTP(device.totp_secret, timeWindow, graceHours);
@@ -413,7 +481,14 @@ router.post('/devices/:deviceId/paut/sms-otp',
         `INSERT INTO grace_unlock_events
            (device_id, dealer_id, grace_hours, otp_window, expires_at, sms_sent_to)
          VALUES ($1, $2, $3, $4, $5, $6)`,
-        [req.params.deviceId, dealer.id, graceHours, timeWindow * 10 + GRACE_INDEX[graceHours], expiresAt, maskedPhone]
+        [
+          req.params.deviceId,
+          dealer.id,
+          graceHours,
+          timeWindow * 10 + GRACE_INDEX[graceHours],
+          expiresAt,
+          maskedPhone
+        ]
       );
     } catch (_) {
       // Non-fatal — migration 101 may not have run yet
@@ -423,14 +498,15 @@ router.post('/devices/:deviceId/paut/sms-otp',
       sent: true,
       grace_hours: graceHours,
       expires_minutes: 30,
-      masked_phone: maskedPhone,
+      masked_phone: maskedPhone
     });
   })
 );
 
 // ─── Active grace unlock for a device ─────────────────────────────────────
 
-router.get('/devices/:deviceId/grace-unlock',
+router.get(
+  '/devices/:deviceId/grace-unlock',
   param('deviceId').isUUID(),
   validateRequest,
   asyncHandler(async (req, res) => {
@@ -455,7 +531,9 @@ router.get('/devices/:deviceId/grace-unlock',
         [req.params.deviceId]
       );
       active = result.rows[0] || null;
-    } catch (_) {}
+    } catch (error) {
+      warnOptionalFailure('active grace unlock lookup', error);
+    }
 
     return res.json({ active });
   })
@@ -466,7 +544,8 @@ router.get('/devices/:deviceId/grace-unlock',
 // not receive the revoke signal until the next check-in (or via push notification
 // if the device has internet access). The device app must honour the revoke flag.
 
-router.delete('/devices/:deviceId/grace-unlock',
+router.delete(
+  '/devices/:deviceId/grace-unlock',
   param('deviceId').isUUID(),
   validateRequest,
   asyncHandler(async (req, res) => {
@@ -487,7 +566,9 @@ router.delete('/devices/:deviceId/grace-unlock',
          WHERE device_id = $1 AND revoked = FALSE AND expires_at > NOW()`,
         [req.params.deviceId]
       );
-    } catch (_) {}
+    } catch (error) {
+      warnOptionalFailure('grace unlock revoke', error);
+    }
 
     return res.json({ revoked: true });
   })
@@ -498,16 +579,22 @@ router.delete('/devices/:deviceId/grace-unlock',
 // Used at the start of the unlock workflow: dealer finds the device, then calls
 // lock-detail to understand the situation before deciding how to unlock.
 
-router.get('/devices/search', asyncHandler(async (req, res) => {
-  const dealer = await getDealerProfile(req.user.id);
-  const dealerIds = getDealerIds(req.user.id, dealer);
-  const q = (req.query.q || '').trim();
+router.get(
+  '/devices/search',
+  asyncHandler(async (req, res) => {
+    const dealer = await getDealerProfile(req.user.id);
+    const dealerIds = getDealerIds(req.user.id, dealer);
+    const q = (req.query.q || '').trim();
 
-  if (!q || q.length < 2)
-    return res.status(400).json(buildErrorResponse(400, 'QUERY_TOO_SHORT', 'Search query must be at least 2 characters'));
+    if (!q || q.length < 2)
+      return res
+        .status(400)
+        .json(
+          buildErrorResponse(400, 'QUERY_TOO_SHORT', 'Search query must be at least 2 characters')
+        );
 
-  const result = await db.query(
-    `SELECT d.id, d.imei, d.model, d.brand, d.status, d.grace_expires_at,
+    const result = await db.query(
+      `SELECT d.id, d.imei, d.model, d.brand, d.status, d.grace_expires_at,
             u.name  AS customer_name,
             REGEXP_REPLACE(u.phone, '(\\d{2})\\d+(\\d{3})', '\\1****\\2') AS masked_phone
      FROM devices d
@@ -522,17 +609,19 @@ router.get('/devices/search', asyncHandler(async (req, res) => {
        )
      ORDER BY d.created_at DESC
      LIMIT 20`,
-    [dealerIds, `%${q}%`]
-  );
+      [dealerIds, `%${q}%`]
+    );
 
-  return res.json({ devices: result.rows, total: result.rows.length });
-}));
+    return res.json({ devices: result.rows, total: result.rows.length });
+  })
+);
 
 // ─── Lock detail — full situation view before unlock ──────────────────────
 // Returns everything the dealer needs in a single call to decide how to unlock.
 // This replaces the need for multiple API round-trips when a customer calls.
 
-router.get('/devices/:deviceId/lock-detail',
+router.get(
+  '/devices/:deviceId/lock-detail',
   param('deviceId').isUUID(),
   validateRequest,
   asyncHandler(async (req, res) => {
@@ -575,7 +664,7 @@ router.get('/devices/:deviceId/lock-detail',
       return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
 
     const row = result.rows[0];
-    const emiPaid  = Number(row.emi_paid)  || 0;
+    const emiPaid = Number(row.emi_paid) || 0;
     const emiTotal = Number(row.emi_total) || 0;
     const emiFullyPaid = emiTotal > 0 && emiPaid >= emiTotal;
 
@@ -595,39 +684,41 @@ router.get('/devices/:deviceId/lock-detail',
         [row.id]
       );
       activeGrace = graceRes.rows[0] || null;
-    } catch (_) {}
+    } catch (error) {
+      warnOptionalFailure('lock detail active grace lookup', error);
+    }
 
     return res.json({
       device: {
-        id:    row.id,
-        imei:  row.imei,
+        id: row.id,
+        imei: row.imei,
         model: row.model,
-        brand: row.brand,
+        brand: row.brand
       },
       customer: {
-        name:         row.customer_name  || null,
+        name: row.customer_name || null,
         masked_phone: row.customer_phone
           ? row.customer_phone.replace(/(\d{2})\d+(\d{3})/, '$1****$2')
-          : null,
+          : null
       },
       lock: {
-        is_locked:    !!(row.lock_level && row.lock_level !== 'NONE'),
-        lock_level:   row.lock_level || null,
-        reason:       row.lock_reason  || null,
-        locked_at:    row.locked_at    || null,
-        days_overdue: daysOverdue,
+        is_locked: !!(row.lock_level && row.lock_level !== 'NONE'),
+        lock_level: row.lock_level || null,
+        reason: row.lock_reason || null,
+        locked_at: row.locked_at || null,
+        days_overdue: daysOverdue
       },
       emi: {
-        installments_paid:  emiPaid,
+        installments_paid: emiPaid,
         installments_total: emiTotal,
-        fully_paid:         emiFullyPaid,
-        days_overdue:       daysOverdue,
+        fully_paid: emiFullyPaid,
+        days_overdue: daysOverdue
       },
       active_grace: activeGrace,
       unlock_options: {
-        online_available:  true,
-        offline_available: !!(row.totp_secret),
-      },
+        online_available: true,
+        offline_available: !!row.totp_secret
+      }
     });
   })
 );
@@ -647,10 +738,14 @@ router.get('/devices/:deviceId/lock-detail',
 // TOTP window: current AND previous 30-minute window are both accepted.
 // This gives up to 60 minutes of effective code validity, handling SMS delivery delays.
 
-router.post('/devices/:deviceId/unlock',
+router.post(
+  '/devices/:deviceId/unlock',
   param('deviceId').isUUID(),
   body('method').isIn(['online', 'offline']),
-  body('grace_hours').isInt().custom(v => [2, 4, 8, 24].includes(Number(v))).withMessage('grace_hours must be 2, 4, 8, or 24'),
+  body('grace_hours')
+    .isInt()
+    .custom((v) => [2, 4, 8, 24].includes(Number(v)))
+    .withMessage('grace_hours must be 2, 4, 8, or 24'),
   validateRequest,
   asyncHandler(async (req, res) => {
     const dealer = await getDealerProfile(req.user.id);
@@ -678,10 +773,10 @@ router.post('/devices/:deviceId/unlock',
     if (!result.rows.length)
       return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
 
-    const device      = result.rows[0];
-    const graceHours  = Number(req.body.grace_hours);
-    const method      = req.body.method;
-    const expiresAt   = new Date(Date.now() + graceHours * 60 * 60 * 1000);
+    const device = result.rows[0];
+    const graceHours = Number(req.body.grace_hours);
+    const { method } = req.body;
+    const expiresAt = new Date(Date.now() + graceHours * 60 * 60 * 1000);
     const maskedPhone = device.customer_phone
       ? device.customer_phone.replace(/(\d{2})\d+(\d{3})/, '$1****$2')
       : null;
@@ -707,14 +802,11 @@ router.post('/devices/:deviceId/unlock',
           `INSERT INTO grace_unlock_events
              (device_id, dealer_id, grace_hours, otp_window, expires_at, sms_sent_to)
            VALUES ($1, $2, $3, $4, $5, $6)`,
-          [
-            device.id, dealer.id, graceHours,
-            otpWindow,
-            expiresAt,
-            maskedPhone || 'unknown',
-          ]
+          [device.id, dealer.id, graceHours, otpWindow, expiresAt, maskedPhone || 'unknown']
         );
-      } catch (_) {}
+      } catch (error) {
+        warnOptionalFailure('grace unlock event insert', error);
+      }
     }
 
     if (method === 'online') {
@@ -725,16 +817,16 @@ router.post('/devices/:deviceId/unlock',
       try {
         const fcmService = require('../modules/notifications/fcm.service');
         if (device.fcm_token) {
-          const result = await fcmService.sendToDevice(device.fcm_token, {
+          const fcmResult = await fcmService.sendToDevice(device.fcm_token, {
             type: 'LOCK_COMMAND',
             command: 'UNLOCK',
             commandType: 'UNLOCK',
             reason: 'DEALER_GRACE_UNLOCK',
             grace_hours: graceHours,
             expires_at: expiresAt.toISOString(),
-            timestamp: Date.now().toString(),
+            timestamp: Date.now().toString()
           });
-          fcmSent = !!result.success;
+          fcmSent = !!fcmResult.success;
         }
       } catch (error) {
         console.warn('Online unlock FCM failed:', error.message);
@@ -742,32 +834,58 @@ router.post('/devices/:deviceId/unlock',
 
       try {
         const sseService = require('../modules/sse/sseService');
-        sseService.emitDeviceUnlocked({ id: device.id, device_name: device.device_name || device.amapi_device_name, dealer_id: dealer.id }, graceHours);
-      } catch (_) {}
+        sseService.emitDeviceUnlocked(
+          {
+            id: device.id,
+            device_name: device.device_name || device.amapi_device_name,
+            dealer_id: dealer.id
+          },
+          graceHours
+        );
+      } catch (error) {
+        warnOptionalFailure('online unlock SSE emit', error);
+      }
 
       return res.json({
-        method:      'online',
+        method: 'online',
         grace_hours: graceHours,
-        expires_at:  expiresAt.toISOString(),
-        fcm_sent:    fcmSent,
+        expires_at: expiresAt.toISOString(),
+        fcm_sent: fcmSent
       });
     }
 
     // Offline path — generate HOTP, return SMS text for dealer to send from their phone
     if (!device.totp_secret)
-      return res.status(400).json(buildErrorResponse(400, 'NO_TOTP',
-        'Device does not have an offline unlock secret. Re-enroll the device to enable offline unlock.'));
+      return res
+        .status(400)
+        .json(
+          buildErrorResponse(
+            400,
+            'NO_TOTP',
+            'Device does not have an offline unlock secret. Re-enroll the device to enable offline unlock.'
+          )
+        );
 
     if (!device.customer_phone)
-      return res.status(400).json(buildErrorResponse(400, 'NO_PHONE',
-        'No customer phone number on record for this device.'));
+      return res
+        .status(400)
+        .json(
+          buildErrorResponse(400, 'NO_PHONE', 'No customer phone number on record for this device.')
+        );
 
     // Rate limit: max 3 OTP requests per device per 30-minute window
     const rateLimitKey = `unlock_otp:${device.id}:${timeWindow}`;
     const allowed = await checkOtpRateLimit(rateLimitKey, 3, 30 * 60);
     if (!allowed)
-      return res.status(429).json(buildErrorResponse(429, 'RATE_LIMITED',
-        'Too many unlock requests. Try again in 30 minutes.'));
+      return res
+        .status(429)
+        .json(
+          buildErrorResponse(
+            429,
+            'RATE_LIMITED',
+            'Too many unlock requests. Try again in 30 minutes.'
+          )
+        );
 
     // Generate grace-encoded HOTP — accept current AND previous window (up to 60 min validity)
     const otp = generateGraceHOTP(device.totp_secret, timeWindow, graceHours);
@@ -785,15 +903,15 @@ router.post('/devices/:deviceId/unlock',
       `Contact ${dealerName} for help.`;
 
     return res.json({
-      method:           'offline',
+      method: 'offline',
       otp,
-      grace_hours:      graceHours,
-      sms_text:         smsText,        // machine-parseable (for auto-SMS app)
-      human_sms_text:   humanSmsText,   // readable (for manual send)
-      customer_phone:   device.customer_phone,
-      masked_phone:     maskedPhone,
-      expires_at:       expiresAt.toISOString(),
-      valid_minutes:    60,             // current + previous window
+      grace_hours: graceHours,
+      sms_text: smsText, // machine-parseable (for auto-SMS app)
+      human_sms_text: humanSmsText, // readable (for manual send)
+      customer_phone: device.customer_phone,
+      masked_phone: maskedPhone,
+      expires_at: expiresAt.toISOString(),
+      valid_minutes: 60 // current + previous window
     });
   })
 );
@@ -804,7 +922,8 @@ router.post('/devices/:deviceId/unlock',
 // To see the exact location for one alert, dealer must submit a reveal request
 // with a stated reason (logged permanently for legal accountability).
 
-router.get('/devices/:deviceId/anomalies',
+router.get(
+  '/devices/:deviceId/anomalies',
   param('deviceId').isUUID(),
   validateRequest,
   asyncHandler(async (req, res) => {
@@ -836,13 +955,16 @@ router.get('/devices/:deviceId/anomalies',
          WHERE device_id = $1 AND dealer_viewed = FALSE`,
         [req.params.deviceId]
       );
-    } catch (_) {}
+    } catch (error) {
+      warnOptionalFailure('location anomaly list lookup', error);
+    }
 
     return res.json({ anomalies });
   })
 );
 
-router.post('/devices/:deviceId/anomalies/:alertId/reveal',
+router.post(
+  '/devices/:deviceId/anomalies/:alertId/reveal',
   param('deviceId').isUUID(),
   param('alertId').isUUID(),
   body('reason').notEmpty().isString().isLength({ max: 500 }),
@@ -879,13 +1001,15 @@ router.post('/devices/:deviceId/anomalies/:alertId/reveal',
         [req.params.alertId, req.params.deviceId]
       );
       coordinate = coordRes.rows[0] || null;
-    } catch (_) {}
+    } catch (error) {
+      warnOptionalFailure('location anomaly reveal', error);
+    }
 
     return res.json({
-      revealed:    true,
+      revealed: true,
       coordinate,
       session_expires_minutes: 30,
-      note: 'This access has been permanently logged.',
+      note: 'This access has been permanently logged.'
     });
   })
 );
@@ -896,8 +1020,12 @@ router.post('/devices/:deviceId/anomalies/:alertId/reveal',
 // NEVER returns: which dealer previously sold a device, device model, purchase price.
 // This protects trade practice — cross-dealer lookup is score-only.
 
-router.post('/customer/lookup',
-  body('nid_hash').notEmpty().isString().isLength({ min: 64, max: 64 })
+router.post(
+  '/customer/lookup',
+  body('nid_hash')
+    .notEmpty()
+    .isString()
+    .isLength({ min: 64, max: 64 })
     .withMessage('nid_hash must be a 64-character SHA-256 hex string'),
   validateRequest,
   asyncHandler(async (req, res) => {
@@ -934,41 +1062,44 @@ router.post('/customer/lookup',
 
     if (blacklisted) {
       return res.json({
-        status:       'BLACKLISTED',
-        reason:       blacklistReason,
-        recommendation: 'Do not proceed. Contact reseller for details.',
+        status: 'BLACKLISTED',
+        reason: blacklistReason,
+        recommendation: 'Do not proceed. Contact reseller for details.'
       });
     }
 
     if (!profile) {
       return res.json({
-        status:         'NEW_MEMBER',
-        score:          null,
-        tier:           null,
-        recommendation: 'No previous EMI history. Standard verification required.',
+        status: 'NEW_MEMBER',
+        score: null,
+        tier: null,
+        recommendation: 'No previous EMI history. Standard verification required.'
       });
     }
 
-    const paymentRate = profile.installments_paid > 0
-      ? Math.round((profile.installments_paid /
-          (profile.installments_paid + profile.installments_late + profile.installments_missed)) * 100)
-      : 100;
+    const paymentRate =
+      profile.installments_paid > 0
+        ? Math.round(
+            (profile.installments_paid /
+              (profile.installments_paid +
+                profile.installments_late +
+                profile.installments_missed)) *
+              100
+          )
+        : 100;
 
     return res.json({
-      status:              'RETURNING_CUSTOMER',
-      score:               profile.score,
-      tier:                profile.tier,
-      member_since:        profile.member_since,
-      devices_completed:   profile.devices_completed,
-      installments_paid:   profile.installments_paid,
-      payment_rate:        paymentRate,
-      fraud_flags:         profile.fraud_flags,
-      sim_stability:       profile.sim_stability,
+      status: 'RETURNING_CUSTOMER',
+      score: profile.score,
+      tier: profile.tier,
+      member_since: profile.member_since,
+      devices_completed: profile.devices_completed,
+      installments_paid: profile.installments_paid,
+      payment_rate: paymentRate,
+      fraud_flags: profile.fraud_flags,
+      sim_stability: profile.sim_stability,
       last_activity_month: profile.last_activity_month,
-      recommendation:      profile.tier === 'GOLD'   ? 'Fast track — trusted customer' :
-                           profile.tier === 'SILVER' ? 'Standard process' :
-                           profile.tier === 'BRONZE' ? 'Verify carefully' :
-                                                       'High risk — additional deposit recommended',
+      recommendation: getCreditRecommendation(profile.tier)
     });
   })
 );
@@ -977,12 +1108,16 @@ router.post('/customer/lookup',
 // Dealer registers that they have stored a customer credit profile in their
 // Google Drive. Server maintains index of who has which profile for fast lookup.
 
-router.post('/profiles/register-seed',
+router.post(
+  '/profiles/register-seed',
   body('nid_hash').notEmpty().isString().isLength({ min: 64, max: 64 }),
   validateRequest,
   asyncHandler(async (req, res) => {
     const dealer = await getDealerProfile(req.user.id);
-    if (!dealer) return res.status(404).json(buildErrorResponse(404, 'DEALER_NOT_FOUND', 'Dealer profile not found'));
+    if (!dealer)
+      return res
+        .status(404)
+        .json(buildErrorResponse(404, 'DEALER_NOT_FOUND', 'Dealer profile not found'));
 
     try {
       await db.query(
@@ -992,17 +1127,28 @@ router.post('/profiles/register-seed',
            SET last_synced_at = NOW()`,
         [req.body.nid_hash, req.user.id]
       );
-    } catch (_) {}
+    } catch (error) {
+      warnOptionalFailure('profile seed registration', error);
+    }
 
     return res.json({ registered: true });
   })
 );
 
-router.get('/profiles/lookup-seed',
+router.get(
+  '/profiles/lookup-seed',
   asyncHandler(async (req, res) => {
     const nidHash = (req.query.nid_hash || '').trim();
     if (!nidHash || nidHash.length !== 64)
-      return res.status(400).json(buildErrorResponse(400, 'INVALID_HASH', 'nid_hash must be a 64-character SHA-256 hex string'));
+      return res
+        .status(400)
+        .json(
+          buildErrorResponse(
+            400,
+            'INVALID_HASH',
+            'nid_hash must be a 64-character SHA-256 hex string'
+          )
+        );
 
     let seeds = [];
     let scoreInfo = null;
@@ -1021,7 +1167,9 @@ router.get('/profiles/lookup-seed',
         [nidHash]
       );
       scoreInfo = scoreRes.rows[0] || null;
-    } catch (_) {}
+    } catch (error) {
+      warnOptionalFailure('profile seed lookup', error);
+    }
 
     return res.json({ seeds, score: scoreInfo?.score || null, tier: scoreInfo?.tier || null });
   })
@@ -1029,15 +1177,17 @@ router.get('/profiles/lookup-seed',
 
 // ─── PADT pending list ─────────────────────────────────────────────────────
 
-router.get('/padt/pending', asyncHandler(async (req, res) => {
-  const dealer = await getDealerProfile(req.user.id);
-  const dealerIds = getDealerIds(req.user.id, dealer);
+router.get(
+  '/padt/pending',
+  asyncHandler(async (req, res) => {
+    const dealer = await getDealerProfile(req.user.id);
+    const dealerIds = getDealerIds(req.user.id, dealer);
 
-  // padt_tokens table may not exist if migration hasn't run — return empty gracefully
-  let rows = [];
-  try {
-    const result = await db.query(
-      `SELECT d.id, d.imei, d.model, d.brand, d.status,
+    // padt_tokens table may not exist if migration hasn't run — return empty gracefully
+    let rows = [];
+    try {
+      const result = await db.query(
+        `SELECT d.id, d.imei, d.model, d.brand, d.status,
               pt.expires_at, pt.used, pt.issued_at, pt.jti
        FROM devices d
        JOIN padt_tokens pt ON pt.device_id = d.id
@@ -1046,41 +1196,49 @@ router.get('/padt/pending', asyncHandler(async (req, res) => {
          AND pt.revoked = false
          AND pt.expires_at > NOW()
        ORDER BY pt.issued_at DESC`,
-      [dealerIds]
-    );
-    rows = result.rows;
-  } catch (_) {
-    // Table not yet migrated — return empty list, not an error
-  }
-
-  return res.json({ pending: rows });
-}));
-
-// ─── AMAPI Enrollment QR ───────────────────────────────────────────────────
-// Returns a QR value string that encodes the Android Enterprise enrollment
-// token. Dealer displays this on screen; customer scans it during Android
-// setup wizard to grant Device Owner automatically.
-router.post('/enrollment-qr', asyncHandler(async (req, res) => {
-  const enterpriseId = process.env.AMAPI_ENTERPRISE_ID;
-  if (!enterpriseId) {
-    return res.status(503).json({ error: 'AMAPI enterprise not configured' });
-  }
-
-  try {
-    const token = await amapiService.createEnrollmentToken(enterpriseId, {
-      duration: '86400s', // 24 hours — plenty of time for dealer to use
-    });
-
-    // AMAPI response includes a qrCode field: a JSON string ready to encode
-    const qrValue = token.qrCode || token.value || null;
-    if (!qrValue) {
-      return res.status(502).json({ error: 'AMAPI did not return QR data' });
+        [dealerIds]
+      );
+      rows = result.rows;
+    } catch (_) {
+      // Table not yet migrated — return empty list, not an error
     }
 
-    return res.json({ qr_value: qrValue, token_name: token.name });
-  } catch (err) {
-    return res.status(502).json({ error: 'Could not generate enrollment QR', detail: err.message });
-  }
-}));
+    return res.json({ pending: rows });
+  })
+);
+
+// ─── AMAPI Enrollment QR ───────────────────────────────────────────────────
+// Returns a QR value string for Android setup-wizard Device Owner provisioning.
+// The setup wizard downloads our signed APK, verifies the checksum, installs it,
+// and sets DeviceAdminReceiver as the Device Policy Controller / Device Owner.
+router.post(
+  '/enrollment-qr',
+  asyncHandler(async (req, res) => {
+    const apkUrl = process.env.USER_APP_APK_URL || DEFAULT_USER_APP_APK_URL;
+    const apkChecksum =
+      process.env.USER_APP_APK_CHECKSUM || DEFAULT_USER_APP_APK_CHECKSUM;
+
+    const provisioningPayload = {
+      'android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME': USER_APP_ADMIN_RECEIVER,
+      'android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION': apkUrl,
+      'android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM': apkChecksum,
+      'android.app.extra.PROVISIONING_DEVICE_ADMIN_MINIMUM_VERSION_CODE': 1,
+      'android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED': true,
+      'android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE': {
+        api_base_url: process.env.PUBLIC_API_BASE_URL || process.env.API_BASE_URL || '',
+        enrollment_source: 'dealer_app'
+      }
+    };
+
+    return res.json({
+      qr_value: JSON.stringify(provisioningPayload),
+      token_name: 'self_hosted_user_app_device_owner',
+      mode: 'self_hosted_device_owner',
+      package_name: USER_APP_PACKAGE,
+      apk_url: apkUrl,
+      checksum: apkChecksum
+    });
+  })
+);
 
 module.exports = router;

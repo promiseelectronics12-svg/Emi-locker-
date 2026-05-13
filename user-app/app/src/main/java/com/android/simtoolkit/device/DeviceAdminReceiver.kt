@@ -1,11 +1,14 @@
 package com.android.simtoolkit.device
 
+import android.annotation.SuppressLint
 import android.app.admin.DeviceAdminReceiver
 import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Build
+import android.os.UserManager
 import android.util.Log
 import com.android.simtoolkit.BuildConfig
 import com.android.simtoolkit.service.EmiLockerService
@@ -28,6 +31,46 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
 
         fun getAdminComponent(context: Context): ComponentName {
             return ComponentName(context, DeviceAdminReceiver::class.java)
+        }
+
+        @SuppressLint("NewApi")
+        fun releaseDeviceManagement(context: Context): Boolean {
+            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val adminComponent = getAdminComponent(context)
+            val restrictions = listOf(
+                UserManager.DISALLOW_FACTORY_RESET,
+                DISALLOW_POWER_OFF_RESTRICTION,
+                UserManager.DISALLOW_SAFE_BOOT,
+                UserManager.DISALLOW_DEBUGGING_FEATURES
+            )
+
+            return try {
+                if (dpm.isDeviceOwnerApp(context.packageName)) {
+                    restrictions.forEach { restriction ->
+                        runCatching { dpm.clearUserRestriction(adminComponent, restriction) }
+                    }
+                    runCatching { dpm.setUninstallBlocked(adminComponent, context.packageName, false) }
+                    runCatching { dpm.setLockTaskPackages(adminComponent, emptyArray()) }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        runCatching { dpm.setLockTaskFeatures(adminComponent, 0) }
+                    }
+                    @Suppress("DEPRECATION")
+                    dpm.clearDeviceOwnerApp(context.packageName)
+                    Log.d(TAG, "Device Owner cleared for decoupling")
+                    true
+                } else {
+                    if (dpm.isAdminActive(adminComponent)) {
+                        dpm.removeActiveAdmin(adminComponent)
+                        Log.d(TAG, "Device Admin cleared for decoupling")
+                    } else {
+                        Log.d(TAG, "No active device management to clear")
+                    }
+                    true
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to release device management", e)
+                false
+            }
         }
     }
 

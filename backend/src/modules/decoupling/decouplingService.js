@@ -452,10 +452,13 @@ async executeDecoupling(deviceId, adminId, totpCode) {
       try {
         const fcmResult = await fcmService.sendToDevice(decoupling.fcm_token, {
           type: 'DECOUPLE_COMMAND',
+          command: 'DECOUPLE',
           deviceId,
+          deviceImei: decoupling.imei || '',
           encryptedRTOC,
           rtocKeySalt,
           signature: signedCommand.signature,
+          hmacSignature: signedCommand.signature,
           timestamp: signedCommand.timestamp,
           nonce: signedCommand.nonce,
           serverId: process.env.SERVER_ID || 'server-001',
