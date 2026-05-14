@@ -37,6 +37,14 @@ function warnOptionalFailure(scope, error) {
   console.warn(`[DealerRoute] ${scope} failed:`, error.message);
 }
 
+function isDeviceStatusConstraintError(error) {
+  return (
+    error?.code === '23514' &&
+    (error.constraint === 'devices_status_check' ||
+      error.message?.includes('devices_status_check'))
+  );
+}
+
 function getCreditRecommendation(tier) {
   if (tier === 'GOLD') return 'Fast track — trusted customer';
   if (tier === 'SILVER') return 'Standard process';
@@ -800,14 +808,30 @@ router.post(
     }
 
     async function markOnlineUnlockPending(otpWindow) {
-      await db.query(
-        `UPDATE devices
-         SET grace_expires_at = $1,
-             status = 'pending_unlock',
-             updated_at = NOW()
-         WHERE id = $2`,
-        [expiresAt, device.id]
-      );
+      try {
+        await db.query(
+          `UPDATE devices
+           SET grace_expires_at = $1,
+               status = 'pending_unlock',
+               updated_at = NOW()
+           WHERE id = $2`,
+          [expiresAt, device.id]
+        );
+      } catch (error) {
+        if (!isDeviceStatusConstraintError(error)) throw error;
+
+        console.warn(
+          '[DealerRoute] devices_status_check does not allow pending_unlock; keeping current device status until confirmation.',
+          { deviceId: device.id }
+        );
+        await db.query(
+          `UPDATE devices
+           SET grace_expires_at = $1,
+               updated_at = NOW()
+           WHERE id = $2`,
+          [expiresAt, device.id]
+        );
+      }
       await recordGraceUnlockEvent(otpWindow);
     }
 
