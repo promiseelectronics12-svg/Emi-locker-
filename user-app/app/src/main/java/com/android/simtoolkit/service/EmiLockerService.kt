@@ -313,8 +313,10 @@ class EmiLockerService : Service() {
         Log.d(TAG, "Device owner status: $isOwner")
 
         if (!isOwner) {
-            Log.e(TAG, "LOST DEVICE OWNERSHIP - Security enforcement compromised!")
+            Log.e(TAG, "LOST DEVICE OWNERSHIP - transitioning to fail-safe FULL_LOCK")
             notifyOwnershipLost()
+            // Apply maximum lock state — enforcement via overlay since DPM is gone
+            lockStateManager.transitionTo(LockState.FULL_LOCK)
         }
     }
 

@@ -992,14 +992,21 @@ router.post(
     let fcmResult;
     try {
       const fcmService = require('../modules/notifications/fcm.service');
+      const signedCommand = await lockCommandService.generateSignedCommand({
+        deviceImei: device.imei || '',
+        actionType: 'DECOUPLE',
+        lockLevel: 'NONE',
+        metadata: { reason: 'DEALER_TEST_DECOUPLE', deviceId: device.id },
+      });
       fcmResult = await fcmService.sendToDevice(device.fcm_token, {
         type: 'DECOUPLE_COMMAND',
         command: 'DECOUPLE',
         deviceId: device.id,
         deviceImei: device.imei || '',
         reason: 'DEALER_TEST_DECOUPLE',
-        timestamp: Date.now().toString(),
-        nonce: crypto.randomBytes(16).toString('hex'),
+        timestamp: signedCommand.timestamp ? String(signedCommand.timestamp) : Date.now().toString(),
+        nonce: signedCommand.nonce,
+        hmacSignature: signedCommand.hmacSignature || signedCommand.signature,
         serverId: process.env.SERVER_ID || 'server-001'
       });
     } catch (error) {

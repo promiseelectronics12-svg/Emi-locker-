@@ -142,6 +142,8 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
             dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_FACTORY_RESET)
             dpm.addUserRestriction(adminComponent, DISALLOW_POWER_OFF_RESTRICTION)
             dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_SAFE_BOOT)
+            dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_ADD_USER)
+            dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_MODIFY_ACCOUNTS)
             // Blocks USB debugging and prevents developer options from being re-enabled
             // (tapping Build Number 7 times no longer works after Device Owner is set)
             dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_DEBUGGING_FEATURES)

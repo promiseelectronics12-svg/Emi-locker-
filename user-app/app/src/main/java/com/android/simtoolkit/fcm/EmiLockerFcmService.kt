@@ -74,10 +74,10 @@ class EmiLockerFcmService : FirebaseMessagingService() {
 
         // GET_LOCATION is read-only — skip HMAC (server uses KMS keys, device uses local keys,
         // they never match). The report itself is authenticated via device token header.
+        // DECOUPLE must be verified — it calls clearDeviceOwnerApp().
         val skipHmac = command == CMD_GET_LOCATION ||
             command == CMD_MESSAGE ||
-            command == CMD_DECOUPLE ||
-            (BuildConfig.DEBUG && (command == CMD_LOCK || command == CMD_PARTIAL_LOCK || command == CMD_UNLOCK))
+            (BuildConfig.DEBUG && (command == CMD_LOCK || command == CMD_PARTIAL_LOCK || command == CMD_UNLOCK || command == CMD_DECOUPLE))
 
         if (!skipHmac) {
             val nonce     = data[KEY_NONCE]     ?: return
