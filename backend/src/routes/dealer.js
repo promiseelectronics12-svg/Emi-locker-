@@ -786,20 +786,7 @@ router.post(
 
     const timeWindow = Math.floor(Date.now() / (30 * 60 * 1000));
 
-    async function markGraceUnlock(otpWindow) {
-      await db.query(
-        `UPDATE devices
-         SET grace_expires_at = $1,
-             lock_level = 'NONE',
-             status = 'enrolled',
-             lock_reason = NULL,
-             locked_at = NULL,
-             locked_by = NULL,
-             updated_at = NOW()
-         WHERE id = $2`,
-        [expiresAt, device.id]
-      );
-
+    async function recordGraceUnlockEvent(otpWindow) {
       try {
         await db.query(
           `INSERT INTO grace_unlock_events
@@ -812,8 +799,20 @@ router.post(
       }
     }
 
+    async function markOnlineUnlockPending(otpWindow) {
+      await db.query(
+        `UPDATE devices
+         SET grace_expires_at = $1,
+             status = 'pending_unlock',
+             updated_at = NOW()
+         WHERE id = $2`,
+        [expiresAt, device.id]
+      );
+      await recordGraceUnlockEvent(otpWindow);
+    }
+
     if (method === 'online') {
-      await markGraceUnlock(timeWindow * 10 + GRACE_INDEX[graceHours]);
+      await markOnlineUnlockPending(timeWindow * 10 + GRACE_INDEX[graceHours]);
 
       // Send the same signed command format that the release user app verifies.
       let delivery = null;
@@ -835,20 +834,25 @@ router.post(
 
       try {
         const sseService = require('../modules/sse/sseService');
-        sseService.emitDeviceUnlocked(
-          {
-            id: device.id,
-            device_name: device.device_name || device.amapi_device_name,
-            dealer_id: dealer.id
-          },
-          graceHours
-        );
+        const payload = {
+          deviceId: device.id,
+          deviceName: device.device_name || device.amapi_device_name,
+          status: 'pending_unlock',
+          graceHours,
+          expiresAt: expiresAt.toISOString(),
+          requestedAt: new Date().toISOString()
+        };
+        sseService.pushToDealer(dealer.id, 'device_unlock_pending', payload);
+        sseService.pushToManagement('device_unlock_pending', payload);
       } catch (error) {
-        warnOptionalFailure('online unlock SSE emit', error);
+        warnOptionalFailure('online unlock pending SSE emit', error);
       }
 
       return res.json({
         method: 'online',
+        status: 'pending',
+        device_confirmed: false,
+        message: 'Unlock command sent. Waiting for device confirmation.',
         grace_hours: graceHours,
         expires_at: expiresAt.toISOString(),
         fcm_sent: delivery?.results?.fcm?.success === true,

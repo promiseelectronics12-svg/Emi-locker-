@@ -2745,6 +2745,16 @@ class _WorkspaceState extends State<Workspace> {
               targetTab: reseller ? null : 1, // Dealer → Devices tab
             ),
           );
+        } else if (event.type == 'device_unlock_pending') {
+          _pushNotification(
+            _AppNotification(
+              type: 'device_unlock_pending',
+              title: 'Unlock Pending',
+              body:
+                  '${event.data['deviceName'] ?? 'A device'} is waiting for phone confirmation.',
+              targetTab: reseller ? null : 1,
+            ),
+          );
         }
       });
     }
@@ -3948,6 +3958,7 @@ class _DealerDashboardState extends State<DealerDashboard> {
         const relevant = {
           'device_locked',
           'device_unlocked',
+          'device_unlock_pending',
           'device_decoupled',
           'device_decoupling_requested',
           'enrollment_complete',
@@ -4872,6 +4883,15 @@ class DeviceActions extends StatelessWidget {
     );
     final deviceName = text(device['device_name'], fallback: 'Device');
     final connColor = _connectionColor(connectionStatus);
+    final statusLower = status.toLowerCase();
+    final lockUpper = lock.toUpperCase();
+    final isLockActive =
+        statusLower == 'locked' ||
+        statusLower == 'partial_lock' ||
+        statusLower == 'reminder' ||
+        lockUpper == 'FULL' ||
+        lockUpper == 'SOFT';
+    final isUnlockPending = statusLower == 'pending_unlock';
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -4977,6 +4997,23 @@ class DeviceActions extends StatelessWidget {
               ],
               const SizedBox(height: 12),
               // ── Info grid (2-col) ───────────────────────────────────────
+              if (isUnlockPending) ...[
+                const _InlineNotice(
+                  message:
+                      'Unlock command sent. Waiting for the phone to confirm.',
+                  tone: AppTone.warning,
+                  icon: Icons.pending_actions_rounded,
+                ),
+                const SizedBox(height: 10),
+              ] else if (isLockActive) ...[
+                const _InlineNotice(
+                  message:
+                      'Device is already locked. Use Unlock before sending another lock.',
+                  tone: AppTone.info,
+                  icon: Icons.lock_clock_rounded,
+                ),
+                const SizedBox(height: 10),
+              ],
               _SoftPanel(
                 padding: const EdgeInsets.all(10),
                 child: Table(
@@ -5029,9 +5066,13 @@ class DeviceActions extends StatelessWidget {
                   children: [
                     _ActionBtn(
                       icon: Icons.lock_outline,
-                      label: 'Lock',
+                      label: isUnlockPending
+                          ? 'Unlocking'
+                          : isLockActive
+                          ? 'Locked'
+                          : 'Lock',
                       color: AppTone.danger,
-                      onTap: id.isEmpty
+                      onTap: id.isEmpty || isLockActive || isUnlockPending
                           ? null
                           : () async {
                               final result =
@@ -5044,8 +5085,9 @@ class DeviceActions extends StatelessWidget {
                                     ),
                                   );
                               if (result != null) await onDeviceChanged?.call();
-                              if (result != null && context.mounted)
+                              if (result != null && context.mounted) {
                                 Navigator.pop(context);
+                              }
                             },
                     ),
                     _ActionBtn(
@@ -8813,7 +8855,8 @@ class _LockDialogState extends State<LockDialog> {
       if (mounted) {
         setState(() {
           _success = true;
-          _status = 'Command may still be processing. Refreshing status shortly.';
+          _status =
+              'Command may still be processing. Refreshing status shortly.';
         });
         snack(context, 'Command submitted. Confirmation is pending.');
       }
@@ -9117,14 +9160,16 @@ class _LocationDialogState extends State<LocationDialog> {
           .get('/api/v1/location/${widget.deviceId}/history?limit=1')
           .timeout(const Duration(seconds: 5));
       final rows = asList(response.data, 'data');
-      final Map<String, dynamic>? previous =
-          rows.isEmpty ? null : asMap(rows.first);
+      final Map<String, dynamic>? previous = rows.isEmpty
+          ? null
+          : asMap(rows.first);
       if (!mounted) return;
       setState(() {
         _location = previous == null || previous.isEmpty ? null : previous;
         _locationIsPrevious = _location != null;
-        message =
-            _location == null ? 'No previous location is available.' : fallbackMessage;
+        message = _location == null
+            ? 'No previous location is available.'
+            : fallbackMessage;
       });
     } catch (e) {
       if (!mounted) return;

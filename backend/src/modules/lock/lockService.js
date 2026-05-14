@@ -46,6 +46,29 @@ class LockService {
     const lockLevel = this.determineLockLevel(reason);
     const dbLockLevel = this.toDbLockLevel(lockLevel);
     const dbStatus = this.toDbStatus(lockLevel);
+    const currentState = await db.query(
+      `SELECT lock_level, status FROM devices WHERE id = $1`,
+      [deviceId]
+    );
+    const currentLockLevel = currentState.rows[0]?.lock_level || 'NONE';
+    const currentStatus = String(currentState.rows[0]?.status || '').toLowerCase();
+    const alreadyLocked =
+      currentLockLevel === 'FULL' ||
+      currentLockLevel === 'SOFT' ||
+      currentStatus === 'locked' ||
+      currentStatus === 'partial_lock' ||
+      currentStatus === 'reminder' ||
+      currentStatus === 'pending_unlock';
+
+    if (alreadyLocked) {
+      return {
+        status: 'ALREADY_LOCKED',
+        decision: 'ALREADY_LOCKED',
+        message: 'Device is already locked. Unlock it before sending another lock command.',
+        currentLockLevel,
+        currentStatus,
+      };
+    }
 
     const requestId = await lockVerificationService.recordApprovedRequest(
       dealerIdentity.dealerRecordId,

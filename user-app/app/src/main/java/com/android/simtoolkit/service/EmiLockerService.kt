@@ -78,15 +78,12 @@ class EmiLockerService : Service() {
         createNotificationChannel()
         startOwnershipVerification()
         startKioskMonitor()
-        serviceScope.launch { permissionHealthReporter.reportCurrentLockState("service_start") }
+        serviceScope.launch { reapplyStoredLockState("service_start") }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "EmiLockerService started with intent: ${intent?.action}")
         startForegroundForAction(intent?.action)
-        serviceScope.launch {
-            permissionHealthReporter.reportCurrentLockState("service_${intent?.action ?: "start"}")
-        }
         when (intent?.action) {
             ACTION_LOCK_DEVICE -> serviceScope.launch {
                 applyLockStateAndReport(LockState.FULL_LOCK, "lock_command")
@@ -107,12 +104,39 @@ class EmiLockerService : Service() {
             }
             ACTION_REPORT_LOCATION -> {
                 val pullId = intent.getStringExtra(EXTRA_PULL_ID).orEmpty()
-                serviceScope.launch { reportPulledLocation(pullId) }
+                serviceScope.launch {
+                    permissionHealthReporter.reportCurrentLockState("service_location")
+                    reportPulledLocation(pullId)
+                }
             }
             ACTION_VERIFY_OWNERSHIP -> serviceScope.launch { verifyAndReportOwnership() }
-            ACTION_REPORT_BOOT -> serviceScope.launch { reportBootEvent() }
+            ACTION_REPORT_BOOT -> serviceScope.launch {
+                reapplyStoredLockState("boot")
+                reportBootEvent()
+            }
+            else -> serviceScope.launch { reapplyStoredLockState("service_start") }
         }
         return START_STICKY
+    }
+
+    private suspend fun reapplyStoredLockState(source: String) {
+        val currentState = try {
+            preferencesManager.getCurrentLockState()
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to read stored lock state during $source: ${e.message}")
+            LockState.NORMAL
+        }
+
+        if (currentState != LockState.NORMAL) {
+            Log.d(TAG, "Reapplying stored lock state after $source: $currentState")
+            lockStateManager.transitionTo(currentState)
+        }
+
+        permissionHealthReporter.reportIfChanged(
+            source,
+            force = true,
+            lockState = currentState
+        )
     }
 
     private suspend fun applyLockStateAndReport(state: LockState, source: String) {

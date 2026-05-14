@@ -182,8 +182,8 @@ class LockStateManager @Inject constructor(
             }
             LockState.FULL_LOCK -> {
                 try {
-                    overlayManager.showFullLockOverlay()
                     enableKioskModeInternal(true)
+                    overlayManager.showFullLockOverlay()
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to reapply FULL_LOCK state", e)
                 }

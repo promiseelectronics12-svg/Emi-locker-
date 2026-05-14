@@ -78,7 +78,8 @@ class _UnlockFlowScreenState extends State<UnlockFlowScreen> {
       });
     } on TimeoutException {
       setState(() {
-        _errorMsg = 'Unlock is still processing. Refresh device status shortly.';
+        _errorMsg =
+            'Unlock is still processing. Refresh device status shortly.';
         _state = 'error';
       });
     } catch (e) {
@@ -93,8 +94,10 @@ class _UnlockFlowScreenState extends State<UnlockFlowScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Unlock · ${widget.deviceName}',
-            overflow: TextOverflow.ellipsis),
+        title: Text(
+          'Unlock · ${widget.deviceName}',
+          overflow: TextOverflow.ellipsis,
+        ),
       ),
       body: _buildBody(),
       bottomNavigationBar: _state == 'ready'
@@ -152,10 +155,10 @@ class _ReadyState extends StatelessWidget {
     final lock = asMap(lockDetail['lock']);
     final emi = asMap(lockDetail['emi']);
     final lockLevel = text(lock['lock_level'], fallback: 'NONE');
-    final reason    = text(lock['reason'], fallback: 'No reason provided');
-    final lockedAt  = text(lock['locked_at']);
-    final overdue   = lock['days_overdue'] ?? emi['days_overdue'];
-    final isLocked  = lock['is_locked'] == true;
+    final reason = text(lock['reason'], fallback: 'No reason provided');
+    final lockedAt = text(lock['locked_at']);
+    final overdue = lock['days_overdue'] ?? emi['days_overdue'];
+    final isLocked = lock['is_locked'] == true;
 
     return ListView(
       padding: const EdgeInsets.all(20),
@@ -176,49 +179,74 @@ class _ReadyState extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  const Icon(Icons.lock_outline, color: AppTone.danger, size: 18),
+                  const Icon(
+                    Icons.lock_outline,
+                    color: AppTone.danger,
+                    size: 18,
+                  ),
                   const SizedBox(width: 8),
-                  Text(isLocked ? 'Device locked' : 'No active lock',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w700, color: AppTone.danger)),
+                  Text(
+                    isLocked ? 'Device locked' : 'No active lock',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: AppTone.danger,
+                    ),
+                  ),
                   const Spacer(),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: AppTone.danger.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: Text('Level $lockLevel',
-                        style: const TextStyle(
-                            fontSize: 11, color: AppTone.danger,
-                            fontWeight: FontWeight.w600)),
+                    child: Text(
+                      'Level $lockLevel',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppTone.danger,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                 ],
               ),
               const SizedBox(height: 8),
-              Text(reason, style: const TextStyle(fontSize: 13, color: AppTone.ink)),
+              Text(
+                reason,
+                style: const TextStyle(fontSize: 13, color: AppTone.ink),
+              ),
               if (lockedAt.isNotEmpty) ...[
                 const SizedBox(height: 4),
-                Text('Locked $lockedAt',
-                    style: const TextStyle(fontSize: 11, color: AppTone.muted)),
+                Text(
+                  'Locked $lockedAt',
+                  style: const TextStyle(fontSize: 11, color: AppTone.muted),
+                ),
               ],
               if (overdue != null) ...[
                 const SizedBox(height: 4),
-                Text('$overdue days overdue',
-                    style: const TextStyle(
-                        fontSize: 11, color: AppTone.warning,
-                        fontWeight: FontWeight.w600)),
+                Text(
+                  '$overdue days overdue',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: AppTone.warning,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ],
             ],
           ),
         ),
         const SizedBox(height: 24),
 
-        Text('Unlock method',
-            style: Theme.of(context)
-                .textTheme
-                .labelMedium
-                ?.copyWith(color: AppTone.muted)),
+        Text(
+          'Unlock method',
+          style: Theme.of(
+            context,
+          ).textTheme.labelMedium?.copyWith(color: AppTone.muted),
+        ),
         const SizedBox(height: 10),
         UnlockMethodCard(
           method: UnlockMethod.online,
@@ -249,7 +277,9 @@ class _ReadyState extends StatelessWidget {
                 const SizedBox(height: 16),
               ],
               GracePeriodSelector(
-                  selected: graceHours, onChanged: onGraceChanged),
+                selected: graceHours,
+                onChanged: onGraceChanged,
+              ),
             ],
           ),
         ),
@@ -285,21 +315,30 @@ class _SuccessState extends StatelessWidget {
                 width: 72,
                 height: 72,
                 decoration: BoxDecoration(
-                  color: AppTone.brand.withOpacity(0.1),
+                  color: AppTone.warning.withOpacity(0.12),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.check_rounded,
-                    color: AppTone.brand, size: 40),
+                child: const Icon(
+                  Icons.pending_actions_rounded,
+                  color: AppTone.warning,
+                  size: 40,
+                ),
               ),
               const SizedBox(height: 20),
-              const Text('Unlock command sent',
-                  style: TextStyle(
-                      fontSize: 20, fontWeight: FontWeight.w700,
-                      color: AppTone.ink)),
+              const Text(
+                'Unlock pending',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: AppTone.ink,
+                ),
+              ),
               const SizedBox(height: 8),
-              Text('Device will unlock within 60 seconds. Grace: ${graceHours}h.',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: AppTone.muted)),
+              Text(
+                'Command sent. The status will change to unlocked after the phone confirms. Grace: ${graceHours}h.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: AppTone.muted),
+              ),
               const SizedBox(height: 28),
               FilledButton(onPressed: onDone, child: const Text('Done')),
             ],
@@ -309,10 +348,12 @@ class _SuccessState extends StatelessWidget {
     }
 
     // Offline OTP result
-    final otp   = text(otpResult?['otp'], fallback: '——');
+    final otp = text(otpResult?['otp'], fallback: '——');
     final phone = text(otpResult?['customer_phone'], fallback: '');
-    final smsText = text(otpResult?['sms_text'],
-        fallback: 'Your unlock code: $otp');
+    final smsText = text(
+      otpResult?['sms_text'],
+      fallback: 'Your unlock code: $otp',
+    );
     final expiresAt = text(otpResult?['expires_at']);
 
     return ListView(
@@ -333,19 +374,22 @@ class _SuccessState extends StatelessWidget {
           ),
           child: Column(
             children: [
-              Text(otp,
-                  style: const TextStyle(
-                    fontFamily: 'JetBrainsMono',
-                    fontSize: 36,
-                    fontWeight: FontWeight.w900,
-                    color: AppTone.ink,
-                    letterSpacing: 8,
-                  )),
+              Text(
+                otp,
+                style: const TextStyle(
+                  fontFamily: 'JetBrainsMono',
+                  fontSize: 36,
+                  fontWeight: FontWeight.w900,
+                  color: AppTone.ink,
+                  letterSpacing: 8,
+                ),
+              ),
               if (expiresAt.isNotEmpty) ...[
                 const SizedBox(height: 6),
-                Text('Expires $expiresAt',
-                    style: const TextStyle(
-                        fontSize: 11, color: AppTone.muted)),
+                Text(
+                  'Expires $expiresAt',
+                  style: const TextStyle(fontSize: 11, color: AppTone.muted),
+                ),
               ],
               const SizedBox(height: 16),
               Row(
@@ -375,8 +419,10 @@ class _SuccessState extends StatelessWidget {
         ),
         if (phone.isNotEmpty) ...[
           const SizedBox(height: 12),
-          Text('Customer phone: $phone',
-              style: const TextStyle(fontSize: 13, color: AppTone.muted)),
+          Text(
+            'Customer phone: $phone',
+            style: const TextStyle(fontSize: 13, color: AppTone.muted),
+          ),
         ],
         const SizedBox(height: 24),
         OutlinedButton(onPressed: onDone, child: const Text('Close')),
@@ -399,9 +445,7 @@ class _ActionBar extends StatelessWidget {
           icon: const Icon(Icons.lock_open_rounded),
           label: const Text('Confirm unlock'),
           onPressed: onConfirm,
-          style: FilledButton.styleFrom(
-            minimumSize: const Size.fromHeight(52),
-          ),
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
         ),
       ),
     );
@@ -448,9 +492,10 @@ class _ErrorState extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             InlineNotice(
-                message: message,
-                tone: AppTone.danger,
-                icon: Icons.error_outline_rounded),
+              message: message,
+              tone: AppTone.danger,
+              icon: Icons.error_outline_rounded,
+            ),
             const SizedBox(height: 16),
             OutlinedButton.icon(
               icon: const Icon(Icons.refresh_rounded),
