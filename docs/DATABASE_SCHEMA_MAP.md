@@ -34,3 +34,10 @@ When a migration changes one of these tables:
 | `devices` | `app_uninstall_suspected_at` | Distinguishes app removed suspicion from normal offline |
 | `devices` | `last_heartbeat_source` | Records what caused latest health update |
 
+## Runtime Status Values
+
+| Table | Field | Allowed runtime values |
+| --- | --- | --- |
+| `devices` | `status` | `pending`, `enrolled`, `active`, `locked`, `unlocked`, `partial_lock`, `reminder`, `pending_lock`, `pending_unlock`, `pending_decouple`, `decoupled`, `disabled`, `suspended`, `stolen` |
+
+Migration `123_device_pending_statuses.sql` aligns the live Neon `devices_status_check` constraint with backend command states. This prevents dealer lock/unlock requests from failing while the backend waits for device confirmation.
