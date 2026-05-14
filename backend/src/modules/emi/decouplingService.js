@@ -15,7 +15,10 @@ const DECOUPLING_STATES = {
 
 const VALID_TRANSITIONS = {
   [DECOUPLING_STATES.EMI_ACTIVE]: [DECOUPLING_STATES.FINAL_PAYMENT_RECEIVED],
-  [DECOUPLING_STATES.FINAL_PAYMENT_RECEIVED]: [DECOUPLING_STATES.DEALER_NOTIFIED, DECOUPLING_STATES.PENDING_ADMIN_DECOUPLE],
+  [DECOUPLING_STATES.FINAL_PAYMENT_RECEIVED]: [
+    DECOUPLING_STATES.DEALER_NOTIFIED,
+    DECOUPLING_STATES.PENDING_ADMIN_DECOUPLE
+  ],
   [DECOUPLING_STATES.DEALER_NOTIFIED]: [DECOUPLING_STATES.PENDING_ADMIN_DECOUPLE],
   [DECOUPLING_STATES.PENDING_ADMIN_DECOUPLE]: [DECOUPLING_STATES.DEVICE_DECOUPLED],
   [DECOUPLING_STATES.DEVICE_DECOUPLED]: []
@@ -69,9 +72,7 @@ class DecouplingService {
       [DECOUPLING_STATES.FINAL_PAYMENT_RECEIVED]: async () => {
         await this.notifyDealer(deviceId);
       },
-      [DECOUPLING_STATES.DEALER_NOTIFIED]: async () => {
-        return this.startFraudDetectionWindow(deviceId);
-      },
+      [DECOUPLING_STATES.DEALER_NOTIFIED]: async () => this.startFraudDetectionWindow(deviceId),
       [DECOUPLING_STATES.PENDING_ADMIN_DECOUPLE]: async () => {
         await this.sendAdminNotification(deviceId);
       },
@@ -177,7 +178,10 @@ class DecouplingService {
       throw new Error('No decoupling state found');
     }
 
-    if (state.state !== DECOUPLING_STATES.DEALER_NOTIFIED && state.state !== DECOUPLING_STATES.PENDING_ADMIN_DECOUPLE) {
+    if (
+      state.state !== DECOUPLING_STATES.DEALER_NOTIFIED &&
+      state.state !== DECOUPLING_STATES.PENDING_ADMIN_DECOUPLE
+    ) {
       throw new Error('Cannot flag fraud in current state');
     }
 
@@ -298,10 +302,7 @@ class DecouplingService {
     hmac.update(payload);
     const expectedSignature = hmac.digest('hex').substring(0, 8);
 
-    return crypto.timingSafeEqual(
-      Buffer.from(providedSignature),
-      Buffer.from(expectedSignature)
-    );
+    return crypto.timingSafeEqual(Buffer.from(providedSignature), Buffer.from(expectedSignature));
   }
 
   async cleanupDeviceData(deviceId) {
@@ -351,7 +352,9 @@ class DecouplingService {
     }
 
     const fraudWindowActive = state.fraud_window_started_at && !state.fraud_window_ends_at;
-    const fraudWindowExpired = state.fraud_window_ends_at ? new Date() >= new Date(state.fraud_window_ends_at) : false;
+    const fraudWindowExpired = state.fraud_window_ends_at
+      ? new Date() >= new Date(state.fraud_window_ends_at)
+      : false;
 
     return {
       deviceId,

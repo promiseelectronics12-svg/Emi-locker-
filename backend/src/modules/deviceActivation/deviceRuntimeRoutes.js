@@ -174,6 +174,63 @@ function hasLockStateChanged(previousDevice, reportedLockState) {
   );
 }
 
+function lockLevelRank(level) {
+  const value = String(level || 'NONE').toUpperCase();
+  if (value === 'FULL') return 2;
+  if (value === 'SOFT') return 1;
+  return 0;
+}
+
+function shouldApplyReportedLockState(previousDevice, reportedLockState) {
+  if (!reportedLockState) return false;
+  if (reportedLockState.lockLevel === 'NONE') {
+    return true;
+  }
+
+  const previousStatus = String(previousDevice?.status || '').toLowerCase();
+  const previousRank = lockLevelRank(previousDevice?.lock_level);
+  const reportedRank = lockLevelRank(reportedLockState.lockLevel);
+
+  if (previousStatus === 'locked' && reportedRank < previousRank) {
+    return false;
+  }
+
+  return true;
+}
+
+function safeSse(methodName, args, fallback) {
+  try {
+    const emitter = sseService[methodName];
+    if (typeof emitter === 'function') {
+      emitter(...args);
+      return;
+    }
+    logger.warn('SSE emitter unavailable', { methodName });
+    if (typeof fallback === 'function') fallback();
+  } catch (error) {
+    logger.warn('SSE emit failed', { methodName, error: error.message });
+  }
+}
+
+function emitDeviceHealthBestEffort(device, health = {}) {
+  safeSse('emitDeviceHealthChanged', [device, health], () => {
+    const payload = {
+      deviceId: device.id,
+      deviceName: device.device_name,
+      imei: device.imei,
+      healthStatus: device.device_health_status || health.status || 'unknown',
+      permissionHealth: health.permissionHealth || null,
+      degradedReasons: health.degradedReasons || [],
+      lastSeenAt: device.last_seen_at || new Date().toISOString(),
+      changedAt: new Date().toISOString()
+    };
+    safeSse('pushToManagement', ['device_health_changed', payload]);
+    if (device.dealer_id) {
+      safeSse('pushToDealer', [device.dealer_id, 'device_health_changed', payload]);
+    }
+  });
+}
+
 router.get('/emi-schedule', validateDeviceToken, async (req, res) => {
   try {
     const schedule = await loadSchedule(req.deviceAuth.sub);
@@ -218,8 +275,9 @@ router.post('/heartbeat', validateDeviceToken, async (req, res) => {
 
     const updatedDevice = result.rows[0];
     let lockStateDevice = updatedDevice;
-    const lockStateChanged = hasLockStateChanged(previousDevice, reportedLockState);
-    if (reportedLockState) {
+    const shouldApplyLockState = shouldApplyReportedLockState(previousDevice, reportedLockState);
+    const lockStateChanged = shouldApplyLockState && hasLockStateChanged(previousDevice, reportedLockState);
+    if (reportedLockState && shouldApplyLockState) {
       const lockUpdate = await db.query(
         `UPDATE devices
          SET status = $2,
@@ -244,6 +302,14 @@ router.post('/heartbeat', validateDeviceToken, async (req, res) => {
         ]
       );
       lockStateDevice = lockUpdate.rows[0] || updatedDevice;
+    } else if (reportedLockState && !shouldApplyLockState) {
+      logger.info('Ignored weaker device lock heartbeat', {
+        deviceId: req.deviceAuth.sub,
+        currentStatus: previousDevice?.status,
+        currentLockLevel: previousDevice?.lock_level,
+        reportedLockState: reportedLockState.raw,
+        reportedLockLevel: reportedLockState.lockLevel
+      });
     }
 
     const previousPermissionSegment = extractPermissionSegment(
@@ -257,7 +323,7 @@ router.post('/heartbeat', validateDeviceToken, async (req, res) => {
         previousDevice?.device_health_status !== lockStateDevice.device_health_status ||
         previousPermissionSegment !== nextPermissionSegment)
     ) {
-      sseService.emitDeviceHealthChanged(lockStateDevice, {
+      emitDeviceHealthBestEffort(lockStateDevice, {
         connectionStatus: nextConnectionStatus,
         permissionHealth: permissionHealth?.permissions || null,
         degradedReasons: permissionHealth?.degradedReasons || []
@@ -273,16 +339,16 @@ router.post('/heartbeat', validateDeviceToken, async (req, res) => {
           status: 'decoupled',
           decoupledAt: new Date().toISOString()
         };
-        sseService.pushToManagement('device_decoupled', payload);
+        safeSse('pushToManagement', ['device_decoupled', payload]);
         if (lockStateDevice.dealer_id) {
-          sseService.pushToDealer(lockStateDevice.dealer_id, 'device_decoupled', payload);
+          safeSse('pushToDealer', [lockStateDevice.dealer_id, 'device_decoupled', payload]);
         }
       } else if (reportedLockState.event === 'unlocked') {
-        sseService.emitDeviceUnlocked(lockStateDevice, null);
+        safeSse('emitDeviceUnlocked', [lockStateDevice, null]);
       } else if (lockStateChanged) {
-        sseService.emitDeviceLocked(lockStateDevice);
+        safeSse('emitDeviceLocked', [lockStateDevice]);
       } else {
-        sseService.emitDeviceHealthChanged(lockStateDevice, {
+        emitDeviceHealthBestEffort(lockStateDevice, {
           status: lockStateDevice.device_health_status,
           lockState: reportedLockState.raw
         });

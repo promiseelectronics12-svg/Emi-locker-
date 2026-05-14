@@ -5,9 +5,8 @@ import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.android.simtoolkit.BuildConfig
 import com.android.simtoolkit.data.local.PreferencesManager
-import com.android.simtoolkit.data.remote.api.ApiService
+import com.android.simtoolkit.health.PermissionHealthReporter
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.flow.firstOrNull
@@ -16,13 +15,14 @@ import kotlinx.coroutines.flow.firstOrNull
 class DeviceHeartbeatWorker @AssistedInject constructor(
     @Assisted private val context: Context,
     @Assisted workerParams: WorkerParameters,
-    private val apiService: ApiService,
-    private val preferencesManager: PreferencesManager
+    private val preferencesManager: PreferencesManager,
+    private val permissionHealthReporter: PermissionHealthReporter
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
         val deviceId = preferencesManager.activatedDeviceId.firstOrNull()
         val deviceToken = preferencesManager.deviceToken.firstOrNull()
+            ?: preferencesManager.accessToken.firstOrNull()
 
         if (deviceId.isNullOrBlank() || deviceToken.isNullOrBlank()) {
             Log.d(TAG, "Heartbeat skipped: device is not bound yet")
@@ -30,23 +30,9 @@ class DeviceHeartbeatWorker @AssistedInject constructor(
         }
 
         return try {
-            val response = apiService.sendDeviceHeartbeat(
-                deviceToken,
-                mapOf(
-                    "source" to "workmanager",
-                    "app_version" to BuildConfig.VERSION_NAME
-                )
-            )
-            if (response.isSuccessful) {
-                Log.d(TAG, "Heartbeat accepted for device=$deviceId")
-                Result.success()
-            } else if (response.code() in 400..499) {
-                Log.w(TAG, "Heartbeat rejected code=${response.code()}")
-                Result.failure()
-            } else {
-                Log.w(TAG, "Heartbeat retryable failure code=${response.code()}")
-                Result.retry()
-            }
+            permissionHealthReporter.reportCurrentLockState("workmanager", force = true)
+            Log.d(TAG, "Heartbeat accepted for device=$deviceId")
+            Result.success()
         } catch (e: Exception) {
             Log.w(TAG, "Heartbeat failed: ${e.message}")
             Result.retry()

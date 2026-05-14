@@ -1,14 +1,18 @@
 const express = require('express');
+
 const router = express.Router();
+const { body } = require('express-validator');
 const deviceController = require('../controllers/deviceController');
 const { authenticateToken } = require('../middleware/auth');
 const { validateSignedDeviceCommand } = require('../middleware/deviceAuth');
-const { body } = require('express-validator');
 const { validateRequest } = require('../middleware/validateRequest');
 
-router.post('/register',
+router.post(
+  '/register',
   authenticateToken,
-  body('imei').matches(/^\d{15}$/).withMessage('IMEI must be 15 digits'),
+  body('imei')
+    .matches(/^\d{15}$/)
+    .withMessage('IMEI must be 15 digits'),
   body('enrollment_token').notEmpty(),
   body('dealer_id').isUUID(),
   validateRequest,
@@ -17,13 +21,15 @@ router.post('/register',
 
 router.get('/my', authenticateToken, deviceController.getMyDevices);
 
-router.get('/:id',
+router.get(
+  '/:id',
   authenticateToken,
   deviceController.validateDeviceOwnership,
   deviceController.getDevice
 );
 
-router.patch('/:id/status',
+router.patch(
+  '/:id/status',
   authenticateToken,
   body('status').isIn(['active', 'locked', 'unlocked', 'stolen', 'disabled']),
   body('reason').optional().isString(),
@@ -31,7 +37,8 @@ router.patch('/:id/status',
   deviceController.updateDeviceStatus
 );
 
-router.post('/:id/lock',
+router.post(
+  '/:id/lock',
   authenticateToken,
   validateSignedDeviceCommand,
   body('reason').optional().isString(),
@@ -40,7 +47,8 @@ router.post('/:id/lock',
   deviceController.lockDevice
 );
 
-router.post('/:id/unlock',
+router.post(
+  '/:id/unlock',
   authenticateToken,
   validateSignedDeviceCommand,
   body('reason').optional().isString(),

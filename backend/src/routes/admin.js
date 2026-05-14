@@ -1,36 +1,35 @@
 const express = require('express');
+
 const router = express.Router();
+const asyncHandler = require('express-async-handler');
 const { authenticateToken } = require('../middleware/auth');
 const { requireRole } = require('../middleware/rbac');
-const asyncHandler = require('express-async-handler');
 const db = require('../config/database');
 
 const getAllUsers = asyncHandler(async (req, res) => {
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 50;
+  const page = parseInt(req.query.page, 10) || 1;
+  const limit = parseInt(req.query.limit, 10) || 50;
   const offset = (page - 1) * limit;
-  
+
   const result = await db.query(
     `SELECT id, email, name, phone, role, status, created_at, last_login
      FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
     [limit, offset]
   );
-  
+
   const countResult = await db.query('SELECT COUNT(*) FROM users');
-  
+
   res.json({
     users: result.rows,
-    total: parseInt(countResult.rows[0].count),
+    total: parseInt(countResult.rows[0].count, 10),
     page,
     limit,
-    pages: Math.ceil(parseInt(countResult.rows[0].count) / limit)
+    pages: Math.ceil(parseInt(countResult.rows[0].count, 10) / limit)
   });
 });
 
 const getAllDealers = asyncHandler(async (req, res) => {
-  const result = await db.query(
-    'SELECT * FROM dealers ORDER BY created_at DESC'
-  );
+  const result = await db.query('SELECT * FROM dealers ORDER BY created_at DESC');
   res.json(result.rows);
 });
 
@@ -58,20 +57,20 @@ const getAllPayments = asyncHandler(async (req, res) => {
 
 const updateUserStatus = asyncHandler(async (req, res) => {
   const { status } = req.body;
-  
+
   if (!['active', 'suspended', 'disabled'].includes(status)) {
     return res.status(400).json({ error: 'Invalid status' });
   }
-  
+
   const result = await db.query(
     'UPDATE users SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
     [status, req.params.userId]
   );
-  
+
   if (result.rows.length === 0) {
     return res.status(404).json({ error: 'User not found' });
   }
-  
+
   res.json(result.rows[0]);
 });
 
@@ -86,7 +85,7 @@ const getDashboardStats = asyncHandler(async (req, res) => {
       (SELECT COUNT(*) FROM payments WHERE status = 'confirmed' AND created_at > NOW() - INTERVAL '30 days') as monthly_payments,
       (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = 'confirmed' AND created_at > NOW() - INTERVAL '30 days') as monthly_revenue
   `);
-  
+
   res.json(stats.rows[0]);
 });
 

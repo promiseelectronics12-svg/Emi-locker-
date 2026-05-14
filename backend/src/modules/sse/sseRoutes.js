@@ -1,4 +1,5 @@
 const express = require('express');
+
 const router = express.Router();
 const { authenticateToken } = require('../../middleware/auth');
 const sseService = require('./sseService');
@@ -22,7 +23,7 @@ const HEARTBEAT_INTERVAL_MS = 25000; // 25s — keeps connection alive through p
  */
 router.get('/', authenticateToken, async (req, res) => {
   const userId = String(req.user.id);
-  const role   = req.user.role;
+  const { role } = req.user;
 
   // For dealers, look up their dealers.id so pushToDealer can find them
   let dealerId = null;
@@ -30,27 +31,33 @@ router.get('/', authenticateToken, async (req, res) => {
     try {
       const r = await db.query('SELECT id FROM dealers WHERE user_id = $1 LIMIT 1', [userId]);
       if (r.rows.length) dealerId = String(r.rows[0].id);
-    } catch (_) {}
+    } catch (e) {
+      logger.warn('SSE: failed to resolve dealer ID', { userId, error: e.message });
+    }
   }
 
   // SSE required headers
-  res.setHeader('Content-Type',  'text/event-stream');
+  res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection',    'keep-alive');
+  res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no'); // disable Nginx buffering
   res.flushHeaders();
 
   // Send initial connected event so client knows stream is live
-  res.write(`event: connected\ndata: ${JSON.stringify({
-    userId,
-    role,
-    serverTime: new Date().toISOString(),
-    message: 'Real-time stream connected',
-  })}\n\n`);
+  res.write(
+    `event: connected\ndata: ${JSON.stringify({
+      userId,
+      role,
+      serverTime: new Date().toISOString(),
+      message: 'Real-time stream connected'
+    })}\n\n`
+  );
 
   sseService.addClient(userId, role, res, dealerId);
 
-  logger.info(`SSE client connected: userId=${userId} role=${role} total=${sseService.clientCount()}`);
+  logger.info(
+    `SSE client connected: userId=${userId} role=${role} total=${sseService.clientCount()}`
+  );
 
   // Heartbeat — prevents idle timeout on proxies and mobile networks
   const heartbeat = setInterval(() => {

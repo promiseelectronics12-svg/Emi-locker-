@@ -66,7 +66,7 @@ class LocationController {
   async getLocationHistory(req, res) {
     try {
       const { deviceId } = req.params;
-      const limit = parseInt(req.query.limit) || 10;
+      const limit = parseInt(req.query.limit, 10) || 10;
 
       const history = await locationService.getLocationHistory(deviceId, limit);
 
@@ -86,18 +86,23 @@ class LocationController {
   async setGeofence(req, res) {
     try {
       const { deviceId } = req.params;
-      const { type, name, center_latitude, center_longitude, radius_meters, coordinates, enabled } = req.body;
+      const { type, name, center_latitude, center_longitude, radius_meters, coordinates, enabled } =
+        req.body;
       const userId = req.user.id;
 
-      const result = await locationService.setGeofence(deviceId, {
-        type,
-        name,
-        center_latitude,
-        center_longitude,
-        radius_meters,
-        coordinates,
-        enabled: enabled !== false
-      }, userId);
+      const result = await locationService.setGeofence(
+        deviceId,
+        {
+          type,
+          name,
+          center_latitude,
+          center_longitude,
+          radius_meters,
+          coordinates,
+          enabled: enabled !== false
+        },
+        userId
+      );
 
       res.json({
         success: true,

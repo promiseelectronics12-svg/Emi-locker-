@@ -1,5 +1,6 @@
 const db = require('../../config/database');
-const pool = db.pool;
+
+const { pool } = db;
 const logger = require('../../utils/logger');
 const redis = require('../../config/redis');
 const crypto = require('crypto');
@@ -10,39 +11,58 @@ class AdminDashboardService {
     try {
       const cached = await redis.get(cacheKey);
       if (cached) return JSON.parse(cached);
-    } catch (_) {}
+    } catch (e) {
+      logger.warn('Redis cache read failed for dashboard stats', { error: e.message });
+    }
 
     const client = await pool.connect();
     try {
       const [
-        totalDevices, lockedCount, decouplingPending, totalUsers,
-        monthlyRevenue, activeAlerts, recentEvents, activeResellers, pendingResellers
+        totalDevices,
+        lockedCount,
+        decouplingPending,
+        totalUsers,
+        monthlyRevenue,
+        activeAlerts,
+        recentEvents,
+        activeResellers,
+        pendingResellers
       ] = await Promise.all([
         client.query("SELECT COUNT(*) FROM devices WHERE status != 'decoupled'"),
         client.query("SELECT COUNT(*) FROM devices WHERE status = 'locked'"),
         client.query("SELECT COUNT(*) FROM devices WHERE status = 'pending_decouple'"),
         client.query('SELECT COUNT(*) FROM users'),
-        client.query(`SELECT COALESCE(SUM(amount), 0) as revenue FROM emi_payments WHERE recorded_at > NOW() - INTERVAL '30 days'`),
-        client.query("SELECT COUNT(*) FROM security_events WHERE created_at > NOW() - INTERVAL '7 days'"),
-        client.query("SELECT id, event_type as type, severity, created_at as timestamp FROM security_events ORDER BY created_at DESC LIMIT 5"),
+        client.query(
+          `SELECT COALESCE(SUM(amount), 0) as revenue FROM emi_payments WHERE recorded_at > NOW() - INTERVAL '30 days'`
+        ),
+        client.query(
+          "SELECT COUNT(*) FROM security_events WHERE created_at > NOW() - INTERVAL '7 days'"
+        ),
+        client.query(
+          'SELECT id, event_type as type, severity, created_at as timestamp FROM security_events ORDER BY created_at DESC LIMIT 5'
+        ),
         client.query("SELECT COUNT(*) FROM resellers WHERE status = 'active'"),
-        client.query("SELECT COUNT(*) FROM resellers WHERE status = 'pending'"),
+        client.query("SELECT COUNT(*) FROM resellers WHERE status = 'pending'")
       ]);
 
       const stats = {
-        totalDevices: parseInt(totalDevices.rows[0].count),
+        totalDevices: parseInt(totalDevices.rows[0].count, 10),
         overdueCount: 0,
-        lockedCount: parseInt(lockedCount.rows[0].count),
-        decouplingPending: parseInt(decouplingPending.rows[0].count),
-        activeResellers: parseInt(activeResellers.rows[0].count),
-        pendingResellers: parseInt(pendingResellers.rows[0].count),
+        lockedCount: parseInt(lockedCount.rows[0].count, 10),
+        decouplingPending: parseInt(decouplingPending.rows[0].count, 10),
+        activeResellers: parseInt(activeResellers.rows[0].count, 10),
+        pendingResellers: parseInt(pendingResellers.rows[0].count, 10),
         monthlyRevenue: parseFloat(monthlyRevenue.rows[0].revenue),
-        totalUsers: parseInt(totalUsers.rows[0].count),
-        activeAlerts: parseInt(activeAlerts.rows[0].count),
+        totalUsers: parseInt(totalUsers.rows[0].count, 10),
+        activeAlerts: parseInt(activeAlerts.rows[0].count, 10),
         recentEvents: recentEvents.rows
       };
 
-      try { await redis.setex(cacheKey, 300, JSON.stringify(stats)); } catch (_) {}
+      try {
+        await redis.setex(cacheKey, 300, JSON.stringify(stats));
+      } catch (e) {
+        logger.warn('Redis cache write failed for dashboard stats', { error: e.message });
+      }
       return stats;
     } finally {
       client.release();
@@ -110,7 +130,7 @@ class AdminDashboardService {
       const countResult = await client.query(countQuery, countParams);
 
       return {
-        resellers: result.rows.map(row => ({
+        resellers: result.rows.map((row) => ({
           ...row,
           monthlyQuota: Number(row.monthly_key_quota ?? row.monthly_quota ?? 0),
           usedQuota: Number(row.used_keys ?? 0),
@@ -118,7 +138,7 @@ class AdminDashboardService {
           dealerCount: row.dealer_count,
           totalRevenue: row.total_revenue
         })),
-        total: parseInt(countResult.rows[0].count)
+        total: parseInt(countResult.rows[0].count, 10)
       };
     } finally {
       client.release();
@@ -197,7 +217,12 @@ class AdminDashboardService {
       await client.query(
         `INSERT INTO audit_log (actor, action, target_type, target_id, metadata, ip_address, created_at)
          VALUES ($1, 'RESELLER_SUSPENDED', 'reseller', $2, $3, $4, NOW())`,
-        [adminId, resellerId, JSON.stringify({ resellerId, reason, suspendedAt: new Date() }), ipAddress]
+        [
+          adminId,
+          resellerId,
+          JSON.stringify({ resellerId, reason, suspendedAt: new Date() }),
+          ipAddress
+        ]
       );
 
       await client.query('COMMIT');
@@ -236,7 +261,12 @@ class AdminDashboardService {
       await client.query(
         `INSERT INTO audit_log (actor, action, target_type, target_id, metadata, ip_address, created_at)
          VALUES ($1, 'RESELLER_QUOTA_UPDATED', 'reseller', $2, $3, $4, NOW())`,
-        [adminId, resellerId, JSON.stringify({ resellerId, monthlyQuota, updatedAt: new Date() }), ipAddress]
+        [
+          adminId,
+          resellerId,
+          JSON.stringify({ resellerId, monthlyQuota, updatedAt: new Date() }),
+          ipAddress
+        ]
       );
 
       await client.query('COMMIT');
@@ -249,6 +279,7 @@ class AdminDashboardService {
       client.release();
     }
   }
+
   async getDevices({ page = 1, limit = 20, status, dealerId } = {}) {
     const client = await pool.connect();
     try {
@@ -257,8 +288,14 @@ class AdminDashboardService {
       const params = [];
       let idx = 1;
 
-      if (status) { conditions.push(`d.status = $${idx++}`); params.push(status); }
-      if (dealerId) { conditions.push(`d.dealer_id = $${idx++}`); params.push(dealerId); }
+      if (status) {
+        conditions.push(`d.status = $${idx++}`);
+        params.push(status);
+      }
+      if (dealerId) {
+        conditions.push(`d.dealer_id = $${idx++}`);
+        params.push(dealerId);
+      }
 
       const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -271,9 +308,7 @@ class AdminDashboardService {
         [...params, limit, offset]
       );
 
-      const countResult = await client.query(
-        `SELECT COUNT(*) FROM devices d ${where}`, params
-      );
+      const countResult = await client.query(`SELECT COUNT(*) FROM devices d ${where}`, params);
       const total = parseInt(countResult.rows[0].count, 10);
 
       return {
@@ -299,8 +334,14 @@ class AdminDashboardService {
       const params = [];
       let p = 0;
 
-      if (filters.status) { query += ` AND d.status = $${++p}`; params.push(filters.status); }
-      if (filters.resellerId) { query += ` AND d.reseller_id = $${++p}`; params.push(filters.resellerId); }
+      if (filters.status) {
+        query += ` AND d.status = $${++p}`;
+        params.push(filters.status);
+      }
+      if (filters.resellerId) {
+        query += ` AND d.reseller_id = $${++p}`;
+        params.push(filters.resellerId);
+      }
       if (filters.search) {
         query += ` AND (d.name ILIKE $${++p} OR d.phone ILIKE $${p} OR d.email ILIKE $${p})`;
         params.push(`%${filters.search}%`);
@@ -308,8 +349,8 @@ class AdminDashboardService {
 
       query += ' ORDER BY d.created_at DESC';
 
-      const limit = Math.min(parseInt(filters.limit) || 50, 200);
-      const offset = parseInt(filters.offset) || 0;
+      const limit = Math.min(parseInt(filters.limit, 10) || 50, 200);
+      const offset = parseInt(filters.offset, 10) || 0;
       query += ` LIMIT $${++p} OFFSET $${++p}`;
       params.push(limit, offset);
 
@@ -318,12 +359,26 @@ class AdminDashboardService {
       let countQ = `SELECT COUNT(*) FROM dealers d WHERE 1=1`;
       const countP = [];
       let cp = 0;
-      if (filters.status) { countQ += ` AND d.status = $${++cp}`; countP.push(filters.status); }
-      if (filters.resellerId) { countQ += ` AND d.reseller_id = $${++cp}`; countP.push(filters.resellerId); }
-      if (filters.search) { countQ += ` AND (d.name ILIKE $${++cp} OR d.phone ILIKE $${cp} OR d.email ILIKE $${cp})`; countP.push(`%${filters.search}%`); }
+      if (filters.status) {
+        countQ += ` AND d.status = $${++cp}`;
+        countP.push(filters.status);
+      }
+      if (filters.resellerId) {
+        countQ += ` AND d.reseller_id = $${++cp}`;
+        countP.push(filters.resellerId);
+      }
+      if (filters.search) {
+        countQ += ` AND (d.name ILIKE $${++cp} OR d.phone ILIKE $${cp} OR d.email ILIKE $${cp})`;
+        countP.push(`%${filters.search}%`);
+      }
 
       const countResult = await client.query(countQ, countP);
-      return { dealers: result.rows, total: parseInt(countResult.rows[0].count), limit, offset };
+      return {
+        dealers: result.rows,
+        total: parseInt(countResult.rows[0].count, 10),
+        limit,
+        offset
+      };
     } finally {
       client.release();
     }
@@ -337,7 +392,10 @@ class AdminDashboardService {
         `UPDATE dealers SET status = 'suspended', updated_at = NOW() WHERE id = $1 RETURNING *`,
         [dealerId]
       );
-      if (!result.rows.length) { await client.query('ROLLBACK'); return { success: false, error: 'Dealer not found' }; }
+      if (!result.rows.length) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'Dealer not found' };
+      }
       await client.query(
         `INSERT INTO audit_log (actor, action, target_type, target_id, metadata, ip_address, created_at)
          VALUES ($1, 'DEALER_SUSPENDED', 'dealer', $2, $3, $4, NOW())`,
@@ -346,7 +404,8 @@ class AdminDashboardService {
       await client.query('COMMIT');
       return { success: true, dealer: result.rows[0] };
     } catch (err) {
-      await client.query('ROLLBACK'); throw err;
+      await client.query('ROLLBACK');
+      throw err;
     } finally {
       client.release();
     }
@@ -360,7 +419,10 @@ class AdminDashboardService {
         `UPDATE dealers SET status = 'active', updated_at = NOW() WHERE id = $1 RETURNING *`,
         [dealerId]
       );
-      if (!result.rows.length) { await client.query('ROLLBACK'); return { success: false, error: 'Dealer not found' }; }
+      if (!result.rows.length) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'Dealer not found' };
+      }
       await client.query(
         `INSERT INTO audit_log (actor, action, target_type, target_id, metadata, ip_address, created_at)
          VALUES ($1, 'DEALER_ACTIVATED', 'dealer', $2, $3, $4, NOW())`,
@@ -369,7 +431,8 @@ class AdminDashboardService {
       await client.query('COMMIT');
       return { success: true, dealer: result.rows[0] };
     } catch (err) {
-      await client.query('ROLLBACK'); throw err;
+      await client.query('ROLLBACK');
+      throw err;
     } finally {
       client.release();
     }
@@ -398,7 +461,7 @@ class AdminDashboardService {
         client.query(
           `SELECT id, name, phone, email, status FROM resellers WHERE name ILIKE $1 OR phone ILIKE $1 OR email ILIKE $1 LIMIT 10`,
           [term]
-        ),
+        )
       ]);
       return { devices: devices.rows, dealers: dealers.rows, resellers: resellers.rows };
     } finally {
@@ -411,7 +474,11 @@ class AdminDashboardService {
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     const key = `reseller_invite:${tokenHash}`;
 
-    await redis.setex(key, 60 * 60 * 48, JSON.stringify({ email, name, invitedBy: adminId, createdAt: new Date().toISOString() }));
+    await redis.setex(
+      key,
+      60 * 60 * 48,
+      JSON.stringify({ email, name, invitedBy: adminId, createdAt: new Date().toISOString() })
+    );
 
     const emailService = require('../notifications/emailService');
     const inviteUrl = `${process.env.ADMIN_PANEL_URL || 'http://localhost:5173'}/reseller-onboard?token=${token}`;
@@ -464,7 +531,8 @@ class AdminDashboardService {
       await redis.del(key);
       return { success: true, reseller: user };
     } catch (err) {
-      await client.query('ROLLBACK'); throw err;
+      await client.query('ROLLBACK');
+      throw err;
     } finally {
       client.release();
     }
@@ -488,20 +556,26 @@ class AdminDashboardService {
       `;
       const params = [];
       let p = 0;
-      if (filters.tier) { query += ` AND ak.tier = $${++p}`; params.push(filters.tier); }
-      if (filters.resellerId) { query += ` AND ak.reseller_id = $${++p}`; params.push(filters.resellerId); }
+      if (filters.tier) {
+        query += ` AND ak.tier = $${++p}`;
+        params.push(filters.tier);
+      }
+      if (filters.resellerId) {
+        query += ` AND ak.reseller_id = $${++p}`;
+        params.push(filters.resellerId);
+      }
       query += ' GROUP BY ak.tier, ak.reseller_id, r.name ORDER BY ak.tier, r.name';
 
       const result = await client.query(query, params);
-      return result.rows.map(row => ({
+      return result.rows.map((row) => ({
         tier: row.tier,
         resellerId: row.reseller_id,
         resellerName: row.reseller_name,
-        available: parseInt(row.available),
-        assigned: parseInt(row.assigned),
-        activated: parseInt(row.activated),
-        revoked: parseInt(row.revoked),
-        total: parseInt(row.total),
+        available: parseInt(row.available, 10),
+        assigned: parseInt(row.assigned, 10),
+        activated: parseInt(row.activated, 10),
+        revoked: parseInt(row.revoked, 10),
+        total: parseInt(row.total, 10)
       }));
     } finally {
       client.release();
@@ -525,7 +599,8 @@ class AdminDashboardService {
   }
 
   async getResellersByDistrict(district) {
-    const result = await pool.query(`
+    const result = await pool.query(
+      `
       SELECT
         r.id, r.name, r.status, r.district,
         COUNT(DISTINCT d.id)::int AS dealer_count,
@@ -536,7 +611,9 @@ class AdminDashboardService {
       WHERE r.district = $1
       GROUP BY r.id
       ORDER BY keys_distributed DESC
-    `, [district]);
+    `,
+      [district]
+    );
     return result.rows;
   }
 
@@ -545,7 +622,8 @@ class AdminDashboardService {
     try {
       const [resellerResult, monthlyResult, dealerResult] = await Promise.all([
         client.query('SELECT * FROM resellers WHERE id = $1', [resellerId]),
-        client.query(`
+        client.query(
+          `
           SELECT
             TO_CHAR(DATE_TRUNC('month', ak.created_at), 'YYYY-MM') AS month,
             COUNT(*) FILTER (WHERE ak.status IN ('activated','assigned'))::int AS keys_distributed
@@ -554,8 +632,11 @@ class AdminDashboardService {
             AND ak.created_at >= NOW() - INTERVAL '12 months'
           GROUP BY month
           ORDER BY month ASC
-        `, [resellerId]),
-        client.query(`
+        `,
+          [resellerId]
+        ),
+        client.query(
+          `
           SELECT
             d.id, d.name, d.phone,
             COUNT(ak.id) FILTER (WHERE ak.status = 'activated')::int AS keys_consumed,
@@ -566,7 +647,9 @@ class AdminDashboardService {
           WHERE d.reseller_id = $1
           GROUP BY d.id
           ORDER BY keys_consumed DESC
-        `, [resellerId]),
+        `,
+          [resellerId]
+        )
       ]);
 
       if (resellerResult.rows.length === 0) return null;
@@ -576,7 +659,7 @@ class AdminDashboardService {
         reseller: resellerResult.rows[0],
         monthly: allMonths.slice(-6),
         yearly: allMonths,
-        dealers: dealerResult.rows,
+        dealers: dealerResult.rows
       };
     } finally {
       client.release();
@@ -605,7 +688,12 @@ class AdminDashboardService {
       await client.query(
         `INSERT INTO audit_log (actor, action, target_type, target_id, metadata, ip_address, created_at)
          VALUES ($1, 'USER_SOFT_DELETED', 'user', $2, $3, $4, NOW())`,
-        [deletedBy, userId, JSON.stringify({ targetUserId: userId, email: result.rows[0].email }), ipAddress]
+        [
+          deletedBy,
+          userId,
+          JSON.stringify({ targetUserId: userId, email: result.rows[0].email }),
+          ipAddress
+        ]
       );
 
       await client.query('COMMIT');

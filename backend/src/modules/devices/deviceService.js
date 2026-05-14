@@ -19,11 +19,15 @@ function parseEnvList(value) {
 }
 
 function getFrpAdminOwnedAccounts(device, extraAccount = null) {
-  return Array.from(new Set([
-    extraAccount,
-    device?.managed_google_account,
-    ...parseEnvList(process.env.FRP_ADMIN_OWNED_ACCOUNTS)
-  ].filter(Boolean)));
+  return Array.from(
+    new Set(
+      [
+        extraAccount,
+        device?.managed_google_account,
+        ...parseEnvList(process.env.FRP_ADMIN_OWNED_ACCOUNTS)
+      ].filter(Boolean)
+    )
+  );
 }
 
 class DeviceService {
@@ -31,9 +35,14 @@ class DeviceService {
     this.enterpriseId = process.env.AMAPI_ENTERPRISE_ID;
   }
 
-  async logAuditEvent({ actor, action, deviceId, metadata = {}, ipAddress = null, result = 'success' }) {
-    const db = require('../../config/database');
-
+  async logAuditEvent({
+    actor,
+    action,
+    deviceId,
+    metadata = {},
+    ipAddress = null,
+    result = 'success'
+  }) {
     try {
       await db.query(
         `INSERT INTO audit_log (actor, action, device_id, metadata, ip_address, result, created_at)
@@ -73,7 +82,9 @@ class DeviceService {
       return true;
     }
 
-    const hashedProvided = crypto.pbkdf2Sync(providedCode, unlock_code_salt, 10000, 32, 'sha256').toString('hex');
+    const hashedProvided = crypto
+      .pbkdf2Sync(providedCode, unlock_code_salt, 10000, 32, 'sha256')
+      .toString('hex');
 
     try {
       return crypto.timingSafeEqual(
@@ -94,7 +105,17 @@ class DeviceService {
     logger.info(`Unlock code cleared for device: ${deviceId}`);
   }
 
-  async enrollDevice({ enrollmentToken, imei, serialNumber, socId, dealerId, userId, deviceName, model, brand }) {
+  async enrollDevice({
+    enrollmentToken,
+    imei,
+    serialNumber,
+    socId,
+    dealerId,
+    userId,
+    deviceName,
+    model,
+    brand
+  }) {
     await amapiService.initialize();
 
     const validToken = await this.validateEnrollmentToken(enrollmentToken, dealerId);
@@ -121,7 +142,9 @@ class DeviceService {
         [dealerId]
       );
       dealerPhone = dealerRow.rows[0]?.phone || null;
-    } catch (_) {}
+    } catch (e) {
+      logger.warn('Failed to fetch dealer phone during enrollment', { dealerId, error: e.message });
+    }
 
     const deviceUuid = uuidv4();
     const managedAccountEmail = `device-${deviceUuid.split('-')[0]}@${process.env.AMAPI_MANAGED_DOMAIN || 'emilocker-mdm.com'}`;
@@ -166,7 +189,7 @@ class DeviceService {
         model,
         brand,
         enrollmentToken,
-        dealerPhone,
+        dealerPhone
       ]
     );
 
@@ -260,7 +283,9 @@ class DeviceService {
 
     const [accountEmail] = getFrpAdminOwnedAccounts(device, managedAccountEmail);
     if (!isFrpEnabled() || !accountEmail) {
-      logger.warn(`FRP binding skipped for device ${deviceId}: FRP disabled or no admin-owned account configured`);
+      logger.warn(
+        `FRP binding skipped for device ${deviceId}: FRP disabled or no admin-owned account configured`
+      );
       return;
     }
 
@@ -306,11 +331,11 @@ class DeviceService {
       throw error;
     }
   }
+
   async markTokenAsUsed(token) {
-    await db.query(
-      `UPDATE enrollment_tokens SET used = true, used_at = NOW() WHERE token = $1`,
-      [token]
-    );
+    await db.query(`UPDATE enrollment_tokens SET used = true, used_at = NOW() WHERE token = $1`, [
+      token
+    ]);
   }
 
   async pushInitialPolicies(deviceId) {
@@ -384,11 +409,21 @@ class DeviceService {
 
     try {
       for (const [setting, value] of Object.entries(policies.globalSettings)) {
-        await amapiService.setGlobalSetting(this.enterpriseId, device.amapi_device_name, setting, value);
+        await amapiService.setGlobalSetting(
+          this.enterpriseId,
+          device.amapi_device_name,
+          setting,
+          value
+        );
       }
 
       for (const [setting, value] of Object.entries(policies.secureSettings)) {
-        await amapiService.setSecureSetting(this.enterpriseId, device.amapi_device_name, setting, value);
+        await amapiService.setSecureSetting(
+          this.enterpriseId,
+          device.amapi_device_name,
+          setting,
+          value
+        );
       }
 
       const policyPayload = {
@@ -402,7 +437,11 @@ class DeviceService {
         }
       };
 
-      await amapiService.setDevicePolicy(this.enterpriseId, device.amapi_device_name, policyPayload);
+      await amapiService.setDevicePolicy(
+        this.enterpriseId,
+        device.amapi_device_name,
+        policyPayload
+      );
 
       await firebaseService.writePolicyStatus(deviceId, {
         policiesApplied: {
@@ -433,7 +472,7 @@ class DeviceService {
       return {
         success: true,
         deviceId,
-        policies: policies
+        policies
       };
     } catch (error) {
       logger.error(`Failed to apply Device Owner policies to device ${deviceId}:`, error);
@@ -500,25 +539,31 @@ class DeviceService {
       enrollmentToken: device.enrollment_token,
       enrolledAt: device.enrolled_at,
       policyLastApplied: device.policy_last_applied,
-      owner: device.owner_id ? {
-        id: device.owner_id,
-        name: device.owner_name,
-        email: device.owner_email,
-        phone: device.owner_phone
-      } : null,
-      dealer: device.dealer_id ? {
-        id: device.dealer_id,
-        name: device.dealer_name,
-        email: device.dealer_email
-      } : null,
-      hardwareBinding: hardwareBinding,
+      owner: device.owner_id
+        ? {
+            id: device.owner_id,
+            name: device.owner_name,
+            email: device.owner_email,
+            phone: device.owner_phone
+          }
+        : null,
+      dealer: device.dealer_id
+        ? {
+            id: device.dealer_id,
+            name: device.dealer_name,
+            email: device.dealer_email
+          }
+        : null,
+      hardwareBinding,
       realtimeStatus: firebaseStatus,
-      amapiStatus: amapiDevice ? {
-        state: amapiDevice.state,
-        managementMode: amapiDevice.managementMode,
-        lastStatusReportTime: amapiDevice.lastStatusReportTime,
-        enrollmentTime: amapiDevice.enrollmentTime
-      } : null
+      amapiStatus: amapiDevice
+        ? {
+            state: amapiDevice.state,
+            managementMode: amapiDevice.managementMode,
+            lastStatusReportTime: amapiDevice.lastStatusReportTime,
+            enrollmentTime: amapiDevice.enrollmentTime
+          }
+        : null
     };
   }
 
@@ -580,7 +625,7 @@ class DeviceService {
       );
       if (emiResult.rows.length) {
         const row = emiResult.rows[0];
-        emiInstallmentsPaid  = Number(row.paid)  || 0;
+        emiInstallmentsPaid = Number(row.paid) || 0;
         emiInstallmentsTotal = Number(row.total) || 0;
         emiFullyPaid = emiInstallmentsTotal > 0 && emiInstallmentsPaid >= emiInstallmentsTotal;
       }
@@ -597,7 +642,7 @@ class DeviceService {
       if (graceResult.rows.length) {
         activeGraceUnlock = {
           grace_hours: graceResult.rows[0].grace_hours,
-          expires_at:  graceResult.rows[0].expires_at,
+          expires_at: graceResult.rows[0].expires_at
         };
       }
     } catch (_) {
@@ -615,16 +660,24 @@ class DeviceService {
       dealer_phone: device.dealer_phone || null,
       grace_expires_at: device.grace_expires_at || null,
       emi: {
-        fully_paid:          emiFullyPaid,
-        installments_paid:   emiInstallmentsPaid,
-        installments_total:  emiInstallmentsTotal,
+        fully_paid: emiFullyPaid,
+        installments_paid: emiInstallmentsPaid,
+        installments_total: emiInstallmentsTotal
       },
-      active_grace_unlock: activeGraceUnlock,
+      active_grace_unlock: activeGraceUnlock
     };
   }
 
   async updateDeviceStatus(deviceId, status, metadata = {}) {
-    const validStatuses = ['active', 'locked', 'unlocked', 'stolen', 'disabled', 'enrolled', 'decoupled'];
+    const validStatuses = [
+      'active',
+      'locked',
+      'unlocked',
+      'stolen',
+      'disabled',
+      'enrolled',
+      'decoupled'
+    ];
     if (!validStatuses.includes(status)) {
       throw new Error(`Invalid status: ${status}`);
     }

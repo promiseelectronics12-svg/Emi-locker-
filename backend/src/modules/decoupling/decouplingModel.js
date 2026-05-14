@@ -1,5 +1,5 @@
-const db = require('../../config/database');
 const { v4: uuidv4 } = require('uuid');
+const db = require('../../config/database');
 const logger = require('../../utils/logger');
 
 const DECOUPLING_STATES = {
@@ -10,7 +10,7 @@ const DECOUPLING_STATES = {
   FRAUD_CONFIRMED: 'FRAUD_CONFIRMED',
   FRAUD_REJECTED: 'FRAUD_REJECTED',
   PENDING_ADMIN_DECOUPLE: 'PENDING_ADMIN_DECOUPLE',
-  DEVICE_DECOUPLED: 'DEVICE_DECOUPLED',
+  DEVICE_DECOUPLED: 'DEVICE_DECOUPLED'
 };
 
 // ============================================================
@@ -19,28 +19,24 @@ const DECOUPLING_STATES = {
 // Dealer's only role during DEALER_NOTIFIED is to FLAG fraud.
 // ============================================================
 const VALID_TRANSITIONS = {
-  [DECOUPLING_STATES.EMI_ACTIVE]: [
-    DECOUPLING_STATES.FINAL_PAYMENT_RECEIVED,
-  ],
-  [DECOUPLING_STATES.FINAL_PAYMENT_RECEIVED]: [
-    DECOUPLING_STATES.DEALER_NOTIFIED,
-  ],
+  [DECOUPLING_STATES.EMI_ACTIVE]: [DECOUPLING_STATES.FINAL_PAYMENT_RECEIVED],
+  [DECOUPLING_STATES.FINAL_PAYMENT_RECEIVED]: [DECOUPLING_STATES.DEALER_NOTIFIED],
   [DECOUPLING_STATES.DEALER_NOTIFIED]: [
-    DECOUPLING_STATES.FRAUD_FLAGGED,         // dealer raises fraud flag
-    DECOUPLING_STATES.PENDING_ADMIN_DECOUPLE, // 5-day window expires, no fraud
+    DECOUPLING_STATES.FRAUD_FLAGGED, // dealer raises fraud flag
+    DECOUPLING_STATES.PENDING_ADMIN_DECOUPLE // 5-day window expires, no fraud
   ],
   [DECOUPLING_STATES.FRAUD_FLAGGED]: [
-    DECOUPLING_STATES.FRAUD_CONFIRMED,        // admin confirms fraud
-    DECOUPLING_STATES.FRAUD_REJECTED,         // admin rejects fraud → continues
+    DECOUPLING_STATES.FRAUD_CONFIRMED, // admin confirms fraud
+    DECOUPLING_STATES.FRAUD_REJECTED // admin rejects fraud → continues
   ],
   [DECOUPLING_STATES.FRAUD_REJECTED]: [
-    DECOUPLING_STATES.PENDING_ADMIN_DECOUPLE, // fraud rejected, proceed to admin
+    DECOUPLING_STATES.PENDING_ADMIN_DECOUPLE // fraud rejected, proceed to admin
   ],
-  [DECOUPLING_STATES.FRAUD_CONFIRMED]: [],    // terminal — decoupling blocked
+  [DECOUPLING_STATES.FRAUD_CONFIRMED]: [], // terminal — decoupling blocked
   [DECOUPLING_STATES.PENDING_ADMIN_DECOUPLE]: [
-    DECOUPLING_STATES.DEVICE_DECOUPLED,       // admin executes decoupling
+    DECOUPLING_STATES.DEVICE_DECOUPLED // admin executes decoupling
   ],
-  [DECOUPLING_STATES.DEVICE_DECOUPLED]: [],   // terminal — immutable
+  [DECOUPLING_STATES.DEVICE_DECOUPLED]: [] // terminal — immutable
 };
 
 async function beginTransaction() {
@@ -116,16 +112,35 @@ class DecouplingModel {
 
   async updateState(deviceId, newState, currentState, additionalData = {}, client = null) {
     const allowedColumns = [
-      'dealer_notified_at', 'fraud_window_started_at', 'fraud_window_ends_at',
-      'fraud_flag', 'fraud_flagged_by', 'fraud_flagged_at', 'fraud_reason', 'fraud_evidence_url',
-      'fraud_confirmed_by', 'fraud_confirmed_at', 'fraud_rejected_by', 'fraud_rejected_at',
-      'rtoc_code_hash', 'rtoc_generated_at', 'rtoc_generated_by',
-      'admin_action_by', 'admin_action_at', 'admin_2fa_verified',
-      'fcm_sent_at', 'fcm_delivered', 'fcm_failure_reason',
-      'padt_token_id', 'padt_issued_at', 'padt_expires_at',
-      'amapi_deleted_at', 'amapi_delete_success',
-      'decoupled_at', 'decoupled_by',
-      'auto_notify_admin_at',
+      'dealer_notified_at',
+      'fraud_window_started_at',
+      'fraud_window_ends_at',
+      'fraud_flag',
+      'fraud_flagged_by',
+      'fraud_flagged_at',
+      'fraud_reason',
+      'fraud_evidence_url',
+      'fraud_confirmed_by',
+      'fraud_confirmed_at',
+      'fraud_rejected_by',
+      'fraud_rejected_at',
+      'rtoc_code_hash',
+      'rtoc_generated_at',
+      'rtoc_generated_by',
+      'admin_action_by',
+      'admin_action_at',
+      'admin_2fa_verified',
+      'fcm_sent_at',
+      'fcm_delivered',
+      'fcm_failure_reason',
+      'padt_token_id',
+      'padt_issued_at',
+      'padt_expires_at',
+      'amapi_deleted_at',
+      'amapi_delete_success',
+      'decoupled_at',
+      'decoupled_by',
+      'auto_notify_admin_at'
     ];
 
     const setClauses = ['state = $1', 'updated_at = NOW()'];
@@ -374,13 +389,36 @@ class DecouplingModel {
     return result.rows;
   }
 
-  async createAuditLog(decouplingId, deviceId, fromState, toState, actorId, actorType, action, details = {}, ipAddress, userAgent) {
+  async createAuditLog(
+    decouplingId,
+    deviceId,
+    fromState,
+    toState,
+    actorId,
+    actorType,
+    action,
+    details = {},
+    ipAddress,
+    userAgent
+  ) {
     const id = uuidv4();
     await db.query(
       `INSERT INTO decoupling_audit_log
        (id, decoupling_id, device_id, from_state, to_state, actor_id, actor_type, action, details_json, ip_address, user_agent, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
-      [id, decouplingId, deviceId, fromState, toState, actorId, actorType, action, JSON.stringify(details), ipAddress, userAgent]
+      [
+        id,
+        decouplingId,
+        deviceId,
+        fromState,
+        toState,
+        actorId,
+        actorType,
+        action,
+        JSON.stringify(details),
+        ipAddress,
+        userAgent
+      ]
     );
     return id;
   }

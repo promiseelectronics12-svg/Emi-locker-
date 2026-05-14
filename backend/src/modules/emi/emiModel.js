@@ -1,9 +1,18 @@
-const db = require('../../config/database');
 const { v4: uuidv4 } = require('uuid');
+const db = require('../../config/database');
 const logger = require('../../utils/logger');
 
 class EmiModel {
-  async createSchedule({ deviceId, totalAmount, downPayment, emiAmount, duration, startDate, graceDays = 7, dealerId }) {
+  async createSchedule({
+    deviceId,
+    totalAmount,
+    downPayment,
+    emiAmount,
+    duration,
+    startDate,
+    graceDays = 7,
+    dealerId
+  }) {
     const id = uuidv4();
 
     const result = await db.query(
@@ -20,7 +29,15 @@ class EmiModel {
       actorType: 'dealer',
       action: 'EMI_SCHEDULE_CREATED',
       deviceId,
-      metadata: { scheduleId: id, totalAmount, downPayment, emiAmount, duration, startDate, graceDays }
+      metadata: {
+        scheduleId: id,
+        totalAmount,
+        downPayment,
+        emiAmount,
+        duration,
+        startDate,
+        graceDays
+      }
     });
 
     return result.rows[0];
@@ -95,7 +112,16 @@ class EmiModel {
     return schedule;
   }
 
-  async recordPayment({ deviceId, scheduleId, amount, method, txId, installmentNumber = null, note = null, recordedBy }) {
+  async recordPayment({
+    deviceId,
+    scheduleId,
+    amount,
+    method,
+    txId,
+    installmentNumber = null,
+    note = null,
+    recordedBy
+  }) {
     const id = uuidv4();
 
     const paymentResult = await db.query(
@@ -117,10 +143,9 @@ class EmiModel {
 
     const payment = verifyResult.rows[0];
 
-    const scheduleResult = await db.query(
-      `SELECT * FROM emi_schedules WHERE id = $1`,
-      [scheduleId]
-    );
+    const scheduleResult = await db.query(`SELECT * FROM emi_schedules WHERE id = $1`, [
+      scheduleId
+    ]);
     const schedule = scheduleResult.rows[0];
 
     const totalPaidResult = await db.query(
@@ -201,7 +226,8 @@ class EmiModel {
       dueDate.setHours(0, 0, 0, 0);
 
       const installmentNumber = i + 1;
-      const installmentExpected = parseFloat(schedule.down_payment) + (installmentNumber * parseFloat(schedule.emi_amount));
+      const installmentExpected =
+        parseFloat(schedule.down_payment) + installmentNumber * parseFloat(schedule.emi_amount);
 
       if (totalPaid < installmentExpected) {
         currentInstallment = installmentNumber;
@@ -252,7 +278,7 @@ class EmiModel {
       [deviceId]
     );
 
-    const recentGracePeriods = parseInt(gracePeriodCountResult.rows[0].count);
+    const recentGracePeriods = parseInt(gracePeriodCountResult.rows[0].count, 10);
 
     if (recentGracePeriods >= 2) {
       throw new Error('Maximum grace period requests (2 per month) exceeded');
@@ -331,7 +357,13 @@ class EmiModel {
   }
 
   async updateDecouplingState(deviceId, newState, additionalData = {}) {
-    const allowedColumns = ['fraud_flag', 'fraud_flagged_by', 'fraud_flagged_at', 'fraud_reason', 'dealer_notified_at'];
+    const allowedColumns = [
+      'fraud_flag',
+      'fraud_flagged_by',
+      'fraud_flagged_at',
+      'fraud_reason',
+      'dealer_notified_at'
+    ];
     const setClauses = ['state = $1', 'updated_at = NOW()'];
     const values = [newState];
     let paramIndex = 2;

@@ -11,6 +11,8 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@capsule-run/mcp-server": "^0.1.2",
+    "@capsule-run/sdk": "^0.8.10",
     "@paperclip-ui/cli": "^20.5.17",
     "graphify": "^1.0.0",
     "paperclip": "^20.5.0"

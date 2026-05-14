@@ -1,13 +1,16 @@
 const crypto = require('crypto');
 const db = require('../../config/database');
+const logger = require('../../utils/logger');
 
 const KEY_CHARSET = 'ABCDEFGHJKLMNPQRTUVWXYZ2346789';
 const KEY_SEGMENTS = 4;
 const SEGMENT_LENGTH = 4;
-const HMAC_SECRET = process.env.HMAC_SECRET;
+const { HMAC_SECRET } = process.env;
 
 if (!HMAC_SECRET) {
-  throw new Error('HMAC_SECRET environment variable must be set - key signatures cannot be securely generated without it');
+  throw new Error(
+    'HMAC_SECRET environment variable must be set - key signatures cannot be securely generated without it'
+  );
 }
 
 async function generateKeyString(client = db) {
@@ -26,11 +29,14 @@ async function generateKeyString(client = db) {
     }
     const keyString = segments.join('-');
     try {
-      const result = await client.query('SELECT id FROM activation_keys WHERE key_string = $1', [keyString]);
+      const result = await client.query('SELECT id FROM activation_keys WHERE key_string = $1', [
+        keyString
+      ]);
       if (result.rows.length === 0) {
         return keyString;
       }
     } catch (err) {
+      logger.warn('Key uniqueness check query failed', { error: err.message });
     }
     attempts++;
   }
@@ -63,7 +69,7 @@ function verifyKeySignature(keyString, dealerId, timestamp, nonce, signature) {
 function calculateEntropy() {
   const charsetSize = KEY_CHARSET.length;
   const totalChars = KEY_SEGMENTS * SEGMENT_LENGTH;
-  const combinations = Math.pow(charsetSize, totalChars);
+  const combinations = charsetSize ** totalChars;
   return Math.log2(combinations);
 }
 

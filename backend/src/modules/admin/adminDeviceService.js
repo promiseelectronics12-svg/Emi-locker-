@@ -62,7 +62,6 @@ class AdminDeviceService {
         params.push(`%${filters.search}%`);
       }
 
-
       query += ' ORDER BY d.created_at DESC';
 
       if (filters.limit) {
@@ -128,8 +127,8 @@ class AdminDeviceService {
       const countResult = await client.query(countQuery, countParams);
 
       return {
-        devices: result.rows.map(row => this.mapDevice(row)),
-        total: parseInt(countResult.rows[0].count),
+        devices: result.rows.map((row) => this.mapDevice(row)),
+        total: parseInt(countResult.rows[0].count, 10),
         filters
       };
     } finally {
@@ -162,10 +161,7 @@ class AdminDeviceService {
     try {
       await client.query('BEGIN');
 
-      const deviceResult = await client.query(
-        'SELECT * FROM devices WHERE id = $1',
-        [deviceId]
-      );
+      const deviceResult = await client.query('SELECT * FROM devices WHERE id = $1', [deviceId]);
 
       if (deviceResult.rows.length === 0) {
         await client.query('ROLLBACK');
@@ -215,7 +211,12 @@ class AdminDeviceService {
       await client.query(
         `INSERT INTO audit_log (actor, action, target_type, target_id, metadata, ip_address, created_at)
          VALUES ($1, 'DEVICE_LOCKED_BY_ADMIN', 'device', $2, $3, $4, NOW())`,
-        [adminId, deviceId, JSON.stringify({ deviceId, reason, lockLevel, lockedAt: new Date(), adminId }), ipAddress]
+        [
+          adminId,
+          deviceId,
+          JSON.stringify({ deviceId, reason, lockLevel, lockedAt: new Date(), adminId }),
+          ipAddress
+        ]
       );
 
       await client.query('COMMIT');
@@ -241,10 +242,7 @@ class AdminDeviceService {
     try {
       await client.query('BEGIN');
 
-      const deviceResult = await client.query(
-        'SELECT * FROM devices WHERE id = $1',
-        [deviceId]
-      );
+      const deviceResult = await client.query('SELECT * FROM devices WHERE id = $1', [deviceId]);
 
       if (deviceResult.rows.length === 0) {
         await client.query('ROLLBACK');
@@ -288,7 +286,12 @@ class AdminDeviceService {
       await client.query(
         `INSERT INTO audit_log (actor, action, target_type, target_id, metadata, ip_address, created_at)
          VALUES ($1, 'DEVICE_UNLOCKED_BY_ADMIN', 'device', $2, $3, $4, NOW())`,
-        [adminId, deviceId, JSON.stringify({ deviceId, reason, unlockedAt: new Date(), adminId }), ipAddress]
+        [
+          adminId,
+          deviceId,
+          JSON.stringify({ deviceId, reason, unlockedAt: new Date(), adminId }),
+          ipAddress
+        ]
       );
 
       await client.query('COMMIT');
@@ -430,7 +433,7 @@ class AdminDeviceService {
 
       return {
         entries: result.rows,
-        total: parseInt(countResult.rows[0].count),
+        total: parseInt(countResult.rows[0].count, 10),
         limit,
         offset
       };
@@ -523,14 +526,14 @@ class AdminDeviceService {
       const countResult = await client.query(countQuery, countParams);
 
       return {
-        events: result.rows.map(row => ({
+        events: result.rows.map((row) => ({
           ...row,
           type: row.event_type,
           timestamp: row.created_at,
           description: row.metadata?.message || row.metadata?.error || row.event_type,
           status: row.resolved ? 'RESOLVED' : 'OPEN'
         })),
-        total: parseInt(countResult.rows[0].count),
+        total: parseInt(countResult.rows[0].count, 10),
         limit,
         offset
       };
@@ -680,7 +683,7 @@ class AdminDeviceService {
       const countResult = await client.query(countQuery, countParams);
 
       return {
-        requests: result.rows.map(row => ({
+        requests: result.rows.map((row) => ({
           ...row,
           resellerId: row.reseller_id,
           resellerName: row.reseller_name,
@@ -688,7 +691,7 @@ class AdminDeviceService {
           createdAt: row.created_at,
           approvedByName: row.approved_by_name
         })),
-        total: parseInt(countResult.rows[0].count),
+        total: parseInt(countResult.rows[0].count, 10),
         limit,
         offset
       };
@@ -724,7 +727,12 @@ class AdminDeviceService {
       await client.query(
         `INSERT INTO audit_log (actor, action, target_type, target_id, metadata, ip_address, created_at)
          VALUES ($1, 'KEY_REQUEST_REJECTED', 'key_request', $2, $3, $4, NOW())`,
-        [adminId, requestId, JSON.stringify({ requestId, rejectionReason, rejectedAt: new Date() }), ipAddress]
+        [
+          adminId,
+          requestId,
+          JSON.stringify({ requestId, rejectionReason, rejectedAt: new Date() }),
+          ipAddress
+        ]
       );
 
       await client.query('COMMIT');
@@ -745,7 +753,13 @@ class AdminDeviceService {
     }
   }
 
-  async approveKeyRequest(requestId, approvedQuantity, adminId, ipAddress, _tierIgnored = 'standard') {
+  async approveKeyRequest(
+    requestId,
+    approvedQuantity,
+    adminId,
+    ipAddress,
+    _tierIgnored = 'standard'
+  ) {
     const client = await db.connect();
     try {
       await client.query('BEGIN');
@@ -763,7 +777,8 @@ class AdminDeviceService {
       const request = requestResult.rows[0];
       // Tier comes from the reseller's request — admin cannot override it
       const tier = ['standard', 'premium', 'vip'].includes(request.tier)
-        ? request.tier : 'standard';
+        ? request.tier
+        : 'standard';
 
       const resellerResult = await client.query(
         `SELECT COALESCE(monthly_key_quota, monthly_quota, 100) as monthly_key_quota
@@ -784,7 +799,7 @@ class AdminDeviceService {
          WHERE reseller_id = $1 AND created_at > NOW() - INTERVAL '30 days'`,
         [request.reseller_id]
       );
-      const approvedThisMonth = parseInt(approvedThisMonthResult.rows[0].count);
+      const approvedThisMonth = parseInt(approvedThisMonthResult.rows[0].count, 10);
 
       const maxAllowed = Math.max(0, Math.floor(monthlyQuota * 0.2) - approvedThisMonth);
 
@@ -823,7 +838,9 @@ class AdminDeviceService {
 
       await client.query('COMMIT');
 
-      logger.info(`Admin ${adminId} approved key request ${requestId}: +${approvedQuantity} ${tier} quota`);
+      logger.info(
+        `Admin ${adminId} approved key request ${requestId}: +${approvedQuantity} ${tier} quota`
+      );
       emitKeyRequestApproved(request.reseller_id, approvedQuantity, tier);
 
       return {

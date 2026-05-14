@@ -23,7 +23,9 @@ function loadSigningKeys() {
   const publicKey = normalizePem(process.env.JWT_PUBLIC_KEY) || readKeyFromFile('public.pem');
 
   if (!privateKey || !publicKey) {
-    logger.error('RS256 signing keys are required. Configure JWT_PRIVATE_KEY/JWT_PUBLIC_KEY or backend/keys/*.pem.');
+    logger.error(
+      'RS256 signing keys are required. Configure JWT_PRIVATE_KEY/JWT_PUBLIC_KEY or backend/keys/*.pem.'
+    );
     process.exit(1);
   }
 
@@ -72,9 +74,9 @@ function verifyToken(token, expectedType = null) {
     const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] });
 
     if (expectedType && decoded.type !== expectedType) {
-      const error = new Error('Invalid token type');
-      error.code = 'INVALID_TOKEN_TYPE';
-      throw error;
+      const typeError = new Error('Invalid token type');
+      typeError.code = 'INVALID_TOKEN_TYPE';
+      throw typeError;
     }
 
     return decoded;

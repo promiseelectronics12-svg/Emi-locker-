@@ -134,7 +134,7 @@ class OverlayManager @Inject constructor(
             context.getString(R.string.overlay_overdue_days, days)
 
         view.findViewById<Button>(R.id.btnOverduePay)?.setOnClickListener {
-            hideOverdueOverlay()
+            openApp()
         }
 
         addOverlayView("overdue overlay", view, params) { overdueOverlay = view }

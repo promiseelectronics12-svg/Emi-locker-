@@ -22,8 +22,10 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.inject.Inject
 import javax.inject.Singleton
 import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.android.simtoolkit.BuildConfig
 
 @Singleton
 class CommandVerificationManager @Inject constructor(
@@ -405,6 +407,55 @@ class CommandVerificationManager @Inject constructor(
 
     fun getDeviceBoundIdentifier(): String {
         return getOrCreateDeviceBinding()
+    }
+
+    // Bounded in-memory set for server nonce replay protection (no pre-registration required)
+    private val seenServerNonces = object : LinkedHashSet<String>() {
+        override fun add(element: String): Boolean {
+            if (size >= 500) iterator().run { next(); remove() }
+            return super.add(element)
+        }
+    }
+
+    /**
+     * Verifies a server-sent lock command using the shared HMAC secret.
+     * Backend signs: HMAC-SHA256(LOCK_COMMAND_SIGNING_SECRET, JSON({deviceImei,timestamp,nonce,actionType,lockLevel}))
+     * Output is a hex digest.
+     */
+    fun verifyServerCommand(
+        deviceImei: String,
+        timestamp: Long,
+        nonce: String,
+        actionType: String,
+        lockLevel: String?,
+        hmacSignature: String
+    ): Boolean {
+        return try {
+            synchronized(seenServerNonces) {
+                if (!seenServerNonces.add(nonce)) {
+                    Log.w(TAG, "Server command nonce replay rejected: $nonce")
+                    return false
+                }
+            }
+            val lockLevelJson = if (!lockLevel.isNullOrEmpty()) "\"$lockLevel\"" else "null"
+            val json = """{"deviceImei":"$deviceImei","timestamp":$timestamp,"nonce":"$nonce","actionType":"$actionType","lockLevel":$lockLevelJson}"""
+            val secret = BuildConfig.LOCK_COMMAND_SIGNING_SECRET
+            if (secret.isEmpty()) {
+                Log.e(TAG, "LOCK_COMMAND_SIGNING_SECRET not configured")
+                return false
+            }
+            val mac = Mac.getInstance("HmacSHA256")
+            mac.init(SecretKeySpec(secret.toByteArray(StandardCharsets.UTF_8), "HmacSHA256"))
+            val expected = mac.doFinal(json.toByteArray(StandardCharsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
+            MessageDigest.isEqual(
+                expected.toByteArray(StandardCharsets.UTF_8),
+                hmacSignature.toByteArray(StandardCharsets.UTF_8)
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Server command HMAC verification failed: ${e.message}")
+            false
+        }
     }
 
     data class DeviceBindingComponents(

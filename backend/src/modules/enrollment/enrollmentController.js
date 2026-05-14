@@ -11,15 +11,14 @@ async function createEnrollment(req, res) {
 
   try {
     // JWT payload has no dealer_id — look it up from dealers table
-    const dealerRow = await db.query(
-      `SELECT id FROM dealers WHERE user_id = $1 LIMIT 1`,
-      [req.user.id]
-    );
+    const dealerRow = await db.query(`SELECT id FROM dealers WHERE user_id = $1 LIMIT 1`, [
+      req.user.id
+    ]);
     const dealerId = dealerRow.rows[0]?.id || req.user.id;
 
     const result = await startEnrollment({
       dealerId,
-      ...req.body,
+      ...req.body
     });
     // result = { enrollment_id, token }
     // token is plaintext — dealer app shows it on screen for dealer to type into user app

@@ -3,21 +3,18 @@ const {
   buildLockCommandPayload,
   buildUnlockCommandPayload,
   buildReminderPayload,
-  buildDealerMessagePayload,
+  buildDealerMessagePayload
 } = require('./fcm.service');
 const {
   sendLockConfirmationSMS,
   sendUnlockConfirmationSMS,
-  sendCriticalAlertSMS,
+  sendCriticalAlertSMS
 } = require('./sms.service');
 const {
   checkAndIncrementDealerMessageRateLimit,
-  getDealerMessageStats,
+  getDealerMessageStats
 } = require('./dealer-message-rate-limiter');
-const {
-  createNotificationRecord,
-  updateNotificationStatus,
-} = require('./notification.repository');
+const { createNotificationRecord, updateNotificationStatus } = require('./notification.repository');
 const { getDeviceById } = require('../devices/device.repository');
 
 function sanitizeMessage(message) {
@@ -76,53 +73,53 @@ async function sendLockCommand(deviceId, lockLevel) {
         const notificationId = await createNotificationRecord({
           device_id: deviceId,
           type: 'LOCK_COMMAND',
-          payload: payload,
+          payload,
           status: 'SENT',
           fcm_message_id: fcmResult.messageId || undefined,
-          provider: 'TWILIO',
+          provider: 'TWILIO'
         });
         return {
           success: true,
           notificationId,
           smsMessageId: smsResult.messageId,
-          fallbackUsed: 'SMS',
+          fallbackUsed: 'SMS'
         };
       }
 
       const notificationId = await createNotificationRecord({
         device_id: deviceId,
         type: 'LOCK_COMMAND',
-        payload: payload,
+        payload,
         status: 'FAILED',
         fcm_message_id: fcmResult.messageId || undefined,
-        provider: 'FCM',
+        provider: 'FCM'
       });
       return {
         success: false,
         notificationId,
-        error: 'FCM and SMS both failed',
+        error: 'FCM and SMS both failed'
       };
     }
 
     const notificationId = await createNotificationRecord({
       device_id: deviceId,
       type: 'LOCK_COMMAND',
-      payload: payload,
+      payload,
       status: 'SENT',
       fcm_message_id: fcmResult.messageId,
-      provider: 'FCM',
+      provider: 'FCM'
     });
 
     return {
       success: true,
       notificationId,
-      fcmMessageId: fcmResult.messageId,
+      fcmMessageId: fcmResult.messageId
     };
   } catch (error) {
     console.error('sendLockCommand error:', error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: error instanceof Error ? error.message : 'Unknown error'
     };
   }
 }
@@ -172,53 +169,53 @@ async function sendUnlockCommand(deviceId, expiryHours = 48) {
         const notificationId = await createNotificationRecord({
           device_id: deviceId,
           type: 'UNLOCK_COMMAND',
-          payload: payload,
+          payload,
           status: 'SENT',
           fcm_message_id: fcmResult.messageId || undefined,
-          provider: 'TWILIO',
+          provider: 'TWILIO'
         });
         return {
           success: true,
           notificationId,
           smsMessageId: smsResult.messageId,
-          fallbackUsed: 'SMS',
+          fallbackUsed: 'SMS'
         };
       }
 
       const notificationId = await createNotificationRecord({
         device_id: deviceId,
         type: 'UNLOCK_COMMAND',
-        payload: payload,
+        payload,
         status: 'FAILED',
         fcm_message_id: fcmResult.messageId || undefined,
-        provider: 'FCM',
+        provider: 'FCM'
       });
       return {
         success: false,
         notificationId,
-        error: 'FCM and SMS both failed',
+        error: 'FCM and SMS both failed'
       };
     }
 
     const notificationId = await createNotificationRecord({
       device_id: deviceId,
       type: 'UNLOCK_COMMAND',
-      payload: payload,
+      payload,
       status: 'SENT',
       fcm_message_id: fcmResult.messageId,
-      provider: 'FCM',
+      provider: 'FCM'
     });
 
     return {
       success: true,
       notificationId,
-      fcmMessageId: fcmResult.messageId,
+      fcmMessageId: fcmResult.messageId
     };
   } catch (error) {
     console.error('sendUnlockCommand error:', error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: error instanceof Error ? error.message : 'Unknown error'
     };
   }
 }
@@ -248,27 +245,34 @@ async function sendReminderNotification(deviceId, daysUntilDue, amountDue, dueDa
       type: 'PAYMENT_REMINDER',
       title: payload.title,
       body: payload.body,
-      payload: payload,
+      payload,
       status: fcmResult.success ? 'SENT' : 'FAILED',
       fcm_message_id: fcmResult.messageId,
-      provider: 'FCM',
+      provider: 'FCM'
     });
 
     return {
       success: fcmResult.success,
       notificationId,
-      fcmMessageId: fcmResult.messageId,
+      fcmMessageId: fcmResult.messageId
     };
   } catch (error) {
     console.error('sendReminderNotification error:', error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: error instanceof Error ? error.message : 'Unknown error'
     };
   }
 }
 
-async function sendDealerMessage(deviceId, message, dealerId, dealerName, isAdmin = false, userId = null) {
+async function sendDealerMessage(
+  deviceId,
+  message,
+  dealerId,
+  dealerName,
+  isAdmin = false,
+  userId = null
+) {
   try {
     const device = await getDeviceById(deviceId);
     if (!device) {
@@ -296,13 +300,16 @@ async function sendDealerMessage(deviceId, message, dealerId, dealerName, isAdmi
       };
     }
 
-    const rateLimitCheck = await checkAndIncrementDealerMessageRateLimit(deviceId, sanitizedMessage);
+    const rateLimitCheck = await checkAndIncrementDealerMessageRateLimit(
+      deviceId,
+      sanitizedMessage
+    );
 
     if (!rateLimitCheck.allowed) {
       return {
         success: false,
         rateLimit: rateLimitCheck,
-        error: rateLimitCheck.error || 'Please wait before sending the same message again.',
+        error: rateLimitCheck.error || 'Please wait before sending the same message again.'
       };
     }
 
@@ -317,7 +324,7 @@ async function sendDealerMessage(deviceId, message, dealerId, dealerName, isAdmi
       return {
         success: false,
         rateLimit: rateLimitCheck,
-        error: 'FCM send failed',
+        error: 'FCM send failed'
       };
     }
 
@@ -326,23 +333,23 @@ async function sendDealerMessage(deviceId, message, dealerId, dealerName, isAdmi
       type: 'DEALER_MESSAGE',
       title: 'Message from Dealer',
       body: message,
-      payload: payload,
+      payload,
       status: 'SENT',
       fcm_message_id: fcmResult.messageId,
-      provider: 'FCM',
+      provider: 'FCM'
     });
 
     return {
       success: true,
       notificationId,
-      rateLimit: rateLimitCheck,
+      rateLimit: rateLimitCheck
     };
   } catch (error) {
     console.error('sendDealerMessage error:', error);
     return {
       success: false,
       rateLimit: { allowed: true, currentCount: 0, limit: 10, resetAt: new Date() },
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: error instanceof Error ? error.message : 'Unknown error'
     };
   }
 }
@@ -354,14 +361,14 @@ async function getDeviceMessageStats(deviceId) {
 async function markNotificationDelivered(notificationId, fcmMessageId) {
   await updateNotificationStatus(notificationId, 'DELIVERED', {
     fcm_message_id: fcmMessageId,
-    delivered_at: new Date(),
+    delivered_at: new Date()
   });
 }
 
 async function markNotificationFailed(notificationId, reason) {
   await updateNotificationStatus(notificationId, 'FAILED', {
     failed_at: new Date(),
-    failure_reason: reason,
+    failure_reason: reason
   });
 }
 
@@ -372,5 +379,5 @@ module.exports = {
   sendDealerMessage,
   getDeviceMessageStats,
   markNotificationDelivered,
-  markNotificationFailed,
+  markNotificationFailed
 };

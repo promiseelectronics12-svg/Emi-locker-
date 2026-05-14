@@ -1,7 +1,9 @@
 const express = require('express');
+
 const router = express.Router();
 const { body } = require('express-validator');
 const rateLimit = require('express-rate-limit');
+const crypto = require('crypto');
 const { authenticateToken } = require('../../middleware/auth');
 const { validateSignedDeviceCommand } = require('../../middleware/deviceAuth');
 const { requireRole } = require('../../middleware/rbac');
@@ -53,25 +55,11 @@ router.post(
 );
 
 // GET /devices — alias for /my, used by user app ApiService.getDevices()
-router.get(
-  '/',
-  authenticateToken,
-  getDevicesByOwner
-);
+router.get('/', authenticateToken, getDevicesByOwner);
 
-router.get(
-  '/my',
-  authenticateToken,
-  getDevicesByOwner
-);
+router.get('/my', authenticateToken, getDevicesByOwner);
 
-router.get(
-  '/:id',
-  authenticateToken,
-  deviceIdParam,
-  validateRequest,
-  getDevice
-);
+router.get('/:id', authenticateToken, deviceIdParam, validateRequest, getDevice);
 
 router.post(
   '/:id/policy',
@@ -91,13 +79,7 @@ router.post(
   updateFcmToken
 );
 
-router.get(
-  '/:id/status',
-  authenticateToken,
-  deviceIdParam,
-  validateRequest,
-  getDeviceStatus
-);
+router.get('/:id/status', authenticateToken, deviceIdParam, validateRequest, getDeviceStatus);
 
 router.post(
   '/:id/lock',
@@ -139,7 +121,9 @@ router.post(
   '/:id/verify-hardware',
   authenticateToken,
   deviceIdParam,
-  body('imei').matches(/^\d{15}$/).withMessage('IMEI must be 15 digits'),
+  body('imei')
+    .matches(/^\d{15}$/)
+    .withMessage('IMEI must be 15 digits'),
   body('serialNumber').isString().isLength({ min: 1, max: 64 }),
   body('socId').isString().isLength({ min: 1, max: 128 }),
   validateRequest,
@@ -148,15 +132,14 @@ router.post(
 
 // Device-token authenticated endpoints (no user session required)
 
-const crypto = require('crypto');
 const db = require('../../config/database');
 const logger = require('../../utils/logger');
 
 async function requireDeviceToken(req, res, next) {
-  const token     = req.headers['x-device-token'];
+  const token = req.headers['x-device-token'];
   const timestamp = req.headers['x-device-timestamp'];
-  const nonce     = req.headers['x-device-nonce'];
-  const deviceId  = req.params.id;
+  const nonce = req.headers['x-device-nonce'];
+  const deviceId = req.params.id;
 
   if (!token || !timestamp || !nonce) {
     return res.status(401).json({ success: false, error: 'Device token required' });
@@ -171,8 +154,9 @@ async function requireDeviceToken(req, res, next) {
       return res.status(404).json({ success: false, error: 'Device not found' });
     }
 
-    const secret   = process.env.DEVICE_SIGNING_SECRET || 'dev-device-signing-secret';
-    const expected = crypto.createHmac('sha256', secret)
+    const secret = process.env.DEVICE_SIGNING_SECRET || 'dev-device-signing-secret';
+    const expected = crypto
+      .createHmac('sha256', secret)
       .update(`${deviceId}${timestamp}${nonce}`)
       .digest('hex');
 
@@ -192,7 +176,7 @@ async function requireDeviceToken(req, res, next) {
 router.post('/:id/sim-event', requireDeviceToken, async (req, res) => {
   try {
     const { event_type, old_sim_hash, new_sim_hash, lat, lon } = req.body;
-    const deviceId = req.deviceId;
+    const { deviceId } = req;
 
     const validTypes = ['SIM_CHANGED', 'SIM_REMOVED', 'SIM_RESTORED'];
     if (!validTypes.includes(event_type)) {
@@ -221,7 +205,7 @@ router.post('/:id/sim-event', requireDeviceToken, async (req, res) => {
 router.post('/:id/theft-capture', requireDeviceToken, async (req, res) => {
   try {
     const { trigger, lat, lon, has_photo, has_audio, evidence_ref } = req.body;
-    const deviceId = req.deviceId;
+    const { deviceId } = req;
 
     const validTriggers = ['FAKE_SHUTDOWN', 'FRP_ATTEMPT', 'WRONG_CODE_5X'];
     if (!validTriggers.includes(trigger)) {
@@ -231,7 +215,15 @@ router.post('/:id/theft-capture', requireDeviceToken, async (req, res) => {
     await db.query(
       `INSERT INTO theft_captures (device_id, trigger, has_photo, has_audio, location_lat, location_lon, evidence_ref)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [deviceId, trigger, has_photo || false, has_audio || false, lat || null, lon || null, evidence_ref || null]
+      [
+        deviceId,
+        trigger,
+        has_photo || false,
+        has_audio || false,
+        lat || null,
+        lon || null,
+        evidence_ref || null
+      ]
     );
 
     const fraudService = require('../fraud/fraudService');
@@ -240,10 +232,11 @@ router.post('/:id/theft-capture', requireDeviceToken, async (req, res) => {
       deviceId,
       eventType: 'INTEGRITY_FAILURE',
       severity: 'CRITICAL',
-      details: { trigger, has_photo, has_audio, lat, lon, source: 'theft_capture' },
+      details: { trigger, has_photo, has_audio, lat, lon, source: 'theft_capture' }
     });
 
-    await fraudService.alertDealer(deviceId,
+    await fraudService.alertDealer(
+      deviceId,
       `THEFT ALERT: ${trigger} detected on device. ${has_photo ? 'Photo captured.' : ''} ${has_audio ? 'Audio captured.' : ''}`
     );
 

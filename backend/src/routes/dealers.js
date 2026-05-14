@@ -1,11 +1,12 @@
 const express = require('express');
+
 const router = express.Router();
 const { body } = require('express-validator');
+const asyncHandler = require('express-async-handler');
 const { validateRequest } = require('../middleware/validateRequest');
 const { authenticateToken } = require('../middleware/auth');
 const { requireMinRole } = require('../middleware/rbac');
 const { buildErrorResponse } = require('../middleware/errorHandler');
-const asyncHandler = require('express-async-handler');
 const db = require('../config/database');
 
 // NID verification is deferred — will be added in a future release.
@@ -27,15 +28,16 @@ const registerDealer = asyncHandler(async (req, res) => {
   // Duplicate check: always check email + phone; only add NID check when provided
   let existing;
   if (nidValue) {
-    existing = await db.query(
-      'SELECT id FROM dealers WHERE email = $1 OR phone = $2 OR nid = $3',
-      [email, phone, nidValue]
-    );
+    existing = await db.query('SELECT id FROM dealers WHERE email = $1 OR phone = $2 OR nid = $3', [
+      email,
+      phone,
+      nidValue
+    ]);
   } else {
-    existing = await db.query(
-      'SELECT id FROM dealers WHERE email = $1 OR phone = $2',
-      [email, phone]
-    );
+    existing = await db.query('SELECT id FROM dealers WHERE email = $1 OR phone = $2', [
+      email,
+      phone
+    ]);
   }
 
   if (existing.rows.length > 0) {
@@ -53,45 +55,41 @@ const registerDealer = asyncHandler(async (req, res) => {
 });
 
 const getDealer = asyncHandler(async (req, res) => {
-  const result = await db.query(
-    'SELECT * FROM dealers WHERE id = $1',
-    [req.params.id]
-  );
-  
+  const result = await db.query('SELECT * FROM dealers WHERE id = $1', [req.params.id]);
+
   if (result.rows.length === 0) {
     return res.status(404).json(buildErrorResponse(404, 'DEALER_NOT_FOUND', 'Dealer not found'));
   }
-  
+
   res.json(result.rows[0]);
 });
 
 const getMyDealerProfile = asyncHandler(async (req, res) => {
-  const result = await db.query(
-    'SELECT * FROM dealers WHERE user_id = $1',
-    [req.user.id]
-  );
-  
+  const result = await db.query('SELECT * FROM dealers WHERE user_id = $1', [req.user.id]);
+
   if (result.rows.length === 0) {
-    return res.status(404).json(buildErrorResponse(404, 'DEALER_NOT_FOUND', 'Dealer profile not found'));
+    return res
+      .status(404)
+      .json(buildErrorResponse(404, 'DEALER_NOT_FOUND', 'Dealer profile not found'));
   }
-  
+
   res.json(result.rows[0]);
 });
 
 const updateDealer = asyncHandler(async (req, res) => {
   const { name, phone, address, business_name } = req.body;
-  
+
   const result = await db.query(
     `UPDATE dealers SET name = $1, phone = $2, address = $3, business_name = $4, updated_at = NOW()
      WHERE id = $5
      RETURNING *`,
     [name, phone, address, business_name, req.params.id]
   );
-  
+
   if (result.rows.length === 0) {
     return res.status(404).json(buildErrorResponse(404, 'DEALER_NOT_FOUND', 'Dealer not found'));
   }
-  
+
   res.json(result.rows[0]);
 });
 
@@ -104,7 +102,7 @@ const getDealerDevices = asyncHandler(async (req, res) => {
      ORDER BY d.created_at DESC`,
     [req.params.id]
   );
-  
+
   res.json(result.rows);
 });
 

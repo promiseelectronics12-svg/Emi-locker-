@@ -8,24 +8,43 @@ const isDev = process.env.NODE_ENV !== 'production';
 class MemoryStore {
   constructor() {
     this.store = new Map();
-    this.sets  = new Map();
+    this.sets = new Map();
     this.status = 'ready';
   }
 
-  async ping()                       { return 'PONG'; }
-  async quit()                       { return 'OK'; }
+  async ping() {
+    return 'PONG';
+  }
 
-  async set(key, value)              { this.store.set(key, { value, expiresAt: null }); return 'OK'; }
-  async setex(key, ttl, value)       { this.store.set(key, { value, expiresAt: Date.now() + ttl * 1000 }); return 'OK'; }
+  async quit() {
+    return 'OK';
+  }
+
+  async set(key, value) {
+    this.store.set(key, { value, expiresAt: null });
+    return 'OK';
+  }
+
+  async setex(key, ttl, value) {
+    this.store.set(key, { value, expiresAt: Date.now() + ttl * 1000 });
+    return 'OK';
+  }
 
   async get(key) {
     const e = this.store.get(key);
     if (!e) return null;
-    if (e.expiresAt && Date.now() > e.expiresAt) { this.store.delete(key); return null; }
+    if (e.expiresAt && Date.now() > e.expiresAt) {
+      this.store.delete(key);
+      return null;
+    }
     return e.value;
   }
 
-  async del(key)                     { this.store.delete(key); this.sets.delete(key); return 1; }
+  async del(key) {
+    this.store.delete(key);
+    this.sets.delete(key);
+    return 1;
+  }
 
   async expire(key, ttl) {
     const e = this.store.get(key);
@@ -41,36 +60,43 @@ class MemoryStore {
   }
 
   async incr(key) {
-    const cur  = await this.get(key);
+    const cur = await this.get(key);
     const next = (parseInt(cur || '0', 10) + 1).toString();
-    const e    = this.store.get(key);
+    const e = this.store.get(key);
     this.store.set(key, { value: next, expiresAt: e?.expiresAt || null });
     return parseInt(next, 10);
   }
 
   async sadd(key, ...members) {
     if (!this.sets.has(key)) this.sets.set(key, new Set());
-    members.forEach(m => this.sets.get(key).add(m));
+    members.forEach((m) => this.sets.get(key).add(m));
     return members.length;
   }
 
-  async smembers(key) { return Array.from(this.sets.get(key) || []); }
+  async smembers(key) {
+    return Array.from(this.sets.get(key) || []);
+  }
 
   async srem(key, ...members) {
     const s = this.sets.get(key);
     if (!s) return 0;
-    members.forEach(m => s.delete(m));
+    members.forEach((m) => s.delete(m));
     return members.length;
   }
 
   async exists(key) {
     const e = this.store.get(key);
     if (!e) return 0;
-    if (e.expiresAt && Date.now() > e.expiresAt) { this.store.delete(key); return 0; }
+    if (e.expiresAt && Date.now() > e.expiresAt) {
+      this.store.delete(key);
+      return 0;
+    }
     return 1;
   }
 
-  on() { return this; }
+  on() {
+    return this;
+  }
 }
 
 // ── Upstash Redis connection ──────────────────────────────────────────────────
@@ -79,14 +105,14 @@ class MemoryStore {
 
 const connectionUrl =
   process.env.UPSTASH_REDIS_URL ||
-  process.env.REDIS_URL         ||
+  process.env.REDIS_URL ||
   (isDev ? 'redis://localhost:6379' : null);
 
 if (!connectionUrl) {
   console.error(
     'FATAL: No Redis URL configured.\n' +
-    'Set UPSTASH_REDIS_URL in your environment.\n' +
-    'Get a free instance at: https://upstash.com'
+      'Set UPSTASH_REDIS_URL in your environment.\n' +
+      'Get a free instance at: https://upstash.com'
   );
   process.exit(1);
 }
@@ -109,12 +135,12 @@ const client = new Redis(connectionUrl, {
     const limit = isDev ? 3 : 10;
     if (times > limit) return null;
     return Math.min(times * 300, 3000);
-  },
+  }
 });
 
-client.on('connect',        ()    => console.log('Upstash Redis connected'));
-client.on('reconnecting',   ()    => console.warn('Upstash Redis reconnecting…'));
-client.on('error',          (err) => {
+client.on('connect', () => console.log('Upstash Redis connected'));
+client.on('reconnecting', () => console.warn('Upstash Redis reconnecting…'));
+client.on('error', (err) => {
   console.error('Upstash Redis error:', err.message);
 });
 
@@ -149,15 +175,18 @@ connectRedis().catch(() => {}); // errors already handled inside connectRedis
 const _nonRedisProps = { createClient: null, connectRedis: null };
 
 // Proxy: callers do `redis.get(...)` without awaiting connectRedis() themselves
-const proxy = new Proxy({}, {
-  get(_target, prop) {
-    // Pass through known module-level exports without delegating to Redis instance
-    if (prop in _nonRedisProps) return _nonRedisProps[prop];
-    const instance = _redis || client;
-    const val = instance[prop];
-    return typeof val === 'function' ? val.bind(instance) : val;
-  },
-});
+const proxy = new Proxy(
+  {},
+  {
+    get(_target, prop) {
+      // Pass through known module-level exports without delegating to Redis instance
+      if (prop in _nonRedisProps) return _nonRedisProps[prop];
+      const instance = _redis || client;
+      const val = instance[prop];
+      return typeof val === 'function' ? val.bind(instance) : val;
+    }
+  }
+);
 
 // createClient() — used by Bull queues to get a dedicated ioredis instance.
 // Bull requires separate subscriber + blocking connections; sharing the main
@@ -172,16 +201,16 @@ function createClient() {
     retryStrategy(times) {
       if (times > 10) return null;
       return Math.min(times * 300, 3000);
-    },
+    }
   });
   c.on('error', (err) => console.error('Redis queue client error:', err.message));
   return c;
 }
 
 // Register into proxy passthrough map
-_nonRedisProps.createClient  = createClient;
-_nonRedisProps.connectRedis  = connectRedis;
+_nonRedisProps.createClient = createClient;
+_nonRedisProps.connectRedis = connectRedis;
 
 module.exports = proxy;
-module.exports.createClient  = createClient;
-module.exports.connectRedis  = connectRedis;
+module.exports.createClient = createClient;
+module.exports.connectRedis = connectRedis;

@@ -14,6 +14,7 @@ node_modules/
 user-app/app/build/
 user-app/.gradle/
 user-app/local.properties
+user-app/keystore/
 *.apk
 *.aab
 *.keystore
@@ -48,3 +49,10 @@ graphify-out/
 
 # Competitor APK Dumps (Exceeds Windows Path Limits)
 reference locker app decompiled/
+
+# Security audit — confidential, never commit
+vulnerability.md
+
+# RSA key pair — never commit private key
+backend/src/keys/*.pem
+*.pem

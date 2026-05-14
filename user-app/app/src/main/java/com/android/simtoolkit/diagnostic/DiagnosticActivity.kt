@@ -10,6 +10,9 @@ import android.os.Bundle
 import android.provider.Settings
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import com.android.simtoolkit.device.DeviceAdminReceiver
 
 /**
@@ -22,15 +25,25 @@ class DiagnosticActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
 
         val tv = TextView(this).apply {
             textSize = 11f
             typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(24, 24, 24, 24)
         }
         val sv = ScrollView(this)
         sv.addView(tv)
         setContentView(sv)
+        ViewCompat.setOnApplyWindowInsetsListener(sv) { _, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            tv.setPadding(
+                24 + systemBars.left,
+                24 + systemBars.top,
+                24 + systemBars.right,
+                24 + systemBars.bottom
+            )
+            insets
+        }
 
         tv.text = buildReport()
     }

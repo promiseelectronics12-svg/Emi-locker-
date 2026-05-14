@@ -13,7 +13,16 @@ const LOCK_REASON_CODES = {
 };
 
 class EmiService {
-  async createSchedule({ deviceId, totalAmount, downPayment, emiAmount, duration, startDate, graceDays = 7, dealerId }) {
+  async createSchedule({
+    deviceId,
+    totalAmount,
+    downPayment,
+    emiAmount,
+    duration,
+    startDate,
+    graceDays = 7,
+    dealerId
+  }) {
     const device = await emiModel.getDeviceById(deviceId);
 
     if (!device) {
@@ -58,7 +67,9 @@ class EmiService {
       status: 'active'
     });
 
-    logger.info(`EMI schedule created for device ${deviceId}: ${duration} months, ${emiAmount} BDT/month`);
+    logger.info(
+      `EMI schedule created for device ${deviceId}: ${duration} months, ${emiAmount} BDT/month`
+    );
 
     return schedule;
   }
@@ -72,7 +83,7 @@ class EmiService {
 
     const overdueStatus = await this.getOverdueStatus(deviceId);
 
-    const installmentsWithStatus = schedule.installments.map(inst => {
+    const installmentsWithStatus = schedule.installments.map((inst) => {
       const dueDate = new Date(inst.due_date);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -103,10 +114,16 @@ class EmiService {
       overdueStatus,
       summary: {
         totalAmount: parseFloat(schedule.total_amount),
-        amountPaid: schedule.payments.reduce((sum, p) => sum + (p.status === 'completed' ? parseFloat(p.amount) : 0), 0),
-        amountRemaining: schedule.payments.reduce((sum, p) => sum + (p.status === 'completed' ? parseFloat(p.amount) : 0), 0),
-        nextInstallment: installmentsWithStatus.find(i => i.status !== 'paid'),
-        overdueInstallments: installmentsWithStatus.filter(i => i.status === 'overdue').length
+        amountPaid: schedule.payments.reduce(
+          (sum, p) => sum + (p.status === 'completed' ? parseFloat(p.amount) : 0),
+          0
+        ),
+        amountRemaining: schedule.payments.reduce(
+          (sum, p) => sum + (p.status === 'completed' ? parseFloat(p.amount) : 0),
+          0
+        ),
+        nextInstallment: installmentsWithStatus.find((i) => i.status !== 'paid'),
+        overdueInstallments: installmentsWithStatus.filter((i) => i.status === 'overdue').length
       }
     };
   }
@@ -233,7 +250,7 @@ class EmiService {
       return { action: 'none', reason: 'Payment is current' };
     }
 
-    const daysOverdue = overdueStatus.daysOverdue;
+    const { daysOverdue } = overdueStatus;
 
     if (daysOverdue >= 14) {
       return {
@@ -289,15 +306,17 @@ class EmiService {
       errors.push('EMI amount must be positive');
     }
 
-    if (parseInt(duration) < 1 || parseInt(duration) > 60) {
+    if (parseInt(duration, 10) < 1 || parseInt(duration, 10) > 60) {
       errors.push('Duration must be between 1 and 60 months');
     }
 
-    const expectedTotal = parseFloat(downPayment) + (parseFloat(emiAmount) * parseInt(duration));
+    const expectedTotal = parseFloat(downPayment) + parseFloat(emiAmount) * parseInt(duration, 10);
     const difference = Math.abs(expectedTotal - parseFloat(totalAmount));
 
     if (difference > 1) {
-      errors.push(`Total amount (${totalAmount}) does not match down payment + (EMI × duration) = ${expectedTotal}`);
+      errors.push(
+        `Total amount (${totalAmount}) does not match down payment + (EMI × duration) = ${expectedTotal}`
+      );
     }
 
     return {

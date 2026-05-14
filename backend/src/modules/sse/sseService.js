@@ -41,7 +41,9 @@ function pushToUser(userId, event, data) {
   if (client) {
     _write(client.res, event, data);
   } else {
-    console.warn(`[SSE] pushToUser: no client for userId=${userId} event=${event} (connected: ${[...clients.keys()].join(',')})`);
+    console.warn(
+      `[SSE] pushToUser: no client for userId=${userId} event=${event} (connected: ${[...clients.keys()].join(',')})`
+    );
   }
 }
 
@@ -88,29 +90,29 @@ function pushToAll(event, data) {
 
 function emitDeviceLocked(device) {
   pushToManagement('device_locked', {
-    deviceId:   device.id,
+    deviceId: device.id,
     deviceName: device.device_name,
-    imei:       device.imei,
-    lockLevel:  device.lock_level,
-    reason:     device.lock_reason,
-    lockedAt:   device.locked_at || new Date().toISOString(),
+    imei: device.imei,
+    lockLevel: device.lock_level,
+    reason: device.lock_reason,
+    lockedAt: device.locked_at || new Date().toISOString()
   });
   if (device.dealer_id) {
     pushToDealer(device.dealer_id, 'device_locked', {
-      deviceId:   device.id,
+      deviceId: device.id,
       deviceName: device.device_name,
-      lockLevel:  device.lock_level,
-      reason:     device.lock_reason,
+      lockLevel: device.lock_level,
+      reason: device.lock_reason
     });
   }
 }
 
 function emitDeviceUnlocked(device, graceHours) {
   const payload = {
-    deviceId:   device.id,
+    deviceId: device.id,
     deviceName: device.device_name,
     graceHours,
-    unlockedAt: new Date().toISOString(),
+    unlockedAt: new Date().toISOString()
   };
   pushToManagement('device_unlocked', payload);
   if (device.dealer_id) {
@@ -120,35 +122,35 @@ function emitDeviceUnlocked(device, graceHours) {
 
 function emitNewAlert(alert) {
   pushToManagement('new_alert', {
-    alertId:    alert.id,
-    type:       alert.alert_type || alert.type,
-    deviceId:   alert.device_id,
+    alertId: alert.id,
+    type: alert.alert_type || alert.type,
+    deviceId: alert.device_id,
     deviceName: alert.device_name,
-    severity:   alert.severity || 'medium',
-    createdAt:  alert.created_at || new Date().toISOString(),
+    severity: alert.severity || 'medium',
+    createdAt: alert.created_at || new Date().toISOString()
   });
 }
 
 function emitEnrollmentComplete(device, dealerId) {
   pushToManagement('enrollment_complete', {
-    deviceId:   device.id,
+    deviceId: device.id,
     deviceName: device.device_name,
-    imei:       device.imei,
-    enrolledAt: new Date().toISOString(),
+    imei: device.imei,
+    enrolledAt: new Date().toISOString()
   });
   if (dealerId) {
     pushToDealer(dealerId, 'enrollment_complete', {
-      deviceId:   device.id,
-      deviceName: device.device_name,
+      deviceId: device.id,
+      deviceName: device.device_name
     });
   }
 }
 
 function emitGraceExpired(device) {
   const payload = {
-    deviceId:   device.id,
+    deviceId: device.id,
     deviceName: device.device_name,
-    expiredAt:  new Date().toISOString(),
+    expiredAt: new Date().toISOString()
   };
   pushToManagement('grace_expired', payload);
   if (device.dealer_id) {
@@ -157,7 +159,12 @@ function emitGraceExpired(device) {
 }
 
 function emitPaymentRecorded(deviceId, deviceName, amount) {
-  pushToManagement('payment_recorded', { deviceId, deviceName, amount, recordedAt: new Date().toISOString() });
+  pushToManagement('payment_recorded', {
+    deviceId,
+    deviceName,
+    amount,
+    recordedAt: new Date().toISOString()
+  });
 }
 
 function emitLocationReported(device, location) {
@@ -169,12 +176,30 @@ function emitLocationReported(device, location) {
     latitude: location.latitude,
     longitude: location.longitude,
     accuracy: location.accuracy,
-    timestamp: location.timestamp || new Date().toISOString(),
+    timestamp: location.timestamp || new Date().toISOString()
   };
 
   pushToManagement('location_reported', payload);
   if (device.dealer_id) {
     pushToDealer(device.dealer_id, 'location_reported', payload);
+  }
+}
+
+function emitDeviceHealthChanged(device, health = {}) {
+  const payload = {
+    deviceId: device.id,
+    deviceName: device.device_name,
+    imei: device.imei,
+    healthStatus: device.device_health_status || health.status || 'unknown',
+    permissionHealth: health.permissionHealth || null,
+    degradedReasons: health.degradedReasons || [],
+    lastSeenAt: device.last_seen_at || new Date().toISOString(),
+    changedAt: new Date().toISOString()
+  };
+
+  pushToManagement('device_health_changed', payload);
+  if (device.dealer_id) {
+    pushToDealer(device.dealer_id, 'device_health_changed', payload);
   }
 }
 
@@ -185,7 +210,7 @@ function emitKeyRequested(resellerId, resellerName, requestId, quantity, tier) {
     resellerName: resellerName || 'Reseller',
     quantity,
     tier,
-    requestedAt: new Date().toISOString(),
+    requestedAt: new Date().toISOString()
   });
 }
 
@@ -193,7 +218,7 @@ function emitKeyRequestApproved(resellerId, quantity, tier) {
   pushToUser(resellerId, 'key_request_approved', {
     quantity,
     tier,
-    approvedAt: new Date().toISOString(),
+    approvedAt: new Date().toISOString()
   });
 }
 
@@ -214,6 +239,7 @@ module.exports = {
   emitGraceExpired,
   emitPaymentRecorded,
   emitLocationReported,
+  emitDeviceHealthChanged,
   emitKeyRequested,
-  emitKeyRequestApproved,
+  emitKeyRequestApproved
 };

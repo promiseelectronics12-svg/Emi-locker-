@@ -13,7 +13,8 @@ const generateEmiNumber = () => {
   return `EMI-${timestamp}-${random}`;
 };
 
-router.post('/',
+router.post(
+  '/',
   authenticateToken,
   [
     body('userId').isUUID(),
@@ -34,8 +35,15 @@ router.post('/',
       }
 
       const {
-        userId, deviceId, totalAmount, downPayment, tenureMonths,
-        interestRate = 0, startDate, paymentDueDay = 5, notes
+        userId,
+        deviceId,
+        totalAmount,
+        downPayment,
+        tenureMonths,
+        interestRate = 0,
+        startDate,
+        paymentDueDay = 5,
+        notes
       } = req.body;
 
       const user = await db.query('SELECT id FROM users WHERE id = $1', [userId]);
@@ -60,16 +68,23 @@ router.post('/',
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          RETURNING *`,
         [
-          emiNumber, userId, deviceId, req.user.userId, totalAmount,
-          monthlyPayment, downPayment, tenureMonths, interestRate,
-          startDate, endDate, paymentDueDay, notes
+          emiNumber,
+          userId,
+          deviceId,
+          req.user.userId,
+          totalAmount,
+          monthlyPayment,
+          downPayment,
+          tenureMonths,
+          interestRate,
+          startDate,
+          endDate,
+          paymentDueDay,
+          notes
         ]
       );
 
-      await db.query(
-        'UPDATE devices SET status = $1 WHERE id = $2',
-        ['locked', deviceId]
-      );
+      await db.query('UPDATE devices SET status = $1 WHERE id = $2', ['locked', deviceId]);
 
       logger.info(`EMI agreement ${emiNumber} created`);
 
@@ -84,7 +99,8 @@ router.post('/',
   }
 );
 
-router.get('/',
+router.get(
+  '/',
   authenticateToken,
   [
     query('status').optional().isIn(['active', 'completed', 'defaulted', 'cancelled', 'disputed']),
@@ -122,9 +138,9 @@ router.get('/',
       res.json({
         agreements: agreementsResult.rows,
         pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total: parseInt(countResult.rows[0].count),
+          page: parseInt(page, 10),
+          limit: parseInt(limit, 10),
+          total: parseInt(countResult.rows[0].count, 10),
           pages: Math.ceil(countResult.rows[0].count / limit)
         }
       });
@@ -135,11 +151,10 @@ router.get('/',
   }
 );
 
-router.get('/:agreementId',
+router.get(
+  '/:agreementId',
   authenticateToken,
-  [
-    param('agreementId').isUUID()
-  ],
+  [param('agreementId').isUUID()],
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -177,7 +192,8 @@ router.get('/:agreementId',
   }
 );
 
-router.put('/:agreementId/status',
+router.put(
+  '/:agreementId/status',
   authenticateToken,
   [
     param('agreementId').isUUID(),
@@ -192,9 +208,11 @@ router.put('/:agreementId/status',
       }
 
       const { status, reason } = req.body;
-      const agreementId = req.params.agreementId;
+      const { agreementId } = req.params;
 
-      const oldAgreement = await db.query('SELECT * FROM emi_agreements WHERE id = $1', [agreementId]);
+      const oldAgreement = await db.query('SELECT * FROM emi_agreements WHERE id = $1', [
+        agreementId
+      ]);
       if (oldAgreement.rows.length === 0) {
         return res.status(404).json({ error: 'Agreement not found' });
       }
@@ -206,13 +224,22 @@ router.put('/:agreementId/status',
       );
 
       if (status === 'completed') {
-        await db.query('UPDATE devices SET status = $1 WHERE id = $2', ['unlocked', oldAgreement.rows[0].device_id]);
+        await db.query('UPDATE devices SET status = $1 WHERE id = $2', [
+          'unlocked',
+          oldAgreement.rows[0].device_id
+        ]);
       }
 
       await db.query(
         `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, old_value, new_value, ip_address)
          VALUES ($1, 'agreement_status_changed', 'agreement', $2, $3, $4, $5)`,
-        [req.user.userId, agreementId, JSON.stringify(oldAgreement.rows[0]), JSON.stringify(result.rows[0]), req.ip]
+        [
+          req.user.userId,
+          agreementId,
+          JSON.stringify(oldAgreement.rows[0]),
+          JSON.stringify(result.rows[0]),
+          req.ip
+        ]
       );
 
       logger.info(`Agreement ${agreementId} status changed to ${status}`);
@@ -228,7 +255,8 @@ router.put('/:agreementId/status',
   }
 );
 
-router.post('/:agreementId/payments',
+router.post(
+  '/:agreementId/payments',
   authenticateToken,
   [
     param('agreementId').isUUID(),
@@ -245,7 +273,7 @@ router.post('/:agreementId/payments',
       }
 
       const { amount, paymentDate, paymentMethod, transactionRef } = req.body;
-      const agreementId = req.params.agreementId;
+      const { agreementId } = req.params;
 
       const agreement = await db.query('SELECT * FROM emi_agreements WHERE id = $1', [agreementId]);
       if (agreement.rows.length === 0) {

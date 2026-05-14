@@ -6,19 +6,48 @@ const kmsSigningService = require('../devices/kmsSigningService');
 
 const NONCE_EXPIRY_SECONDS = 300;
 const COMMAND_EXPIRY_MS = 5 * 60 * 1000;
+const NONCE_STORE_TIMEOUT_MS = parseInt(process.env.LOCK_NONCE_STORE_TIMEOUT_MS || '250', 10);
 
 class LockCommandService {
   generateNonce() {
     return crypto.randomBytes(16).toString('hex');
   }
 
+  async redisFast(operation, fallback, label) {
+    let timer;
+    try {
+      return await Promise.race([
+        operation(),
+        new Promise((resolve) => {
+          timer = setTimeout(() => resolve(fallback), NONCE_STORE_TIMEOUT_MS);
+        })
+      ]);
+    } catch (error) {
+      logger.warn('Lock nonce Redis operation skipped', {
+        label,
+        error: error.message
+      });
+      return fallback;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   async isNonceUsed(nonce) {
-    const existing = await redis.get(`lock:nonce:${nonce}`);
+    const existing = await this.redisFast(
+      () => redis.get(`lock:nonce:${nonce}`),
+      null,
+      'get'
+    );
     return existing !== null;
   }
 
   async storeNonce(nonce) {
-    await redis.setex(`lock:nonce:${nonce}`, NONCE_EXPIRY_SECONDS, '1');
+    await this.redisFast(
+      () => redis.setex(`lock:nonce:${nonce}`, NONCE_EXPIRY_SECONDS, '1'),
+      'OK',
+      'setex'
+    );
   }
 
   async generateSignedCommand({ deviceImei, actionType, lockLevel, metadata = {} }) {
@@ -30,19 +59,20 @@ class LockCommandService {
       throw new Error('Nonce collision — retry');
     }
 
-    const payload = {
+    // Sign only core fields — device must reconstruct these to verify
+    const corePayload = {
       deviceImei,
       timestamp,
       nonce,
       actionType,
       lockLevel: lockLevel || null,
-      metadata,
     };
 
-    const signatureResult = await kmsSigningService.sign(payload);
+    const signatureResult = await kmsSigningService.sign(corePayload);
 
     const command = {
-      ...payload,
+      ...corePayload,
+      metadata,
       hmacSignature: signatureResult.signature,
       signatureProvider: signatureResult.provider,
       signatureKeyId: signatureResult.keyId,
@@ -76,7 +106,7 @@ class LockCommandService {
       return { valid: false, reason: 'Command expired or invalid timestamp' };
     }
 
-    const payload = { deviceImei, timestamp, nonce, actionType, lockLevel, metadata };
+    const payload = { deviceImei, timestamp, nonce, actionType, lockLevel };
     const isValid = await kmsSigningService.verifySignature(payload, hmacSignature, {
       provider: command.signatureProvider,
       keyId: command.signatureKeyId,
@@ -105,9 +135,9 @@ class LockCommandService {
   async verifyAndConsumeNonce(command) {
     const { nonce } = command;
     const key = `lock:nonce:${nonce}`;
-    const exists = await redis.get(key);
+    const exists = await this.redisFast(() => redis.get(key), null, 'consume:get');
     if (exists) {
-      await redis.del(key);
+      await this.redisFast(() => redis.del(key), 0, 'consume:del');
       return true;
     }
     return false;

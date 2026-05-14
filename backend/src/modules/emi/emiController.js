@@ -1,18 +1,31 @@
 const asyncHandler = require('express-async-handler');
 const emiService = require('./emiService');
 const emiModel = require('./emiModel');
-const { validateRequest, scheduleValidation, deviceIdParam, paymentValidation, gracePeriodValidation, upcomingQueryValidation } = require('./emiValidation');
+const {
+  validateRequest,
+  scheduleValidation,
+  deviceIdParam,
+  paymentValidation,
+  gracePeriodValidation,
+  upcomingQueryValidation
+} = require('./emiValidation');
 const logger = require('../../utils/logger');
 
 const createSchedule = asyncHandler(async (req, res) => {
-  const { deviceId, totalAmount, downPayment, emiAmount, duration, startDate, graceDays } = req.body;
+  const { deviceId, totalAmount, downPayment, emiAmount, duration, startDate, graceDays } =
+    req.body;
   const dealerId = req.user?.id || req.body.dealerId;
 
   if (!dealerId) {
     return res.status(401).json({ error: 'Dealer ID is required' });
   }
 
-  const validation = await emiService.validateScheduleAmounts(totalAmount, downPayment, emiAmount, duration);
+  const validation = await emiService.validateScheduleAmounts(
+    totalAmount,
+    downPayment,
+    emiAmount,
+    duration
+  );
 
   if (!validation.valid) {
     return res.status(400).json({
@@ -251,7 +264,9 @@ const requestGracePeriod = asyncHandler(async (req, res) => {
         reason,
         status: gracePeriod.status,
         validUntil: gracePeriod.created_at
-          ? new Date(new Date(gracePeriod.created_at).getTime() + 14 * 24 * 60 * 60 * 1000).toISOString()
+          ? new Date(
+              new Date(gracePeriod.created_at).getTime() + 14 * 24 * 60 * 60 * 1000
+            ).toISOString()
           : null
       }
     });
@@ -271,15 +286,13 @@ const requestGracePeriod = asyncHandler(async (req, res) => {
 });
 
 const getUpcoming = asyncHandler(async (req, res) => {
-  const days = parseInt(req.query.days) || 7;
+  const days = parseInt(req.query.days, 10) || 7;
 
   try {
     const upcomingDevices = await emiService.getUpcomingDueDevices(days);
 
-    const formattedDevices = upcomingDevices.map(device => {
-      const nextDueDate = device.next_due_date
-        ? new Date(device.next_due_date)
-        : null;
+    const formattedDevices = upcomingDevices.map((device) => {
+      const nextDueDate = device.next_due_date ? new Date(device.next_due_date) : null;
       const daysUntilDue = nextDueDate
         ? Math.ceil((nextDueDate - new Date()) / (1000 * 60 * 60 * 24))
         : null;
@@ -364,7 +377,10 @@ const flagFraud = asyncHandler(async (req, res) => {
   } catch (error) {
     logger.error('Failed to flag fraud:', error);
 
-    if (error.message.includes('Cannot flag fraud') || error.message.includes('window has expired')) {
+    if (
+      error.message.includes('Cannot flag fraud') ||
+      error.message.includes('window has expired')
+    ) {
       return res.status(400).json({ error: error.message });
     }
 

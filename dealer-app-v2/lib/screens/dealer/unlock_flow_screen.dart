@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:dealer_app/app/emi_locker_app.dart';
 import 'package:dealer_app/widgets/grace_period_selector.dart';
+import 'package:dealer_app/widgets/locky_mascot.dart';
 import 'package:dealer_app/widgets/unlock_method_card.dart';
 
 class UnlockFlowScreen extends StatefulWidget {
@@ -41,7 +44,9 @@ class _UnlockFlowScreenState extends State<UnlockFlowScreen> {
   Future<void> _loadLockDetail() async {
     setState(() => _state = 'loading');
     try {
-      final res = await widget.api.get('/api/v1/dealer/devices/${widget.deviceId}/lock-detail');
+      final res = await widget.api
+          .get('/api/v1/dealer/devices/${widget.deviceId}/lock-detail')
+          .timeout(const Duration(seconds: 7));
       setState(() {
         _lockDetail = asMap(res.data);
         _state = 'ready';
@@ -58,16 +63,23 @@ class _UnlockFlowScreenState extends State<UnlockFlowScreen> {
     HapticFeedback.lightImpact();
     setState(() => _state = 'submitting');
     try {
-      final res = await widget.api.post(
-        '/api/v1/dealer/devices/${widget.deviceId}/unlock',
-        data: {
-          'method': _method == UnlockMethod.online ? 'online' : 'offline',
-          'grace_hours': _graceHours,
-        },
-      );
+      final res = await widget.api
+          .post(
+            '/api/v1/dealer/devices/${widget.deviceId}/unlock',
+            data: {
+              'method': _method == UnlockMethod.online ? 'online' : 'offline',
+              'grace_hours': _graceHours,
+            },
+          )
+          .timeout(const Duration(seconds: 7));
       setState(() {
         _otpResult = _method == UnlockMethod.offline ? asMap(res.data) : null;
         _state = 'success';
+      });
+    } on TimeoutException {
+      setState(() {
+        _errorMsg = 'Unlock is still processing. Refresh device status shortly.';
+        _state = 'error';
       });
     } catch (e) {
       setState(() {
@@ -99,14 +111,7 @@ class _UnlockFlowScreenState extends State<UnlockFlowScreen> {
         return _ErrorState(message: _errorMsg, onRetry: _loadLockDetail);
       case 'submitting':
         return const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
-              Text('Sending unlock command…'),
-            ],
-          ),
+          child: LockyMascot(size: 120, label: 'Sending unlock command…'),
         );
       case 'success':
         return _SuccessState(

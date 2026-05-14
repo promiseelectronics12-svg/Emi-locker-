@@ -1,7 +1,7 @@
-const db = require('../../config/database');
-const logger = require('../../utils/logger');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
+const db = require('../../config/database');
+const logger = require('../../utils/logger');
 const commandSigningService = require('../devices/commandSigningService');
 const { createNotificationRecord } = require('../notifications/notification.repository');
 const { sendCriticalAlertSMS } = require('../notifications/sms.service');
@@ -21,7 +21,8 @@ function getLockDeliveryService() {
 }
 
 function getLockLevels() {
-  if (!_lockVerificationService) _lockVerificationService = require('../lock/lockVerificationService');
+  if (!_lockVerificationService)
+    _lockVerificationService = require('../lock/lockVerificationService');
   return _lockVerificationService.LOCK_LEVELS;
 }
 
@@ -29,14 +30,14 @@ const LOCK_LEVELS = {
   NONE: 'NONE',
   REMINDER_MODE: 'REMINDER_MODE',
   PARTIAL_LOCK: 'PARTIAL_LOCK',
-  FULL_LOCK: 'FULL_LOCK',
+  FULL_LOCK: 'FULL_LOCK'
 };
 
 const INTEGRITY_FAILURE_TYPES = {
   ROOTED_DEVICE: 'ROOTED_DEVICE',
   TAMPERED_APK: 'TAMPERED_APK',
   UNKNOWN_SOURCES: 'UNKNOWN_SOURCES',
-  ATTESTATION_FAILED: 'ATTESTATION_FAILED',
+  ATTESTATION_FAILED: 'ATTESTATION_FAILED'
 };
 
 const SECURITY_EVENT_TYPES = {
@@ -45,14 +46,14 @@ const SECURITY_EVENT_TYPES = {
   IMEI_MULTIREGISTER: 'IMEI_MULTIREGISTER',
   DEVICE_OFFLINE_OVERDUE: 'DEVICE_OFFLINE_OVERDUE',
   DEALER_FRAUD_RATE: 'DEALER_FRAUD_RATE',
-  MANUAL_FLAG: 'MANUAL_FLAG',
+  MANUAL_FLAG: 'MANUAL_FLAG'
 };
 
 const SEVERITY_LEVELS = {
   LOW: 'LOW',
   MEDIUM: 'MEDIUM',
   HIGH: 'HIGH',
-  CRITICAL: 'CRITICAL',
+  CRITICAL: 'CRITICAL'
 };
 
 class FraudService {
@@ -71,7 +72,13 @@ class FraudService {
       throw new Error('Device not found');
     }
 
-    await this.verifyIntegrityCommandSignature({ deviceId, deviceImei: device.imei, nonce, timestamp, signature });
+    await this.verifyIntegrityCommandSignature({
+      deviceId,
+      deviceImei: device.imei,
+      nonce,
+      timestamp,
+      signature
+    });
 
     const severity = this.determineIntegritySeverity(failureType);
 
@@ -85,15 +92,18 @@ class FraudService {
         nonce,
         timestamp,
         signature,
-        reportedAt: new Date().toISOString(),
-      },
+        reportedAt: new Date().toISOString()
+      }
     });
 
     await this.flagDeviceForNeir(deviceId, `Integrity failure: ${failureType}`);
 
     if (severity === SEVERITY_LEVELS.CRITICAL || severity === SEVERITY_LEVELS.HIGH) {
       await this.triggerAutoLock(deviceId, `Integrity failure: ${failureType}`);
-      await this.alertDealer(deviceId, `Device ${device.imei} failed integrity check (${failureType}). Device has been auto-locked.`);
+      await this.alertDealer(
+        deviceId,
+        `Device ${device.imei} failed integrity check (${failureType}). Device has been auto-locked.`
+      );
     }
 
     await this.logAuditEvent({
@@ -101,13 +111,13 @@ class FraudService {
       action: 'INTEGRITY_FAILURE_DETECTED',
       deviceId,
       metadata: { failureType, severity, securityEventId },
-      result: 'logged',
+      result: 'logged'
     });
 
     return {
       securityEventId,
       severity,
-      action: severity >= SEVERITY_LEVELS.HIGH ? 'DEVICE_LOCKED' : 'FLAGGED',
+      action: severity >= SEVERITY_LEVELS.HIGH ? 'DEVICE_LOCKED' : 'FLAGGED'
     };
   }
 
@@ -116,13 +126,12 @@ class FraudService {
       [INTEGRITY_FAILURE_TYPES.ROOTED_DEVICE]: SEVERITY_LEVELS.CRITICAL,
       [INTEGRITY_FAILURE_TYPES.TAMPERED_APK]: SEVERITY_LEVELS.HIGH,
       [INTEGRITY_FAILURE_TYPES.UNKNOWN_SOURCES]: SEVERITY_LEVELS.MEDIUM,
-      [INTEGRITY_FAILURE_TYPES.ATTESTATION_FAILED]: SEVERITY_LEVELS.HIGH,
+      [INTEGRITY_FAILURE_TYPES.ATTESTATION_FAILED]: SEVERITY_LEVELS.HIGH
     };
     return severityMap[failureType] || SEVERITY_LEVELS.MEDIUM;
   }
 
   async verifyIntegrityCommandSignature({ deviceId, deviceImei, nonce, timestamp, signature }) {
-
     if (!nonce || !timestamp || !signature) {
       throw new Error('Nonce, timestamp, and signature are required for integrity report');
     }
@@ -136,13 +145,16 @@ class FraudService {
       timestamp,
       nonce,
       payload: { deviceId, failureType: 'INTEGRITY_FAILURE' },
-      signature,
+      signature
     };
 
     try {
       await commandSigningService.verifySignedCommand(deviceId, signedCommand);
     } catch (error) {
-      logger.warn(`Integrity command signature verification failed for device ${deviceId}:`, error.message);
+      logger.warn(
+        `Integrity command signature verification failed for device ${deviceId}:`,
+        error.message
+      );
       throw new Error('Invalid integrity report signature');
     }
   }
@@ -151,7 +163,7 @@ class FraudService {
     try {
       const lockService = getLockService();
       const lockDeliveryService = getLockDeliveryService();
-      const LOCK_LEVELS = getLockLevels();
+      const lockLevels = getLockLevels();
 
       const device = await this.getDeviceById(deviceId);
       if (!device || !device.imei) {
@@ -161,15 +173,19 @@ class FraudService {
       const command = await lockService.generateCommand({
         deviceImei: device.imei,
         actionType: 'LOCK',
-        lockLevel: LOCK_LEVELS.FULL_LOCK,
-        metadata: { reason, source: 'integrity_failure' },
+        lockLevel: lockLevels.FULL_LOCK,
+        metadata: { reason, source: 'integrity_failure' }
       });
 
-      const delivery = await lockDeliveryService.deliverCommand(deviceId, command, LOCK_LEVELS.FULL_LOCK);
+      const delivery = await lockDeliveryService.deliverCommand(
+        deviceId,
+        command,
+        lockLevels.FULL_LOCK
+      );
 
       await db.query(
         `UPDATE devices SET status = 'locked', lock_level = $1, lock_reason = $2, locked_at = NOW(), locked_by = 'system', updated_at = NOW() WHERE id = $3`,
-        [LOCK_LEVELS.FULL_LOCK, reason, deviceId]
+        [lockLevels.FULL_LOCK, reason, deviceId]
       );
 
       await this.logAuditEvent({
@@ -177,7 +193,7 @@ class FraudService {
         action: 'AUTO_LOCK_TRIGGERED',
         deviceId,
         metadata: { reason, commandNonce: command.nonce, delivery: delivery.results },
-        result: 'success',
+        result: 'success'
       });
 
       return { success: true, action: 'LOCKED' };
@@ -209,7 +225,7 @@ class FraudService {
         type: 'FRAUD_ALERT',
         payload: { message, deviceImei: device.imei, alertType: 'INTEGRITY_FAILURE' },
         status: 'PENDING',
-        provider: 'SYSTEM',
+        provider: 'SYSTEM'
       });
 
       if (dealerData.phone) {
@@ -221,7 +237,7 @@ class FraudService {
         action: 'DEALER_ALERT_SENT',
         deviceId,
         metadata: { dealerId: device.dealer_id, message },
-        result: 'success',
+        result: 'success'
       });
 
       return { success: true };
@@ -234,12 +250,16 @@ class FraudService {
   async createSecurityEvent({ deviceId, eventType, severity, details, createdBy }) {
     const validEventTypes = Object.values(SECURITY_EVENT_TYPES);
     if (!eventType || !validEventTypes.includes(eventType)) {
-      throw new Error(`Invalid eventType: ${eventType}. Must be one of: ${validEventTypes.join(', ')}`);
+      throw new Error(
+        `Invalid eventType: ${eventType}. Must be one of: ${validEventTypes.join(', ')}`
+      );
     }
 
     const validSeverities = Object.values(SEVERITY_LEVELS);
     if (!severity || !validSeverities.includes(severity)) {
-      throw new Error(`Invalid severity: ${severity}. Must be one of: ${validSeverities.join(', ')}`);
+      throw new Error(
+        `Invalid severity: ${severity}. Must be one of: ${validSeverities.join(', ')}`
+      );
     }
 
     const eventId = uuidv4();
@@ -256,7 +276,7 @@ class FraudService {
       action: 'SECURITY_EVENT_CREATED',
       deviceId,
       metadata: { eventId, eventType, severity },
-      result: 'success',
+      result: 'success'
     });
 
     return result.rows[0];
@@ -286,7 +306,7 @@ class FraudService {
         action: 'SECURITY_EVENT_RESOLVED',
         deviceId: event.device_id,
         metadata: { eventId, resolution },
-        result: 'success',
+        result: 'success'
       });
     }
 
@@ -304,7 +324,15 @@ class FraudService {
     return result.rows[0] || null;
   }
 
-  async getSecurityEvents({ page = 1, limit = 20, resolved, severity, eventType, deviceId, dealerId }) {
+  async getSecurityEvents({
+    page = 1,
+    limit = 20,
+    resolved,
+    severity,
+    eventType,
+    deviceId,
+    dealerId
+  }) {
     const offset = (page - 1) * limit;
     const conditions = [];
     const params = [];
@@ -358,8 +386,8 @@ class FraudService {
         page,
         limit,
         total: parseInt(countResult.rows[0].total, 10),
-        pages: Math.ceil(parseInt(countResult.rows[0].total, 10) / limit),
-      },
+        pages: Math.ceil(parseInt(countResult.rows[0].total, 10) / limit)
+      }
     };
   }
 
@@ -393,7 +421,7 @@ class FraudService {
       action: 'DEVICE_FLAGGED_FOR_NEIR',
       deviceId,
       metadata: { reason },
-      result: 'success',
+      result: 'success'
     });
 
     return { success: true, action: 'CREATED' };
@@ -440,9 +468,8 @@ class FraudService {
       result.rows.pop();
     }
 
-    const nextCursor = hasMore && result.rows.length > 0
-      ? result.rows[result.rows.length - 1].created_at
-      : null;
+    const nextCursor =
+      hasMore && result.rows.length > 0 ? result.rows[result.rows.length - 1].created_at : null;
 
     let total;
     if (cursor || startDate || endDate) {
@@ -463,8 +490,8 @@ class FraudService {
         total,
         pages: total ? Math.ceil(total / limit) : null,
         hasMore,
-        nextCursor,
-      },
+        nextCursor
+      }
     };
   }
 
@@ -540,8 +567,8 @@ class FraudService {
           toLocation: { lat: jump.lat2, lon: jump.lon2, timestamp: jump.time2 },
           distanceKm: Math.round(jump.distance_km),
           hoursElapsed: Math.round(jump.hours_elapsed * 100) / 100,
-          alert: `Device jumped ${Math.round(jump.distance_km)}km in ${Math.round(jump.hours_elapsed * 60)} minutes while locked`,
-        },
+          alert: `Device jumped ${Math.round(jump.distance_km)}km in ${Math.round(jump.hours_elapsed * 60)} minutes while locked`
+        }
       });
     }
 
@@ -589,14 +616,14 @@ class FraudService {
           nid: record.nid,
           imeiCount: record.imei_count,
           imeis: record.imeis,
-          devices: devices.rows.map(d => ({
+          devices: devices.rows.map((d) => ({
             deviceId: d.id,
             imei: d.imei,
             deviceName: d.device_name,
             model: d.model,
-            dealerId: d.dealer_id,
-          })),
-        },
+            dealerId: d.dealer_id
+          }))
+        }
       });
     }
 
@@ -644,8 +671,8 @@ class FraudService {
           lastLocationAt: device.last_location_at,
           daysOffline: Math.round(device.days_offline),
           emiScheduleId: device.schedule_id,
-          alert: `Device offline for ${Math.round(device.days_offline)} days while EMI overdue`,
-        },
+          alert: `Device offline for ${Math.round(device.days_offline)} days while EMI overdue`
+        }
       });
     }
 
@@ -655,7 +682,8 @@ class FraudService {
   async detectDealerFraudFlags() {
     const FRAUD_RATE_THRESHOLD = parseFloat(process.env.DEALER_FRAUD_RATE_THRESHOLD || '0.5');
 
-    const result = await db.query(`
+    const result = await db.query(
+      `
       WITH dealer_fraud_stats AS (
         SELECT
           d.dealer_id,
@@ -677,7 +705,9 @@ class FraudService {
       FROM dealer_fraud_stats
       WHERE (high_severity_events::numeric / NULLIF(total_devices, 0)) >= $1
         OR high_severity_events >= 10
-    `, [FRAUD_RATE_THRESHOLD]);
+    `,
+      [FRAUD_RATE_THRESHOLD]
+    );
 
     const anomalies = result.rows;
 
@@ -705,9 +735,9 @@ class FraudService {
           highSeverityEvents: dealer.high_severity_events,
           unresolvedEvents: dealer.unresolved_events,
           fraudRate: dealer.fraud_rate,
-          alert: `Dealer ${dealer.dealer_name} has ${dealer.fraud_rate}% fraud flag rate`,
+          alert: `Dealer ${dealer.dealer_name} has ${dealer.fraud_rate}% fraud flag rate`
         },
-        createdBy: 'system',
+        createdBy: 'system'
       });
     }
 
@@ -721,23 +751,27 @@ class FraudService {
         this.detectLocationAnomalies(),
         this.detectMultiImeiRegistration(),
         this.detectOfflineOverdueDevices(),
-        this.detectDealerFraudFlags(),
+        this.detectDealerFraudFlags()
       ]);
 
     const results = {
-      locationAnomalies: locationAnomalies.status === 'fulfilled'
-        ? locationAnomalies.value
-        : { detected: 0, error: locationAnomalies.reason?.message },
-      multiImeiRegistration: multiImeiRegistration.status === 'fulfilled'
-        ? multiImeiRegistration.value
-        : { detected: 0, error: multiImeiRegistration.reason?.message },
-      offlineOverdueDevices: offlineOverdueDevices.status === 'fulfilled'
-        ? offlineOverdueDevices.value
-        : { detected: 0, error: offlineOverdueDevices.reason?.message },
-      dealerFraudFlags: dealerFraudFlags.status === 'fulfilled'
-        ? dealerFraudFlags.value
-        : { detected: 0, error: dealerFraudFlags.reason?.message },
-      ranAt: new Date().toISOString(),
+      locationAnomalies:
+        locationAnomalies.status === 'fulfilled'
+          ? locationAnomalies.value
+          : { detected: 0, error: locationAnomalies.reason?.message },
+      multiImeiRegistration:
+        multiImeiRegistration.status === 'fulfilled'
+          ? multiImeiRegistration.value
+          : { detected: 0, error: multiImeiRegistration.reason?.message },
+      offlineOverdueDevices:
+        offlineOverdueDevices.status === 'fulfilled'
+          ? offlineOverdueDevices.value
+          : { detected: 0, error: offlineOverdueDevices.reason?.message },
+      dealerFraudFlags:
+        dealerFraudFlags.status === 'fulfilled'
+          ? dealerFraudFlags.value
+          : { detected: 0, error: dealerFraudFlags.reason?.message },
+      ranAt: new Date().toISOString()
     };
 
     const totalDetected = Object.values(results).reduce((sum, r) => {
@@ -750,7 +784,7 @@ class FraudService {
       action: 'ANOMALY_DETECTION_COMPLETE',
       deviceId: null,
       metadata: { ...results, totalDetected },
-      result: 'success',
+      result: 'success'
     });
 
     return results;
@@ -786,7 +820,7 @@ class FraudService {
     for (const row of severitySummary.rows) {
       bySeverity[row.severity] = {
         total: parseInt(row.count, 10),
-        unresolved: parseInt(row.unresolved_count, 10),
+        unresolved: parseInt(row.unresolved_count, 10)
       };
     }
 
@@ -797,11 +831,11 @@ class FraudService {
         multiImeiRegistration: countsByType[SECURITY_EVENT_TYPES.IMEI_MULTIREGISTER] || 0,
         offlineOverdueDevices: countsByType[SECURITY_EVENT_TYPES.DEVICE_OFFLINE_OVERDUE] || 0,
         dealerFraudFlags: countsByType[SECURITY_EVENT_TYPES.DEALER_FRAUD_RATE] || 0,
-        integrityFailures: countsByType[SECURITY_EVENT_TYPES.INTEGRITY_FAILURE] || 0,
+        integrityFailures: countsByType[SECURITY_EVENT_TYPES.INTEGRITY_FAILURE] || 0
       },
       bySeverity,
       breakdown: summary.rows,
-      period: '30 days',
+      period: '30 days'
     };
   }
 
@@ -824,7 +858,7 @@ class FraudService {
       );
 
       const twoSignals = recentAnomaly.rows.length > 0;
-      const severity   = twoSignals ? SEVERITY_LEVELS.CRITICAL : SEVERITY_LEVELS.HIGH;
+      const severity = twoSignals ? SEVERITY_LEVELS.CRITICAL : SEVERITY_LEVELS.HIGH;
 
       await this.createSecurityEvent({
         deviceId,
@@ -833,8 +867,9 @@ class FraudService {
         details: {
           type: 'SIM_CHANGE',
           twoSignalRule: twoSignals,
-          lat, lon,
-        },
+          lat,
+          lon
+        }
       });
 
       const msg = twoSignals
@@ -860,9 +895,14 @@ class FraudService {
       if (!device) return;
 
       // Immediately-alerting single signals (no two-signal requirement)
-      const criticalAlerts = ['IMPOSSIBLE_TRAVEL', 'RESET_WITH_RELOCATION', 'SIM_CHANGE_RELOCATION'];
+      const criticalAlerts = [
+        'IMPOSSIBLE_TRAVEL',
+        'RESET_WITH_RELOCATION',
+        'SIM_CHANGE_RELOCATION'
+      ];
       if (criticalAlerts.includes(alert_type)) {
-        await this.alertDealer(deviceId,
+        await this.alertDealer(
+          deviceId,
           `${alert_type.replace(/_/g, ' ')} detected on device ${device.model || device.imei}. Area: ${area_description || 'unknown'}.`
         );
         return;
@@ -879,7 +919,8 @@ class FraudService {
       );
 
       if (recentSim.rows.length > 0) {
-        await this.alertDealer(deviceId,
+        await this.alertDealer(
+          deviceId,
           `Two-signal fraud alert: ${alert_type} + SIM change within 60 min on device ${device.model || device.imei}. Area: ${area_description || 'unknown'}.`
         );
         await this._applyCreditPenalty(device, 'ANOMALY_DETECTED');
@@ -894,7 +935,6 @@ class FraudService {
     try {
       if (!device.owner_nid) return;
       const creditService = require('../credit/creditScoreService');
-      const crypto = require('crypto');
       const nidHash = crypto.createHash('sha256').update(device.owner_nid).digest('hex');
       await creditService.recordPaymentEvent(nidHash, eventType);
     } catch (err) {

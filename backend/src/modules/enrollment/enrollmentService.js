@@ -6,13 +6,11 @@ const logger = require('../../utils/logger');
 const { emitEnrollmentComplete } = require('../sse/sseService');
 
 function createDeviceToken({ deviceId, dealerId, resellerId }) {
-  const secret = process.env.DEVICE_TOKEN_SECRET || process.env.JWT_SECRET;
-  if (!secret) throw new Error('DEVICE_TOKEN_SECRET or JWT_SECRET must be configured');
-  return jwt.sign(
-    { sub: deviceId, type: 'device', dealerId, resellerId },
-    secret,
-    { expiresIn: process.env.DEVICE_TOKEN_EXPIRES_IN || '30d' }
-  );
+  const secret = process.env.DEVICE_TOKEN_SECRET;
+  if (!secret) throw new Error('DEVICE_TOKEN_SECRET must be set — must not share signing secret with user JWTs');
+  return jwt.sign({ sub: deviceId, type: 'device', dealerId, resellerId }, secret, {
+    expiresIn: process.env.DEVICE_TOKEN_EXPIRES_IN || '30d'
+  });
 }
 
 function createOfflineUnlockSecret() {
@@ -33,29 +31,47 @@ function truncateNullable(value, maxLength) {
   return String(value).slice(0, maxLength);
 }
 
+function normalizeImei(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
 function generateSixDigitToken() {
   return String(crypto.randomInt(100000, 999999));
 }
 
-function normalizeEmiTerms({ totalAmount, downPayment, emiAmount, duration, startDate, graceDays }) {
+function normalizeEmiTerms({
+  totalAmount,
+  downPayment,
+  emiAmount,
+  duration,
+  startDate,
+  graceDays
+}) {
   const total = Number(totalAmount);
   const down = Number(downPayment);
   const monthly = Number(emiAmount);
   const months = Number.parseInt(duration, 10);
-  const grace = graceDays === undefined || graceDays === null || graceDays === ''
-    ? 7
-    : Number.parseInt(graceDays, 10);
+  const grace =
+    graceDays === undefined || graceDays === null || graceDays === ''
+      ? 7
+      : Number.parseInt(graceDays, 10);
 
   if (!Number.isFinite(total) || total <= 0) throw new Error('Total amount must be positive.');
   if (!Number.isFinite(down) || down < 0) throw new Error('Down payment must be zero or more.');
-  if (!Number.isFinite(monthly) || monthly <= 0) throw new Error('Monthly EMI amount must be positive.');
-  if (!Number.isInteger(months) || months < 1 || months > 60) throw new Error('Duration must be 1-60 months.');
-  if (!Number.isInteger(grace) || grace < 0 || grace > 30) throw new Error('Grace days must be 0-30.');
-  if (!startDate || Number.isNaN(new Date(startDate).getTime())) throw new Error('Start date is required.');
+  if (!Number.isFinite(monthly) || monthly <= 0)
+    throw new Error('Monthly EMI amount must be positive.');
+  if (!Number.isInteger(months) || months < 1 || months > 60)
+    throw new Error('Duration must be 1-60 months.');
+  if (!Number.isInteger(grace) || grace < 0 || grace > 30)
+    throw new Error('Grace days must be 0-30.');
+  if (!startDate || Number.isNaN(new Date(startDate).getTime()))
+    throw new Error('Start date is required.');
 
-  const expected = down + (monthly * months);
+  const expected = down + monthly * months;
   if (Math.abs(expected - total) > 0.01) {
-    const err = new Error(`Total amount must equal down payment + monthly EMI × duration (${expected.toFixed(2)}).`);
+    const err = new Error(
+      `Total amount must equal down payment + monthly EMI × duration (${expected.toFixed(2)}).`
+    );
     err.statusCode = 400;
     throw err;
   }
@@ -79,9 +95,10 @@ function addMonths(date, months) {
 }
 
 function buildInstallments(schedule) {
-  const startDate = schedule.start_date instanceof Date
-    ? schedule.start_date.toISOString().slice(0, 10)
-    : String(schedule.start_date).slice(0, 10);
+  const startDate =
+    schedule.start_date instanceof Date
+      ? schedule.start_date.toISOString().slice(0, 10)
+      : String(schedule.start_date).slice(0, 10);
   const start = new Date(`${startDate}T00:00:00.000Z`);
   const duration = Number(schedule.duration) || 0;
   const amount = Number(schedule.emi_amount) || 0;
@@ -101,9 +118,10 @@ function formatSchedule(schedule) {
     downPayment: Number(schedule.down_payment || 0),
     emiAmount: Number(schedule.emi_amount),
     duration: Number(schedule.duration),
-    startDate: schedule.start_date instanceof Date
-      ? schedule.start_date.toISOString().slice(0, 10)
-      : String(schedule.start_date).slice(0, 10),
+    startDate:
+      schedule.start_date instanceof Date
+        ? schedule.start_date.toISOString().slice(0, 10)
+        : String(schedule.start_date).slice(0, 10),
     graceDays: Number(schedule.grace_days || 0),
     status: schedule.status,
     installments: buildInstallments(schedule)
@@ -154,8 +172,23 @@ async function startEnrollment({
   startDate,
   graceDays
 }) {
+  const primaryImei = normalizeImei(imei1);
+  const secondaryImei = normalizeImei(imei2);
+  if (secondaryImei && primaryImei === secondaryImei) {
+    const err = new Error('IMEI 2 must be different from IMEI 1.');
+    err.statusCode = 400;
+    throw err;
+  }
+
   const keyTier = ['standard', 'premium', 'vip'].includes(tier) ? tier : 'standard';
-  const emiTerms = normalizeEmiTerms({ totalAmount, downPayment, emiAmount, duration, startDate, graceDays });
+  const emiTerms = normalizeEmiTerms({
+    totalAmount,
+    downPayment,
+    emiAmount,
+    duration,
+    startDate,
+    graceDays
+  });
   const dealerIdentity = await resolveDealerIdentity(dealerId);
 
   const stockRow = await db.query(
@@ -175,10 +208,9 @@ async function startEnrollment({
     throw err;
   }
 
-  const deviceRow = await db.query(
-    `SELECT id, status FROM devices WHERE imei = $1 LIMIT 1`,
-    [imei1]
-  );
+  const deviceRow = await db.query(`SELECT id, status FROM devices WHERE imei = $1 LIMIT 1`, [
+    primaryImei
+  ]);
 
   let device;
   if (!deviceRow.rows.length) {
@@ -189,12 +221,12 @@ async function startEnrollment({
        VALUES ($1, $2, $3, 'pending', NOW(), NOW())
        ON CONFLICT (imei) DO UPDATE SET updated_at = NOW()
        RETURNING id, status`,
-      [imei1, brand || null, model || null]
+      [primaryImei, brand || null, model || null]
     );
-    device = created.rows[0];
-    logger.info('Device created by dealer during enrollment', { imei: imei1.slice(-4) });
+    [device] = created.rows;
+    logger.info('Device created by dealer during enrollment', { imei: primaryImei.slice(-4) });
   } else {
-    device = deviceRow.rows[0];
+    [device] = deviceRow.rows;
   }
 
   if (device.status === 'enrolled' || device.status === 'active') {
@@ -215,13 +247,30 @@ async function startEnrollment({
         total_amount, down_payment, emi_amount, duration, start_date, grace_days,
         status, expires_at, created_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pending',$19,NOW())`,
-    [enrollmentId, device.id, dealerIdentity.dealerRecordId, customer_name, nid_hash, phone_number,
-     brand, model, imei1, imei2 || null, tokenHash, keyTier,
-     emiTerms.totalAmount, emiTerms.downPayment, emiTerms.emiAmount, emiTerms.duration, emiTerms.startDate, emiTerms.graceDays,
-     expiresAt]
+    [
+      enrollmentId,
+      device.id,
+      dealerIdentity.dealerRecordId,
+      customer_name,
+      nid_hash,
+      phone_number,
+      brand,
+      model,
+      primaryImei,
+      secondaryImei || null,
+      tokenHash,
+      keyTier,
+      emiTerms.totalAmount,
+      emiTerms.downPayment,
+      emiTerms.emiAmount,
+      emiTerms.duration,
+      emiTerms.startDate,
+      emiTerms.graceDays,
+      expiresAt
+    ]
   );
 
-  logger.info('Enrollment started', { enrollmentId, imei: imei1.slice(-4) });
+  logger.info('Enrollment started', { enrollmentId, imei: primaryImei.slice(-4) });
 
   // Return plaintext token to dealer app — dealer will type it into the user app
   return { enrollment_id: enrollmentId, device_id: device.id, token };
@@ -303,7 +352,7 @@ async function confirmFromDevice({ code, imei }) {
       throw err;
     }
 
-    committedEnrollment = lockedRow.rows[0];
+    [committedEnrollment] = lockedRow.rows;
     committedDealerIdentity = await resolveDealerIdentity(committedEnrollment.dealer_id, client);
     const keyTier = committedEnrollment.tier || 'standard';
 
@@ -326,7 +375,7 @@ async function confirmFromDevice({ code, imei }) {
       throw err;
     }
 
-    consumedKey = keyRow.rows[0];
+    [consumedKey] = keyRow.rows;
     offlineUnlockSecret = createOfflineUnlockSecret();
 
     const customerResult = await client.query(
@@ -341,14 +390,14 @@ async function confirmFromDevice({ code, imei }) {
       [
         createCustomerEmail({
           nidHash: committedEnrollment.nid_hash,
-          phoneNumber: committedEnrollment.phone_number,
+          phoneNumber: committedEnrollment.phone_number
         }),
         committedEnrollment.customer_name,
         committedEnrollment.phone_number,
-        truncateNullable(committedEnrollment.nid_hash, 50),
+        truncateNullable(committedEnrollment.nid_hash, 50)
       ]
     );
-    customer = customerResult.rows[0];
+    [customer] = customerResult.rows;
 
     const dealerPhoneResult = await client.query(
       `SELECT phone FROM dealers WHERE id = $1 LIMIT 1`,
@@ -415,7 +464,7 @@ async function confirmFromDevice({ code, imei }) {
         committedEnrollment.grace_days
       ]
     );
-    createdSchedule = scheduleResult.rows[0];
+    [createdSchedule] = scheduleResult.rows;
 
     await client.query('COMMIT');
     logger.info('Activation key consumed', { keyId: consumedKey.id, tier: keyTier });
@@ -426,12 +475,21 @@ async function confirmFromDevice({ code, imei }) {
     client.release();
   }
 
-  logger.info('Device bound via user app', { enrollmentId: committedEnrollment.id, imei: imei ? imei.slice(-4) : 'unknown' });
+  logger.info('Device bound via user app', {
+    enrollmentId: committedEnrollment.id,
+    imei: imei ? imei.slice(-4) : 'unknown'
+  });
 
   try {
-    const devRow = await db.query(`SELECT id, device_name, imei FROM devices WHERE id = $1`, [committedEnrollment.dev_id]);
-    if (devRow.rows.length) emitEnrollmentComplete(devRow.rows[0], committedDealerIdentity.dealerRecordId);
-  } catch (_) {}
+    const devRow = await db.query(`SELECT id, device_name, imei FROM devices WHERE id = $1`, [
+      committedEnrollment.dev_id
+    ]);
+    if (devRow.rows.length) {
+      emitEnrollmentComplete(devRow.rows[0], committedDealerIdentity.dealerRecordId);
+    }
+  } catch (error) {
+    logger.warn('Enrollment SSE emit failed', { error: error.message });
+  }
 
   const deviceToken = createDeviceToken({
     deviceId: committedEnrollment.dev_id,

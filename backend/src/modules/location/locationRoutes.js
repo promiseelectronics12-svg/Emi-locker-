@@ -1,15 +1,19 @@
 const express = require('express');
+
 const router = express.Router();
 const { body, param, query } = require('express-validator');
 const rateLimit = require('express-rate-limit');
+const { param: paramValidator } = require('express-validator');
 const db = require('../../config/database');
 const logger = require('../../utils/logger');
 const { authenticateToken } = require('../../middleware/auth');
 const { requireRole } = require('../../middleware/rbac');
 const { validateRequest } = require('../../middleware/validation');
 const locationController = require('./locationController');
-const { param: paramValidator } = require('express-validator');
-const locationDeviceIdParam = paramValidator('deviceId').isUUID().withMessage('Valid device ID required');
+
+const locationDeviceIdParam = paramValidator('deviceId')
+  .isUUID()
+  .withMessage('Valid device ID required');
 const validateLocationDeviceId = (req, res, next) => {
   const { validationResult } = require('express-validator');
   const errors = validationResult(req);
@@ -27,14 +31,15 @@ async function validateDeviceToken(req, res, next) {
 
   try {
     const jwt = require('jsonwebtoken');
-    const secret = process.env.DEVICE_TOKEN_SECRET || process.env.JWT_SECRET;
+    const secret = process.env.DEVICE_TOKEN_SECRET;
     if (!secret) {
-      return res.status(500).json({ success: false, error: 'Server misconfigured' });
+      logger.error('DEVICE_TOKEN_SECRET not configured');
+      return res.status(401).json({ success: false, error: 'Invalid device token' });
     }
 
     let payload;
     try {
-      payload = jwt.verify(deviceToken, secret);
+      payload = jwt.verify(deviceToken, secret, { algorithms: ['HS256'] });
     } catch (e) {
       return res.status(401).json({ success: false, error: 'Invalid device token' });
     }
@@ -126,15 +131,17 @@ function verifyDeviceOwnership(req, res, next) {
      WHERE d.id = $1
        AND (dl.user_id = $2 OR dl2.user_id = $2 OR d.owner_id = $2 OR r.id = $2 OR d.dealer_id = $2)`,
     [deviceId, userId]
-  ).then(result => {
-    if (result.rows.length === 0) {
-      return res.status(403).json({ success: false, error: 'Access denied to this device' });
-    }
-    next();
-  }).catch(error => {
-    logger.error('Device ownership verification error:', error);
-    return res.status(500).json({ success: false, error: 'Verification error' });
-  });
+  )
+    .then((result) => {
+      if (result.rows.length === 0) {
+        return res.status(403).json({ success: false, error: 'Access denied to this device' });
+      }
+      next();
+    })
+    .catch((error) => {
+      logger.error('Device ownership verification error:', error);
+      return res.status(500).json({ success: false, error: 'Verification error' });
+    });
 }
 
 const reportLocationValidation = [
@@ -154,8 +161,12 @@ const setGeofenceValidation = [
   body('center_longitude').optional().isFloat({ min: -180, max: 180 }),
   body('radius_meters').optional().isInt({ min: 100, max: 100000 }),
   body('coordinates').optional().isArray().withMessage('Coordinates must be array'),
-  body('coordinates.*.latitude').isFloat({ min: -90, max: 90 }).withMessage('Coordinate latitude must be between -90 and 90'),
-  body('coordinates.*.longitude').isFloat({ min: -180, max: 180 }).withMessage('Coordinate longitude must be between -180 and 180'),
+  body('coordinates.*.latitude')
+    .isFloat({ min: -90, max: 90 })
+    .withMessage('Coordinate latitude must be between -90 and 90'),
+  body('coordinates.*.longitude')
+    .isFloat({ min: -180, max: 180 })
+    .withMessage('Coordinate longitude must be between -180 and 180'),
   body('enabled').optional().isBoolean(),
   validateRequest
 ];
@@ -235,10 +246,16 @@ router.post(
   validateDeviceToken,
   locationDeviceIdParam,
   validateLocationDeviceId,
-  body('alert_type').isIn([
-    'UNUSUAL_LOCATION', 'IMPOSSIBLE_TRAVEL', 'NEW_REGION',
-    'RESET_WITH_RELOCATION', 'SIM_CHANGE_RELOCATION', 'EXTENDED_OFFLINE'
-  ]).withMessage('Invalid alert_type'),
+  body('alert_type')
+    .isIn([
+      'UNUSUAL_LOCATION',
+      'IMPOSSIBLE_TRAVEL',
+      'NEW_REGION',
+      'RESET_WITH_RELOCATION',
+      'SIM_CHANGE_RELOCATION',
+      'EXTENDED_OFFLINE'
+    ])
+    .withMessage('Invalid alert_type'),
   body('area_description').optional().isString().isLength({ max: 255 }),
   body('confidence').optional().isInt({ min: 0, max: 100 }),
   body('lat').optional().isFloat({ min: -90, max: 90 }),
@@ -253,7 +270,14 @@ router.post(
         `INSERT INTO location_anomalies
            (device_id, alert_type, area_description, confidence, reveal_lat, reveal_lon)
          VALUES ($1, $2, $3, $4, $5, $6)`,
-        [deviceId, alert_type, area_description || null, confidence || null, lat || null, lon || null]
+        [
+          deviceId,
+          alert_type,
+          area_description || null,
+          confidence || null,
+          lat || null,
+          lon || null
+        ]
       );
 
       // Delegate two-signal correlation to fraud service

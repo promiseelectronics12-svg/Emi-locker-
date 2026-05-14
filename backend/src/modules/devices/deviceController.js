@@ -3,6 +3,7 @@ const { body, param, validationResult } = require('express-validator');
 const deviceService = require('./deviceService');
 const hardwareBindingService = require('./hardwareBindingService');
 const logger = require('../../utils/logger');
+const db = require('../../config/database');
 
 const validateRequest = (req, res, next) => {
   const errors = validationResult(req);
@@ -31,9 +32,7 @@ const enrollmentTokenValidation = body('enrollmentToken')
   .isLength({ min: 1 })
   .withMessage('Enrollment token is required');
 
-const deviceIdParam = param('id')
-  .isUUID()
-  .withMessage('Valid device ID is required');
+const deviceIdParam = param('id').isUUID().withMessage('Valid device ID is required');
 
 const fcmTokenValidation = body('fcmToken')
   .isString()
@@ -53,16 +52,8 @@ const unlockCodeValidation = body('unlockCode')
   .withMessage('Unlock code must be 4-8 characters');
 
 const enrollDevice = asyncHandler(async (req, res) => {
-  const {
-    enrollmentToken,
-    imei,
-    serialNumber,
-    socId,
-    dealerId,
-    deviceName,
-    model,
-    brand
-  } = req.body;
+  const { enrollmentToken, imei, serialNumber, socId, dealerId, deviceName, model, brand } =
+    req.body;
 
   const userId = req.user?.id;
 
@@ -328,8 +319,6 @@ const getDevicesByOwner = asyncHandler(async (req, res) => {
   if (!userId) {
     return res.status(401).json({ error: 'User not authenticated' });
   }
-
-  const db = require('../../config/database');
 
   try {
     const result = await db.query(

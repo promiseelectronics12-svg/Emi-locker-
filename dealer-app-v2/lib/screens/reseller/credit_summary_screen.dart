@@ -34,12 +34,21 @@ class _CreditSummaryScreenState extends State<CreditSummaryScreen> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _errorMsg = ''; });
+    setState(() {
+      _loading = true;
+      _errorMsg = '';
+    });
     try {
       final res = await widget.api.get('/api/v1/reseller/credit/summary');
-      setState(() { _data = asMap(res.data); _loading = false; });
+      setState(() {
+        _data = asMap(res.data);
+        _loading = false;
+      });
     } catch (e) {
-      setState(() { _errorMsg = readableError(e); _loading = false; });
+      setState(() {
+        _errorMsg = readableError(e);
+        _loading = false;
+      });
     }
   }
 
@@ -50,14 +59,20 @@ class _CreditSummaryScreenState extends State<CreditSummaryScreen> {
       return;
     }
     HapticFeedback.lightImpact();
-    setState(() { _registering = true; _registerSuccess = false; });
+    setState(() {
+      _registering = true;
+      _registerSuccess = false;
+    });
     try {
       await widget.api.post(
         '/api/v1/reseller/profiles/register-seed',
         data: {'nid_hash': hash},
       );
       if (mounted) {
-        setState(() { _registering = false; _registerSuccess = true; });
+        setState(() {
+          _registering = false;
+          _registerSuccess = true;
+        });
         _nidHashController.clear();
         snack(context, 'Profile seed registered');
       }
@@ -104,9 +119,10 @@ class _CreditSummaryScreenState extends State<CreditSummaryScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               InlineNotice(
-                  message: _errorMsg,
-                  tone: AppTone.danger,
-                  icon: Icons.error_outline),
+                message: _errorMsg,
+                tone: AppTone.danger,
+                icon: Icons.error_outline,
+              ),
               const SizedBox(height: 16),
               OutlinedButton.icon(
                 icon: const Icon(Icons.refresh_rounded),
@@ -119,12 +135,11 @@ class _CreditSummaryScreenState extends State<CreditSummaryScreen> {
       );
     }
 
-    final d = _data!;
+    final d = _data ?? <String, dynamic>{};
     final tiers = (d['tier_distribution'] as List? ?? [])
         .map((e) => asMap(e))
         .toList();
-    final blacklistCount =
-        (d['active_blacklist_count'] as num? ?? 0).toInt();
+    final blacklistCount = (d['active_blacklist_count'] as num? ?? 0).toInt();
 
     return ListView(
       padding: const EdgeInsets.all(20),
@@ -134,13 +149,13 @@ class _CreditSummaryScreenState extends State<CreditSummaryScreen> {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: blacklistCount > 0
-                ? AppTone.danger.withOpacity(0.06)
+                ? AppTone.danger.withValues(alpha: 0.06)
                 : AppTone.surface,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: blacklistCount > 0
-                  ? AppTone.danger.withOpacity(0.3)
-                  : AppTone.muted.withOpacity(0.15),
+                  ? AppTone.danger.withValues(alpha: 0.3)
+                  : AppTone.muted.withValues(alpha: 0.15),
             ),
           ),
           child: Row(
@@ -153,38 +168,46 @@ class _CreditSummaryScreenState extends State<CreditSummaryScreen> {
                 size: 28,
               ),
               const SizedBox(width: 14),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Active blacklist in region',
-                      style: const TextStyle(
-                          fontSize: 12, color: AppTone.muted)),
-                  Text('$blacklistCount customers',
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Active blacklist in region',
+                      style: TextStyle(fontSize: 12, color: AppTone.muted),
+                    ),
+                    Text(
+                      '$blacklistCount customers',
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                          color: blacklistCount > 0
-                              ? AppTone.danger
-                              : AppTone.ink)),
-                ],
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: blacklistCount > 0
+                            ? AppTone.danger
+                            : AppTone.ink,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
         ),
         const SizedBox(height: 24),
 
-        Text('Tier distribution',
-            style: Theme.of(context)
-                .textTheme
-                .labelMedium
-                ?.copyWith(color: AppTone.muted)),
+        Text(
+          'Tier distribution',
+          style: Theme.of(
+            context,
+          ).textTheme.labelMedium?.copyWith(color: AppTone.muted),
+        ),
         const SizedBox(height: 12),
 
         if (tiers.isEmpty)
           const Empty('No credit data yet for your region')
         else
           ...tiers.map((t) {
-            final tier  = text(t['tier'], fallback: '—');
+            final tier = text(t['tier'], fallback: '?');
             final count = (t['count'] as num? ?? 0).toInt();
             final color = tierColor(tier);
             return Padding(
@@ -195,8 +218,10 @@ class _CreditSummaryScreenState extends State<CreditSummaryScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: LinearProgressIndicator(
-                      value: count > 0 ? (count / (count + 1)).clamp(0.0, 1.0) : 0.0,
-                      backgroundColor: color.withOpacity(0.1),
+                      value: count > 0
+                          ? (count / (count + 1)).clamp(0.0, 1.0)
+                          : 0.0,
+                      backgroundColor: color.withValues(alpha: 0.1),
                       color: color,
                       minHeight: 8,
                       borderRadius: BorderRadius.circular(4),
@@ -205,12 +230,15 @@ class _CreditSummaryScreenState extends State<CreditSummaryScreen> {
                   const SizedBox(width: 10),
                   SizedBox(
                     width: 36,
-                    child: Text('$count',
-                        textAlign: TextAlign.right,
-                        style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: AppTone.ink)),
+                    child: Text(
+                      '$count',
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppTone.ink,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -219,11 +247,12 @@ class _CreditSummaryScreenState extends State<CreditSummaryScreen> {
 
         const SizedBox(height: 28),
 
-        Text('Register profile seed',
-            style: Theme.of(context)
-                .textTheme
-                .labelMedium
-                ?.copyWith(color: AppTone.muted)),
+        Text(
+          'Register profile seed',
+          style: Theme.of(
+            context,
+          ).textTheme.labelMedium?.copyWith(color: AppTone.muted),
+        ),
         const SizedBox(height: 10),
         const InlineNotice(
           message:
@@ -247,10 +276,13 @@ class _CreditSummaryScreenState extends State<CreditSummaryScreen> {
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
               : (_registerSuccess
-                  ? const Icon(Icons.check_rounded, size: 16)
-                  : const Icon(Icons.cloud_upload_outlined, size: 16)),
+                    ? const Icon(Icons.check_rounded, size: 16)
+                    : const Icon(Icons.cloud_upload_outlined, size: 16)),
           label: Text(_registerSuccess ? 'Registered!' : 'Register seed'),
           onPressed: _registering ? null : _registerSeed,
         ),

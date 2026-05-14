@@ -11,6 +11,12 @@ function getPautService() {
   return _pautService;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 class LockDeliveryService {
   buildFcmData(data) {
     return Object.fromEntries(
@@ -30,9 +36,11 @@ class LockDeliveryService {
         if (attempt >= maxRetries) {
           throw error;
         }
-        const delay = baseDelay * Math.pow(2, attempt - 1);
-        logger.warn(`Delivery attempt ${attempt} failed, retrying in ${delay}ms...`, { error: error.message });
-        await new Promise(resolve => setTimeout(resolve, delay));
+        const delay = baseDelay * 2 ** (attempt - 1);
+        logger.warn(`Delivery attempt ${attempt} failed, retrying in ${delay}ms...`, {
+          error: error.message
+        });
+        await sleep(delay);
       }
     }
   }
@@ -41,7 +49,7 @@ class LockDeliveryService {
     const results = {
       fcm: { attempted: false, success: false, error: null },
       amapi: { attempted: false, success: false, error: null },
-      paut: { attempted: false, success: false, error: null },
+      paut: { attempted: false, success: false, error: null }
     };
 
     const deviceRow = await getDeviceDeliveryInfo(deviceId);
@@ -57,7 +65,13 @@ class LockDeliveryService {
     if (lockLevel !== LOCK_LEVELS.FULL_LOCK) {
       results.paut = await this.deliverPaut(deviceId, imei, lockLevel);
     } else {
-      results.paut = { attempted: false, success: false, error: null, channel: 'PAUT', skipped: true };
+      results.paut = {
+        attempted: false,
+        success: false,
+        error: null,
+        channel: 'PAUT',
+        skipped: true
+      };
     }
 
     const anySuccess = results.fcm.success || results.amapi.success || results.paut.success;
@@ -88,12 +102,12 @@ class LockDeliveryService {
           timestamp: String(command.timestamp),
           expiresAt: command.expiresAt,
           hmacSignature: command.hmacSignature,
-          deviceImei: command.deviceImei,
+          deviceImei: command.deviceImei
         }),
         android: {
           priority: 'high',
-          ttl: 5 * 60 * 1000,
-        },
+          ttl: 5 * 60 * 1000
+        }
       };
 
       await this.withRetry(() => getMessaging().send(message));
@@ -132,12 +146,14 @@ class LockDeliveryService {
       const policyMap = {
         REMINDER_MODE: this.buildReminderModePolicy(),
         PARTIAL_LOCK: this.buildPartialLockPolicy(),
-        FULL_LOCK: this.buildFullLockPolicy(),
+        FULL_LOCK: this.buildFullLockPolicy()
       };
 
       const policy = policyMap[lockLevel] || policyMap.FULL_LOCK;
 
-      await this.withRetry(() => amapiService.setDevicePolicy(enterpriseId, amapiDeviceName, policy));
+      await this.withRetry(() =>
+        amapiService.setDevicePolicy(enterpriseId, amapiDeviceName, policy)
+      );
       result.success = true;
       logger.info('AMAPI policy applied', { deviceId, lockLevel });
     } catch (error) {
@@ -172,31 +188,37 @@ class LockDeliveryService {
   buildReminderModePolicy() {
     return {
       statusBarSettings: { disabled: false },
-      statusBarNotifications: [{
-        title: 'EMI Payment Reminder',
-        text: 'Your EMI payment is overdue. Please make a payment to avoid device restrictions.',
-        userCanDismiss: false,
-      }],
+      statusBarNotifications: [
+        {
+          title: 'EMI Payment Reminder',
+          text: 'Your EMI payment is overdue. Please make a payment to avoid device restrictions.',
+          userCanDismiss: false
+        }
+      ]
     };
   }
 
   buildPartialLockPolicy() {
     // Read blocked apps from env for configurability (white-labeling support)
-    const blockedApps = (process.env.PARTIAL_LOCK_BLOCKED_APPS ||
-      'com.android.chrome,com.google.android.youtube,com.instagram.android,com.facebook.katana,com.whatsapp')
+    const blockedApps = (
+      process.env.PARTIAL_LOCK_BLOCKED_APPS ||
+      'com.android.chrome,com.google.android.youtube,com.instagram.android,com.facebook.katana,com.whatsapp'
+    )
       .split(',')
-      .map(pkg => ({ packageName: pkg.trim() }));
+      .map((pkg) => ({ packageName: pkg.trim() }));
 
     return {
       installAppsDisabled: true,
       uninstallAppsDisabled: true,
       statusBarSettings: { disabled: true },
-      statusBarNotifications: [{
-        title: 'EMI Payment Required',
-        text: 'Your device is partially locked due to overdue EMI. Contact your dealer.',
-        userCanDismiss: false,
-      }],
-      disabledApplications: blockedApps,
+      statusBarNotifications: [
+        {
+          title: 'EMI Payment Required',
+          text: 'Your device is partially locked due to overdue EMI. Contact your dealer.',
+          userCanDismiss: false
+        }
+      ],
+      disabledApplications: blockedApps
     };
   }
 
@@ -207,15 +229,17 @@ class LockDeliveryService {
     // AMAPI is used here only to enforce device-level restrictions.
     const lockTaskPackages = (process.env.FULL_LOCK_KIOSK_PACKAGES || 'com.emilocker.user')
       .split(',')
-      .map(pkg => pkg.trim());
+      .map((pkg) => pkg.trim());
 
     return {
       statusBarSettings: { disabled: true },
-      statusBarNotifications: [{
-        title: 'Device Locked — EMI Overdue',
-        text: 'This device is locked due to non-payment. Contact your dealer to resolve.',
-        userCanDismiss: false,
-      }],
+      statusBarNotifications: [
+        {
+          title: 'Device Locked — EMI Overdue',
+          text: 'This device is locked due to non-payment. Contact your dealer to resolve.',
+          userCanDismiss: false
+        }
+      ],
       installAppsDisabled: true,
       uninstallAppsDisabled: true,
       usbDataAccessDisabled: true,
@@ -227,12 +251,12 @@ class LockDeliveryService {
         powerButtonActions: 'POWER_BUTTON_AVAILABLE',
         systemErrorWarnings: 'ERROR_AND_WARNINGS_DISABLED',
         systemNavigation: 'NAVIGATION_DISABLED',
-        statusBar: 'NOTIFICATIONS_AND_SYSTEM_INFO_DISABLED',
+        statusBar: 'NOTIFICATIONS_AND_SYSTEM_INFO_DISABLED'
       },
       lockTaskPolicy: {
-        packages: lockTaskPackages,
+        packages: lockTaskPackages
       },
-      wipeOnFailureEnabled: false,
+      wipeOnFailureEnabled: false
     };
   }
 
@@ -244,7 +268,7 @@ class LockDeliveryService {
         commandType: command.actionType,
         fcmResult: results.fcm,
         amapiResult: results.amapi,
-        pautResult: results.paut,
+        pautResult: results.paut
       });
     } catch (error) {
       logger.error('Failed to log delivery result', { deviceId, error: error.message });
@@ -252,10 +276,7 @@ class LockDeliveryService {
   }
 
   async deliverNotification(deviceId, type, title, body) {
-    const device = await db.query(
-      `SELECT fcm_token FROM devices WHERE id = $1`,
-      [deviceId]
-    );
+    const device = await db.query(`SELECT fcm_token FROM devices WHERE id = $1`, [deviceId]);
 
     if (device.rows.length === 0 || !device.rows[0].fcm_token) {
       return { success: false, error: 'No FCM token' };
@@ -267,9 +288,9 @@ class LockDeliveryService {
         data: this.buildFcmData({
           type,
           title,
-          body,
+          body
         }),
-        android: { priority: 'high' },
+        android: { priority: 'high' }
       });
       return { success: true };
     } catch (error) {
@@ -279,10 +300,7 @@ class LockDeliveryService {
   }
 
   async deliverOverlayCommand(deviceId, type, title, body) {
-    const device = await db.query(
-      `SELECT fcm_token FROM devices WHERE id = $1`,
-      [deviceId]
-    );
+    const device = await db.query(`SELECT fcm_token FROM devices WHERE id = $1`, [deviceId]);
 
     if (device.rows.length === 0 || !device.rows[0].fcm_token) {
       return { success: false, error: 'No FCM token' };
@@ -296,9 +314,9 @@ class LockDeliveryService {
           title,
           body,
           overlay: 'true',
-          dismissible: 'false',
+          dismissible: 'false'
         }),
-        android: { priority: 'high' },
+        android: { priority: 'high' }
       });
       return { success: true };
     } catch (error) {

@@ -5,6 +5,7 @@ import 'dart:math';
 
 import '../core/local_vault.dart';
 import '../core/google_vault.dart';
+import '../core/google_auth.dart';
 import '../core/sse_service.dart';
 import '../screens/dealer/unlock_flow_screen.dart';
 import '../screens/dealer/lock_detail_screen.dart';
@@ -13,7 +14,7 @@ import '../screens/dealer/customer_credit_screen.dart';
 import '../screens/dealer/fraud_center_screen.dart';
 import '../screens/dealer/evidence_vault_screen.dart';
 import '../screens/dealer/bind_device_wizard.dart';
-import '../screens/reseller/credit_summary_screen.dart';
+import '../screens/reseller/credit_summary_screen.dart' as reseller_credit;
 import '../screens/shared/biometric_lock_screen.dart';
 import '../screens/shared/google_drive_onboarding_screen.dart';
 import '../screens/shared/onboarding_screen.dart';
@@ -38,6 +39,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../core/biometric_service.dart';
+import '../widgets/locky_mascot.dart';
 
 const storage = FlutterSecureStorage();
 const localApiBaseUrl = 'http://localhost:3000';
@@ -103,59 +105,110 @@ class AppText {
 
   // ── Display / Hero ────────────────────────────────────────────────────────
   static TextStyle display({Color? color}) => GoogleFonts.inter(
-        fontSize: 30, fontWeight: FontWeight.w900,
-        letterSpacing: -0.8, height: 1.08, color: color ?? AppTone.ink);
+    fontSize: 30,
+    fontWeight: FontWeight.w900,
+    letterSpacing: -0.8,
+    height: 1.08,
+    color: color ?? AppTone.ink,
+  );
 
   static TextStyle headline({Color? color}) => GoogleFonts.inter(
-        fontSize: 22, fontWeight: FontWeight.w800,
-        letterSpacing: -0.5, height: 1.15, color: color ?? AppTone.ink);
+    fontSize: 22,
+    fontWeight: FontWeight.w800,
+    letterSpacing: -0.5,
+    height: 1.15,
+    color: color ?? AppTone.ink,
+  );
 
   // ── Titles ────────────────────────────────────────────────────────────────
   static TextStyle title({Color? color}) => GoogleFonts.inter(
-        fontSize: 17, fontWeight: FontWeight.w800,
-        letterSpacing: -0.2, height: 1.3, color: color ?? AppTone.ink);
+    fontSize: 17,
+    fontWeight: FontWeight.w800,
+    letterSpacing: -0.2,
+    height: 1.3,
+    color: color ?? AppTone.ink,
+  );
 
   static TextStyle titleSm({Color? color}) => GoogleFonts.inter(
-        fontSize: 15, fontWeight: FontWeight.w700,
-        letterSpacing: -0.1, height: 1.3, color: color ?? AppTone.ink);
+    fontSize: 15,
+    fontWeight: FontWeight.w700,
+    letterSpacing: -0.1,
+    height: 1.3,
+    color: color ?? AppTone.ink,
+  );
 
   // ── Body ──────────────────────────────────────────────────────────────────
   static TextStyle body({Color? color}) => GoogleFonts.inter(
-        fontSize: 14, fontWeight: FontWeight.w500,
-        letterSpacing: 0.0, height: 1.5, color: color ?? AppTone.ink);
+    fontSize: 14,
+    fontWeight: FontWeight.w500,
+    letterSpacing: 0.0,
+    height: 1.5,
+    color: color ?? AppTone.ink,
+  );
 
   static TextStyle bodyBold({Color? color}) => GoogleFonts.inter(
-        fontSize: 14, fontWeight: FontWeight.w700,
-        letterSpacing: 0.0, height: 1.5, color: color ?? AppTone.ink);
+    fontSize: 14,
+    fontWeight: FontWeight.w700,
+    letterSpacing: 0.0,
+    height: 1.5,
+    color: color ?? AppTone.ink,
+  );
 
   // ── Captions / Meta ───────────────────────────────────────────────────────
   static TextStyle caption({Color? color}) => GoogleFonts.inter(
-        fontSize: 12, fontWeight: FontWeight.w500,
-        letterSpacing: 0.1, height: 1.4, color: color ?? AppTone.muted);
+    fontSize: 12,
+    fontWeight: FontWeight.w500,
+    letterSpacing: 0.1,
+    height: 1.4,
+    color: color ?? AppTone.muted,
+  );
 
   static TextStyle captionBold({Color? color}) => GoogleFonts.inter(
-        fontSize: 12, fontWeight: FontWeight.w700,
-        letterSpacing: 0.1, height: 1.4, color: color ?? AppTone.muted);
+    fontSize: 12,
+    fontWeight: FontWeight.w700,
+    letterSpacing: 0.1,
+    height: 1.4,
+    color: color ?? AppTone.muted,
+  );
 
   // ── Labels (ALL CAPS small chips) ─────────────────────────────────────────
   static TextStyle label({Color? color}) => GoogleFonts.inter(
-        fontSize: 10, fontWeight: FontWeight.w800,
-        letterSpacing: 1.1, height: 1.2, color: color ?? AppTone.muted);
+    fontSize: 10,
+    fontWeight: FontWeight.w800,
+    letterSpacing: 1.1,
+    height: 1.2,
+    color: color ?? AppTone.muted,
+  );
 
   // ── Monospace (codes, IMEI, tokens) ──────────────────────────────────────
-  static TextStyle mono({double size = 13, Color? color, double spacing = 1.0}) =>
-      GoogleFonts.jetBrainsMono(
-        fontSize: size, fontWeight: FontWeight.w600,
-        letterSpacing: spacing, height: 1.4, color: color ?? AppTone.ink);
+  static TextStyle mono({
+    double size = 13,
+    Color? color,
+    double spacing = 1.0,
+  }) => GoogleFonts.jetBrainsMono(
+    fontSize: size,
+    fontWeight: FontWeight.w600,
+    letterSpacing: spacing,
+    height: 1.4,
+    color: color ?? AppTone.ink,
+  );
 
   // ── Button ────────────────────────────────────────────────────────────────
   static TextStyle button({Color? color}) => GoogleFonts.inter(
-        fontSize: 15, fontWeight: FontWeight.w700,
-        letterSpacing: 0.1, height: 1.0, color: color ?? Colors.white);
+    fontSize: 15,
+    fontWeight: FontWeight.w700,
+    letterSpacing: 0.1,
+    height: 1.0,
+    color: color ?? Colors.white,
+  );
 
   static TextStyle buttonSm({Color? color}) => GoogleFonts.inter(
-        fontSize: 13, fontWeight: FontWeight.w700,
-        letterSpacing: 0.1, height: 1.0, color: color ?? AppTone.ink);
+    fontSize: 13,
+    fontWeight: FontWeight.w700,
+    letterSpacing: 0.1,
+    height: 1.0,
+    color: color ?? AppTone.ink,
+  );
 }
 
 Color roleAccent(AppUser user) =>
@@ -183,24 +236,69 @@ class EmiLockerApp extends StatefulWidget {
   State<EmiLockerApp> createState() => _EmiLockerAppState();
 }
 
-class _EmiLockerAppState extends State<EmiLockerApp> {
+class _EmiLockerAppState extends State<EmiLockerApp>
+    with WidgetsBindingObserver {
   final api = ApiClient();
+  final _navigatorKey = GlobalKey<NavigatorState>();
+  final _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
   Session? session;
   bool loading = true;
   bool _showOnboarding = false;
-  late final SseService _sse = SseService(dio: api.dio, getToken: () => api.accessToken);
+  bool _endingSession = false;
+  bool _validatingSession = false;
+  DateTime? _backgroundedAt;
+  String? _loginNotice;
+  late final SseService _sse = SseService(
+    dio: api.dio,
+    getToken: () => api.accessToken,
+  );
+
+  static Duration get _sessionTimeout {
+    final minutes =
+        int.tryParse(dotenv.env['SESSION_TIMEOUT_MINUTES'] ?? '') ?? 30;
+    return Duration(minutes: minutes.clamp(5, 1440).toInt());
+  }
+
+  static const _sessionRefreshTimeout = Duration(seconds: 8);
+  static const _resumeValidationGrace = Duration(seconds: 45);
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     api.onSessionExpired = _sessionExpired;
     _restore();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _sse.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      _backgroundedAt = DateTime.now();
+      return;
+    }
+    if (state != AppLifecycleState.resumed ||
+        session == null ||
+        _backgroundedAt == null) {
+      return;
+    }
+
+    final idleFor = DateTime.now().difference(_backgroundedAt!);
+    _backgroundedAt = null;
+    if (idleFor >= _sessionTimeout) {
+      _endLocalSession(notice: 'Your session timed out. Please log in again.');
+      return;
+    }
+    if (idleFor >= _resumeValidationGrace) {
+      unawaited(_validateServerSession());
+    }
   }
 
   Future<void> _restore() async {
@@ -208,17 +306,73 @@ class _EmiLockerAppState extends State<EmiLockerApp> {
     final refresh = await storage.read(key: 'refreshToken');
     final rawUser = await storage.read(key: 'user');
     if (access != null && refresh != null && rawUser != null) {
-      final user = AppUser.fromJson(asMap(jsonDecode(rawUser)));
-      api.setTokens(accessToken: access, refreshToken: refresh);
-      session = Session(user: user, accessToken: access, refreshToken: refresh);
-      _sse.start();
+      try {
+        final user = AppUser.fromJson(asMap(jsonDecode(rawUser)));
+        api.setTokens(accessToken: access, refreshToken: refresh);
+        final verified = await api.refresh().timeout(_sessionRefreshTimeout);
+        final verifiedAccess = api.accessToken;
+        final verifiedRefresh = api.refreshToken;
+        if (!verified || verifiedAccess == null || verifiedRefresh == null) {
+          throw StateError('Stored session could not be verified.');
+        }
+        session = Session(
+          user: user,
+          accessToken: verifiedAccess,
+          refreshToken: verifiedRefresh,
+        );
+        _sse.start();
+      } catch (error) {
+        if (kDebugMode) debugPrint('Stored session rejected: $error');
+        api.clearTokens();
+        await storage.deleteAll();
+        _loginNotice =
+            'Please log in again. Your previous session was not valid.';
+      }
     } else {
       final onboardingDone = await OnboardingScreen.isComplete();
-      if (!onboardingDone) _showOnboarding = true;
+      if (!onboardingDone) {
+        _showOnboarding = true;
+      }
       // Pre-populate local vault from Drive backup (survives reinstall)
       _tryRestoreVaultFromDrive();
     }
-    setState(() => loading = false);
+    if (mounted) {
+      setState(() => loading = false);
+    }
+  }
+
+  Future<void> _validateServerSession() async {
+    if (_validatingSession || session == null) {
+      return;
+    }
+    _validatingSession = true;
+    try {
+      final verified = await api.refresh().timeout(_sessionRefreshTimeout);
+      final access = api.accessToken;
+      final refresh = api.refreshToken;
+      if (!verified || access == null || refresh == null) {
+        throw StateError('Session refresh was rejected.');
+      }
+      if (!mounted || session == null) {
+        return;
+      }
+      setState(() {
+        session = Session(
+          user: session!.user,
+          accessToken: access,
+          refreshToken: refresh,
+        );
+      });
+      _sse.stop();
+      _sse.start();
+    } catch (error) {
+      if (kDebugMode) debugPrint('Resume session validation failed: $error');
+      await _endLocalSession(
+        notice: 'Your session could not be verified. Please log in again.',
+      );
+    } finally {
+      _validatingSession = false;
+    }
   }
 
   Future<void> _authenticated(Session next) async {
@@ -226,12 +380,26 @@ class _EmiLockerAppState extends State<EmiLockerApp> {
       accessToken: next.accessToken,
       refreshToken: next.refreshToken,
     );
-    await storage.write(key: 'accessToken', value: next.accessToken);
-    await storage.write(key: 'refreshToken', value: next.refreshToken);
-    await storage.write(key: 'user', value: jsonEncode(next.user.toJson()));
-    setState(() => session = next);
+    setState(() {
+      session = next;
+      _loginNotice = null;
+      _backgroundedAt = null;
+    });
     _sse.start();
-    _maybeSyncVaultToDrive();
+    unawaited(_persistSession(next));
+    unawaited(_maybeSyncVaultToDrive());
+  }
+
+  Future<void> _persistSession(Session next) async {
+    try {
+      await Future.wait([
+        storage.write(key: 'accessToken', value: next.accessToken),
+        storage.write(key: 'refreshToken', value: next.refreshToken),
+        storage.write(key: 'user', value: jsonEncode(next.user.toJson())),
+      ]);
+    } catch (error) {
+      if (kDebugMode) debugPrint('Session persistence failed: $error');
+    }
   }
 
   Future<void> _tryRestoreVaultFromDrive() async {
@@ -239,12 +407,16 @@ class _EmiLockerAppState extends State<EmiLockerApp> {
       if (!await GoogleVault.isBound()) return;
       final snapshot = await GoogleVault.restoreFromDrive();
       if (snapshot == null) return;
-      final devices = List<Map<String, dynamic>>.from(snapshot['devices'] as List? ?? []);
-      final keys    = List<Map<String, dynamic>>.from(snapshot['keys']    as List? ?? []);
+      final devices = List<Map<String, dynamic>>.from(
+        snapshot['devices'] as List? ?? [],
+      );
+      final keys = List<Map<String, dynamic>>.from(
+        snapshot['keys'] as List? ?? [],
+      );
       final dealerId = snapshot['dealer_id']?.toString() ?? '';
       if (dealerId.isNotEmpty && (devices.isNotEmpty || keys.isNotEmpty)) {
         if (devices.isNotEmpty) await LocalVault.syncDevices(dealerId, devices);
-        if (keys.isNotEmpty)    await LocalVault.syncKeys(dealerId, keys);
+        if (keys.isNotEmpty) await LocalVault.syncKeys(dealerId, keys);
       }
     } catch (_) {}
   }
@@ -264,29 +436,43 @@ class _EmiLockerAppState extends State<EmiLockerApp> {
     _sse.stop();
     try {
       final refresh = await storage.read(key: 'refreshToken');
-      await api.post('/api/v1/auth/logout',
-          data: refresh != null ? {'refreshToken': refresh} : null);
+      await api.post(
+        '/api/v1/auth/logout',
+        data: refresh != null ? {'refreshToken': refresh} : null,
+      );
     } catch (_) {}
-    api.clearTokens();
-    await storage.deleteAll();
-    setState(() => session = null);
+    await _endLocalSession();
   }
 
   Future<void> _sessionExpired() async {
+    await _endLocalSession(
+      notice: 'Your session expired. Please log in again.',
+    );
+  }
+
+  Future<void> _endLocalSession({String? notice}) async {
+    if (_endingSession) return;
+    _endingSession = true;
     _sse.stop();
     api.clearTokens();
     await storage.deleteAll();
     if (!mounted) return;
+    _navigatorKey.currentState?.popUntil((route) => route.isFirst);
     setState(() {
       session = null;
       loading = false;
+      _loginNotice = notice;
+      _backgroundedAt = null;
     });
+    _endingSession = false;
   }
 
   @override
   Widget build(BuildContext context) {
     final baseText = GoogleFonts.interTextTheme();
     return MaterialApp(
+      navigatorKey: _navigatorKey,
+      scaffoldMessengerKey: _scaffoldMessengerKey,
       title: 'EMI Locker',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -361,8 +547,11 @@ class _EmiLockerAppState extends State<EmiLockerApp> {
             fontSize: 12,
             fontWeight: FontWeight.w500,
           ),
-          prefixIconColor: WidgetStateColor.resolveWith((states) =>
-            states.contains(WidgetState.focused) ? AppTone.brand : AppTone.muted),
+          prefixIconColor: WidgetStateColor.resolveWith(
+            (states) => states.contains(WidgetState.focused)
+                ? AppTone.brand
+                : AppTone.muted,
+          ),
           suffixIconColor: AppTone.muted,
         ),
         filledButtonTheme: FilledButtonThemeData(
@@ -397,20 +586,28 @@ class _EmiLockerAppState extends State<EmiLockerApp> {
         ),
       ),
       home: loading
-          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+          ? const _AppSplashLoader()
           : session != null
           ? AppBiometricGate(
               onUsePassword: _logout,
               child: AppEventScope(
                 events: _sse.events,
-                child: Workspace(api: api, session: session!, onLogout: _logout),
+                child: Workspace(
+                  api: api,
+                  session: session!,
+                  onLogout: _logout,
+                ),
               ),
             )
           : _showOnboarding
           ? OnboardingScreen(
               onComplete: () => setState(() => _showOnboarding = false),
             )
-          : LoginScreen(api: api, onAuthenticated: _authenticated),
+          : LoginScreen(
+              api: api,
+              onAuthenticated: _authenticated,
+              notice: _loginNotice,
+            ),
     );
   }
 }
@@ -418,11 +615,7 @@ class _EmiLockerAppState extends State<EmiLockerApp> {
 /// Provides the SSE event stream to any widget in the tree.
 /// Access via: AppEventScope.of(context).listen(...)
 class AppEventScope extends InheritedWidget {
-  const AppEventScope({
-    super.key,
-    required this.events,
-    required super.child,
-  });
+  const AppEventScope({super.key, required this.events, required super.child});
 
   final Stream<SseEvent> events;
 
@@ -451,13 +644,23 @@ class ApiClient {
     dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {
+          options.extra['requestStartedAt'] = DateTime.now();
           if (_accessToken != null) {
             options.headers['Authorization'] = 'Bearer $_accessToken';
           }
           handler.next(options);
         },
+        onResponse: (response, handler) {
+          _logTiming(response.requestOptions, response.statusCode);
+          handler.next(response);
+        },
         onError: (error, handler) async {
+          _logTiming(error.requestOptions, error.response?.statusCode);
+          final isRefreshRequest = error.requestOptions.path.endsWith(
+            '/auth/refresh',
+          );
           if (error.response?.statusCode == 401 &&
+              !isRefreshRequest &&
               !_refreshing &&
               _refreshToken != null) {
             _refreshing = true;
@@ -484,16 +687,28 @@ class ApiClient {
     );
   }
 
+  void _logTiming(RequestOptions options, int? statusCode) {
+    if (!kDebugMode) return;
+    final startedAt = options.extra['requestStartedAt'];
+    if (startedAt is! DateTime) return;
+    final elapsed = DateTime.now().difference(startedAt).inMilliseconds;
+    debugPrint(
+      '[API] ${options.method} ${options.path} -> ${statusCode ?? 'ERR'} in ${elapsed}ms',
+    );
+  }
+
   late final Dio dio;
   String? _accessToken;
   String? _refreshToken;
   bool _refreshing = false;
+  bool _warmupStarted = false;
   Future<void> Function()? onSessionExpired;
 
   static Duration _timeout(String key) =>
       Duration(milliseconds: int.tryParse(dotenv.env[key] ?? '') ?? 30000);
 
   String? get accessToken => _accessToken;
+  String? get refreshToken => _refreshToken;
 
   void setTokens({required String accessToken, required String refreshToken}) {
     _accessToken = accessToken;
@@ -503,6 +718,25 @@ class ApiClient {
   void clearTokens() {
     _accessToken = null;
     _refreshToken = null;
+  }
+
+  Future<void> warmUp() async {
+    if (_warmupStarted) return;
+    _warmupStarted = true;
+    try {
+      await dio
+          .get<dynamic>(
+            '/health',
+            options: Options(
+              sendTimeout: const Duration(seconds: 6),
+              receiveTimeout: const Duration(seconds: 6),
+              validateStatus: (_) => true,
+            ),
+          )
+          .timeout(const Duration(seconds: 6));
+    } catch (_) {
+      // Warm-up is best-effort. Login will show a clear timeout if Render is still waking.
+    }
   }
 
   Future<void> expireSession() async {
@@ -542,7 +776,13 @@ class ApiClient {
     String path, {
     dynamic data,
     Map<String, dynamic>? query,
-  }) => dio.post<dynamic>(_path(path), data: data, queryParameters: query);
+    CancelToken? cancelToken,
+  }) => dio.post<dynamic>(
+    _path(path),
+    data: data,
+    queryParameters: query,
+    cancelToken: cancelToken,
+  );
 
   Future<Response<dynamic>> put(
     String path, {
@@ -553,8 +793,10 @@ class ApiClient {
   Future<Response<dynamic>> patch(String path, {dynamic data}) =>
       dio.patch<dynamic>(_path(path), data: data);
 
-  Future<Response<dynamic>> delete(String path, {Map<String, dynamic>? query}) =>
-      dio.delete<dynamic>(_path(path), queryParameters: query);
+  Future<Response<dynamic>> delete(
+    String path, {
+    Map<String, dynamic>? query,
+  }) => dio.delete<dynamic>(_path(path), queryParameters: query);
 }
 
 class Session {
@@ -613,49 +855,82 @@ class LoginScreen extends StatefulWidget {
     super.key,
     required this.api,
     required this.onAuthenticated,
+    this.notice,
   });
   final ApiClient api;
   final ValueChanged<Session> onAuthenticated;
+  final String? notice;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  static const _loginActionTimeout = Duration(seconds: 18);
+
   final email = TextEditingController();
   final password = TextEditingController();
   final _otpController = TextEditingController();
   bool busy = false;
   String? error;
   bool _showOtp = false;
+  bool _serverWaking = false;
   String? _deviceFingerprint;
+  String? _otpEmail;
   int _errorShakeKey = 0;
+  late final Future<void> _fingerprintReady;
+  Timer? _loginWaitTimer;
 
   @override
   void initState() {
     super.initState();
-    _loadOrGenFingerprint();
+    _fingerprintReady = _loadOrGenFingerprint();
+    unawaited(widget.api.warmUp());
   }
 
   Future<void> _loadOrGenFingerprint() async {
     var fp = await storage.read(key: 'device_fingerprint');
     if (fp == null) {
       final rand = Random.secure();
-      fp = List.generate(32, (_) => rand.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+      fp = List.generate(
+        32,
+        (_) => rand.nextInt(256).toRadixString(16).padLeft(2, '0'),
+      ).join();
       await storage.write(key: 'device_fingerprint', value: fp);
     }
     if (mounted) setState(() => _deviceFingerprint = fp);
+  }
+
+  void _startLoginWaitHint() {
+    _loginWaitTimer?.cancel();
+    _serverWaking = false;
+    _loginWaitTimer = Timer(const Duration(milliseconds: 1300), () {
+      if (!mounted || !busy) return;
+      setState(() => _serverWaking = true);
+    });
+  }
+
+  void _stopLoginWaitHint() {
+    _loginWaitTimer?.cancel();
+    _loginWaitTimer = null;
+    if (mounted && _serverWaking) {
+      setState(() => _serverWaking = false);
+    } else {
+      _serverWaking = false;
+    }
   }
 
   void _completeLogin(Map<String, dynamic> data) {
     final access = data['accessToken']?.toString();
     final refresh = data['refreshToken']?.toString();
     if (access == null || refresh == null) throw Exception('Tokens missing');
-    widget.onAuthenticated(Session(
-      user: AppUser.fromJson(asMap(data['user'])),
-      accessToken: access,
-      refreshToken: refresh,
-    ));
+    widget.onAuthenticated(
+      Session(
+        user: AppUser.fromJson(asMap(data['user'])),
+        accessToken: access,
+        refreshToken: refresh,
+      ),
+    );
   }
 
   String _deviceName() {
@@ -669,43 +944,149 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> login() async {
-    setState(() { busy = true; error = null; });
+    setState(() {
+      busy = true;
+      error = null;
+      _serverWaking = false;
+    });
+    _startLoginWaitHint();
     try {
-      final res = await widget.api.post('/api/v1/auth/login', data: {
-        'email': email.text.trim(),
-        'password': password.text,
-        'device_fingerprint': _deviceFingerprint,
-        'device_name': _deviceName(),
-      });
+      await _fingerprintReady.timeout(
+        const Duration(seconds: 2),
+        onTimeout: () {},
+      );
+      final res = await widget.api
+          .post(
+            '/api/v1/auth/login',
+            data: {
+              'email': email.text.trim(),
+              'password': password.text,
+              'device_fingerprint': _deviceFingerprint,
+              'device_name': _deviceName(),
+            },
+          )
+          .timeout(
+            _loginActionTimeout,
+            onTimeout: () => throw Exception(
+              'Login is taking longer than expected. The server may be waking up; please try again in a moment.',
+            ),
+          );
       final data = asMap(res.data);
       if (data['requiresDeviceVerification'] == true) {
-        setState(() { _showOtp = true; busy = false; });
+        setState(() {
+          _showOtp = true;
+          _otpEmail = text(data['email']).isEmpty
+              ? email.text.trim()
+              : text(data['email']);
+          busy = false;
+        });
         return;
       }
       _completeLogin(data);
     } catch (e) {
-      setState(() { error = readableError(e); _errorShakeKey++; });
+      setState(() {
+        error = readableError(e);
+        _errorShakeKey++;
+      });
     } finally {
+      _stopLoginWaitHint();
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> _loginWithGoogle() async {
+    setState(() {
+      busy = true;
+      error = null;
+      _serverWaking = false;
+    });
+    _startLoginWaitHint();
+    try {
+      await _fingerprintReady.timeout(
+        const Duration(seconds: 2),
+        onTimeout: () {},
+      );
+      final identity = await DealerGoogleAuth.signInForIdToken();
+      if (identity == null) return;
+
+      final res = await widget.api
+          .post(
+            '/api/v1/auth/google/login',
+            data: {
+              'idToken': identity.idToken,
+              'device_fingerprint': _deviceFingerprint,
+              'device_name': _deviceName(),
+            },
+          )
+          .timeout(
+            _loginActionTimeout,
+            onTimeout: () => throw Exception(
+              'Google login is taking longer than expected. The server may be waking up; please try again in a moment.',
+            ),
+          );
+      final data = asMap(res.data);
+      if (data['requiresDeviceVerification'] == true) {
+        setState(() {
+          _showOtp = true;
+          _otpEmail = text(data['email']).isEmpty
+              ? identity.email
+              : text(data['email']);
+          email.text = _otpEmail ?? identity.email;
+        });
+        return;
+      }
+      _completeLogin(data);
+    } catch (e) {
+      setState(() {
+        error = readableError(e);
+        _errorShakeKey++;
+      });
+    } finally {
+      _stopLoginWaitHint();
       if (mounted) setState(() => busy = false);
     }
   }
 
   Future<void> _verifyOtp() async {
-    setState(() { busy = true; error = null; });
+    setState(() {
+      busy = true;
+      error = null;
+    });
     try {
-      final res = await widget.api.post('/api/v1/auth/verify-device-otp', data: {
-        'email': email.text.trim(),
-        'device_fingerprint': _deviceFingerprint,
-        'otp': _otpController.text.trim(),
-      });
+      final res = await widget.api.post(
+        '/api/v1/auth/verify-device-otp',
+        data: {
+          'email': (_otpEmail ?? email.text).trim(),
+          'device_fingerprint': _deviceFingerprint,
+          'otp': _otpController.text.trim(),
+        },
+      );
       _completeLogin(asMap(res.data));
       // Offer biometric enrollment on first trust of this device
       _offerBiometricEnrollment();
     } catch (e) {
-      setState(() { error = readableError(e); _errorShakeKey++; });
+      setState(() {
+        error = readableError(e);
+        _errorShakeKey++;
+      });
     } finally {
       if (mounted) setState(() => busy = false);
     }
+  }
+
+  Future<void> _openPasswordReset() async {
+    final message = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTone.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) =>
+          _PasswordResetSheet(api: widget.api, initialEmail: email.text.trim()),
+    );
+    if (!mounted || message == null) return;
+    snack(context, message);
   }
 
   Future<void> _offerBiometricEnrollment() async {
@@ -719,8 +1100,10 @@ class _LoginScreenState extends State<LoginScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Enable fingerprint login?',
-            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+        title: const Text(
+          'Enable fingerprint login?',
+          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
+        ),
         content: const Text(
           'Skip the email code on this device next time.\n'
           'Use your fingerprint or PIN instead.',
@@ -745,6 +1128,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
+    _loginWaitTimer?.cancel();
     email.dispose();
     password.dispose();
     _otpController.dispose();
@@ -808,192 +1192,288 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget _buildLoginCard(BuildContext context) {
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 450),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(28, 32, 28, 28),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
-          boxShadow: [
-            BoxShadow(
-              color: AppTone.brand.withValues(alpha: 0.06),
-              blurRadius: 40,
-              offset: const Offset(0, 8),
-            ),
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 24,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Header with breathing icon
-            Row(
-              children: [
-                Container(
-                  width: 44, height: 44,
-                  decoration: BoxDecoration(
-                    color: AppTone.brand,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppTone.brand.withValues(alpha: 0.28),
-                        blurRadius: 14,
-                        offset: const Offset(0, 5),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(Icons.security_rounded, size: 22, color: Colors.white),
-                )
-                    .animate(onPlay: (c) => c.repeat(reverse: true))
-                    .scale(
-                      begin: const Offset(1, 1),
-                      end: const Offset(1.05, 1.05),
-                      duration: 2800.ms,
-                      curve: Curves.easeInOut,
+      child:
+          Container(
+                padding: const EdgeInsets.fromLTRB(28, 32, 28, 28),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTone.brand.withValues(alpha: 0.06),
+                      blurRadius: 40,
+                      offset: const Offset(0, 8),
                     ),
-                const SizedBox(width: 14),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'EMI Locker',
-                      style: GoogleFonts.inter(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w900,
-                        color: AppTone.ink,
-                        letterSpacing: -0.5,
-                        height: 1.1,
-                      ),
-                    ),
-                    Text(
-                      'Secure workspace access',
-                      style: GoogleFonts.inter(
-                        color: AppTone.muted,
-                        fontWeight: FontWeight.w500,
-                        fontSize: 12,
-                      ),
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.06),
+                      blurRadius: 24,
+                      offset: const Offset(0, 4),
                     ),
                   ],
                 ),
-              ],
-            ),
-            const SizedBox(height: 28),
-            _LightLoginInput(
-              controller: email,
-              label: 'Email address',
-              icon: Icons.alternate_email,
-              keyboardType: TextInputType.emailAddress,
-            ),
-            const SizedBox(height: 12),
-            _LightLoginInput(
-              controller: password,
-              label: 'Password',
-              icon: Icons.lock_outline,
-              obscure: true,
-            ),
-            if (_showOtp) ...[
-              const SizedBox(height: 18),
-              _InlineNotice(
-                message: 'A verification code was sent to your email. Enter it below.',
-                tone: AppTone.info,
-                icon: Icons.mark_email_unread_outlined,
-              ),
-              const SizedBox(height: 12),
-              _LightLoginInput(
-                controller: _otpController,
-                label: '6-digit verification code',
-                icon: Icons.pin_outlined,
-                keyboardType: TextInputType.number,
-              ),
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: busy ? null : () => setState(() => _showOtp = false),
-                  style: TextButton.styleFrom(foregroundColor: AppTone.brand),
-                  child: const Text('Use a different account'),
-                ),
-              ),
-            ],
-            AnimatedSize(
-              duration: _medium,
-              curve: Curves.easeOutCubic,
-              child: error == null
-                  ? const SizedBox.shrink()
-                  : Padding(
-                      padding: const EdgeInsets.only(top: 14),
-                      child: _InlineNotice(
-                        message: error!,
-                        tone: AppTone.red,
-                        icon: Icons.error_outline,
-                      )
-                          .animate(key: ValueKey(_errorShakeKey))
-                          .shake(hz: 4, offset: const Offset(5, 0), duration: 400.ms),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Header with breathing icon
+                    Row(
+                      children: [
+                        Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: AppTone.brand,
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: AppTone.brand.withValues(
+                                      alpha: 0.28,
+                                    ),
+                                    blurRadius: 14,
+                                    offset: const Offset(0, 5),
+                                  ),
+                                ],
+                              ),
+                              child: const Icon(
+                                Icons.security_rounded,
+                                size: 22,
+                                color: Colors.white,
+                              ),
+                            )
+                            .animate(onPlay: (c) => c.repeat(reverse: true))
+                            .scale(
+                              begin: const Offset(1, 1),
+                              end: const Offset(1.05, 1.05),
+                              duration: 2800.ms,
+                              curve: Curves.easeInOut,
+                            ),
+                        const SizedBox(width: 14),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'EMI Locker',
+                              style: GoogleFonts.inter(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w900,
+                                color: AppTone.ink,
+                                letterSpacing: -0.5,
+                                height: 1.1,
+                              ),
+                            ),
+                            Text(
+                              'Secure workspace access',
+                              style: GoogleFonts.inter(
+                                color: AppTone.muted,
+                                fontWeight: FontWeight.w500,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-            ),
-            const SizedBox(height: 24),
-            _GradientLoginButton(
-              busy: busy,
-              showOtp: _showOtp,
-              onPressed: busy ? null : (_showOtp ? _verifyOtp : login),
-            ),
-            const SizedBox(height: 24),
-            // Demo section header
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppTone.accent.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: AppTone.accent.withValues(alpha: 0.18)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.play_circle_outline_rounded, size: 12, color: AppTone.accent),
-                      const SizedBox(width: 5),
-                      Text('TRY DEMO', style: AppText.label(color: AppTone.accent)),
+                    const SizedBox(height: 28),
+                    if (widget.notice != null &&
+                        widget.notice!.trim().isNotEmpty) ...[
+                      _InlineNotice(
+                        message: widget.notice!,
+                        tone: AppTone.info,
+                        icon: Icons.lock_clock_rounded,
+                      ),
+                      const SizedBox(height: 14),
                     ],
-                  ),
+                    AnimatedSize(
+                      duration: _medium,
+                      curve: Curves.easeOutCubic,
+                      child: _serverWaking
+                          ? const Padding(
+                              padding: EdgeInsets.only(bottom: 14),
+                              child: _InlineNotice(
+                                message:
+                                    'Secure server is waking up. This first login may take a few seconds.',
+                                tone: AppTone.info,
+                                icon: Icons.cloud_sync_rounded,
+                              ),
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                    _LightLoginInput(
+                      controller: email,
+                      label: 'Email address',
+                      icon: Icons.alternate_email,
+                      keyboardType: TextInputType.emailAddress,
+                    ),
+                    const SizedBox(height: 12),
+                    _LightLoginInput(
+                      controller: password,
+                      label: 'Password',
+                      icon: Icons.lock_outline,
+                      obscure: true,
+                    ),
+                    if (_showOtp) ...[
+                      const SizedBox(height: 18),
+                      _InlineNotice(
+                        message:
+                            'A verification code was sent to your email. Enter it below.',
+                        tone: AppTone.info,
+                        icon: Icons.mark_email_unread_outlined,
+                      ),
+                      const SizedBox(height: 12),
+                      _LightLoginInput(
+                        controller: _otpController,
+                        label: '6-digit verification code',
+                        icon: Icons.pin_outlined,
+                        keyboardType: TextInputType.number,
+                      ),
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: busy
+                              ? null
+                              : () => setState(() {
+                                  _showOtp = false;
+                                  _otpEmail = null;
+                                  _otpController.clear();
+                                }),
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppTone.brand,
+                          ),
+                          child: const Text('Use a different account'),
+                        ),
+                      ),
+                    ],
+                    AnimatedSize(
+                      duration: _medium,
+                      curve: Curves.easeOutCubic,
+                      child: error == null
+                          ? const SizedBox.shrink()
+                          : Padding(
+                              padding: const EdgeInsets.only(top: 14),
+                              child:
+                                  _InlineNotice(
+                                        message: error!,
+                                        tone: AppTone.red,
+                                        icon: Icons.error_outline,
+                                      )
+                                      .animate(key: ValueKey(_errorShakeKey))
+                                      .shake(
+                                        hz: 4,
+                                        offset: const Offset(5, 0),
+                                        duration: 400.ms,
+                                      ),
+                            ),
+                    ),
+                    const SizedBox(height: 24),
+                    _GradientLoginButton(
+                      busy: busy,
+                      showOtp: _showOtp,
+                      onPressed: busy ? null : (_showOtp ? _verifyOtp : login),
+                    ),
+                    if (!_showOtp) ...[
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: busy ? null : _loginWithGoogle,
+                        icon: const Icon(Icons.g_mobiledata_rounded, size: 26),
+                        label: const Text('Continue with Google'),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(50),
+                          foregroundColor: AppTone.ink,
+                          side: const BorderSide(color: AppTone.line),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                      ),
+                    ],
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: busy ? null : _openPasswordReset,
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppTone.brand,
+                        ),
+                        child: const Text('Forgot password?'),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    // Demo section header
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 9,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppTone.accent.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: AppTone.accent.withValues(alpha: 0.18),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.play_circle_outline_rounded,
+                                size: 12,
+                                color: AppTone.accent,
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                'TRY DEMO',
+                                style: AppText.label(color: AppTone.accent),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Divider(color: AppTone.line, height: 1),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    _RoleDemoCard(
+                      role: 'Dealer',
+                      email: 'dealer@emi-locker.com',
+                      icon: Icons.storefront_rounded,
+                      accent: AppTone.brand,
+                      onPressed: () {
+                        setState(() {
+                          email.text = 'dealer@emi-locker.com';
+                          password.text = 'Demo@123456';
+                          _showOtp = false;
+                          _otpEmail = null;
+                          _otpController.clear();
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    _RoleDemoCard(
+                      role: 'Reseller',
+                      email: 'reseller@emi-locker.com',
+                      icon: Icons.group_rounded,
+                      accent: AppTone.accent,
+                      onPressed: () {
+                        setState(() {
+                          email.text = 'reseller@emi-locker.com';
+                          password.text = 'Demo@123456';
+                          _showOtp = false;
+                          _otpEmail = null;
+                          _otpController.clear();
+                        });
+                      },
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 10),
-                Expanded(child: Divider(color: AppTone.line, height: 1)),
-              ],
-            ),
-            const SizedBox(height: 10),
-            _RoleDemoCard(
-              role: 'Dealer',
-              email: 'dealer@emi-locker.com',
-              icon: Icons.storefront_rounded,
-              accent: AppTone.brand,
-              onPressed: () {
-                email.text = 'dealer@emi-locker.com';
-                password.text = 'Demo@123456';
-              },
-            ),
-            const SizedBox(height: 8),
-            _RoleDemoCard(
-              role: 'Reseller',
-              email: 'reseller@emi-locker.com',
-              icon: Icons.group_rounded,
-              accent: AppTone.accent,
-              onPressed: () {
-                email.text = 'reseller@emi-locker.com';
-                password.text = 'Demo@123456';
-              },
-            ),
-          ],
-        ),
-      )
-          .animate()
-          .fadeIn(duration: 400.ms, delay: 100.ms)
-          .slideY(begin: 0.04, end: 0, curve: Curves.easeOutCubic),
+              )
+              .animate()
+              .fadeIn(duration: 400.ms, delay: 100.ms)
+              .slideY(begin: 0.04, end: 0, curve: Curves.easeOutCubic),
     );
   }
 
@@ -1009,14 +1489,40 @@ class _LoginScreenState extends State<LoginScreen> {
         body: Stack(
           children: [
             // Aurora blobs — light pastel, slowly drifting
-            Positioned(top: -80, left: -60,
-              child: _DriftingBlob(color: AppTone.brand.withValues(alpha: 0.10), size: 340, delay: 0)),
-            Positioned(bottom: -40, right: -40,
-              child: _DriftingBlob(color: const Color(0xFF34D399).withValues(alpha: 0.08), size: 280, delay: 1200)),
-            Positioned(top: 200, right: -80,
-              child: _DriftingBlob(color: AppTone.accent.withValues(alpha: 0.05), size: 220, delay: 600)),
+            Positioned(
+              top: -80,
+              left: -60,
+              child: _DriftingBlob(
+                color: AppTone.brand.withValues(alpha: 0.10),
+                size: 340,
+                delay: 0,
+              ),
+            ),
+            Positioned(
+              bottom: -40,
+              right: -40,
+              child: _DriftingBlob(
+                color: const Color(0xFF34D399).withValues(alpha: 0.08),
+                size: 280,
+                delay: 1200,
+              ),
+            ),
+            Positioned(
+              top: 200,
+              right: -80,
+              child: _DriftingBlob(
+                color: AppTone.accent.withValues(alpha: 0.05),
+                size: 220,
+                delay: 600,
+              ),
+            ),
             // Shimmer top bar
-            const Positioned(top: 0, left: 0, right: 0, child: _ShimmerTopBar()),
+            const Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: _ShimmerTopBar(),
+            ),
             SafeArea(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1027,69 +1533,73 @@ class _LoginScreenState extends State<LoginScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
-                          children: [
-                            // Breathing logo
-                            Container(
-                              width: 36, height: 36,
-                              decoration: BoxDecoration(
-                                color: AppTone.brand,
-                                borderRadius: BorderRadius.circular(10),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: AppTone.brand.withValues(alpha: 0.30),
-                                    blurRadius: 12,
-                                    offset: const Offset(0, 4),
+                              children: [
+                                // Breathing logo
+                                Container(
+                                      width: 36,
+                                      height: 36,
+                                      decoration: BoxDecoration(
+                                        color: AppTone.brand,
+                                        borderRadius: BorderRadius.circular(10),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: AppTone.brand.withValues(
+                                              alpha: 0.30,
+                                            ),
+                                            blurRadius: 12,
+                                            offset: const Offset(0, 4),
+                                          ),
+                                        ],
+                                      ),
+                                      child: const Icon(
+                                        Icons.security_rounded,
+                                        size: 18,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                    .animate(
+                                      onPlay: (c) => c.repeat(reverse: true),
+                                    )
+                                    .scale(
+                                      begin: const Offset(1, 1),
+                                      end: const Offset(1.06, 1.06),
+                                      duration: 2600.ms,
+                                      curve: Curves.easeInOut,
+                                    ),
+                                const SizedBox(width: 10),
+                                Text(
+                                  'EMI Locker',
+                                  style: GoogleFonts.inter(
+                                    color: AppTone.ink,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: -0.4,
                                   ),
-                                ],
-                              ),
-                              child: const Icon(Icons.security_rounded, size: 18, color: Colors.white),
-                            )
-                                .animate(onPlay: (c) => c.repeat(reverse: true))
-                                .scale(
-                                  begin: const Offset(1, 1),
-                                  end: const Offset(1.06, 1.06),
-                                  duration: 2600.ms,
-                                  curve: Curves.easeInOut,
                                 ),
-                            const SizedBox(width: 10),
-                            Text(
-                              'EMI Locker',
-                              style: GoogleFonts.inter(
-                                color: AppTone.ink,
-                                fontSize: 18,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -0.4,
-                              ),
-                            ),
-                          ],
-                        )
+                              ],
+                            )
                             .animate()
                             .fadeIn(duration: 300.ms)
                             .slideY(begin: -0.03, end: 0),
                         const SizedBox(height: 20),
                         Text(
-                          'Command centre\nfor device control',
-                          style: GoogleFonts.inter(
-                            color: AppTone.ink,
-                            fontWeight: FontWeight.w900,
-                            fontSize: 28,
-                            height: 1.1,
-                            letterSpacing: -0.7,
-                          ),
-                        )
+                              'Command centre\nfor device control',
+                              style: GoogleFonts.inter(
+                                color: AppTone.ink,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 28,
+                                height: 1.1,
+                                letterSpacing: -0.7,
+                              ),
+                            )
                             .animate()
                             .fadeIn(duration: 380.ms, delay: 60.ms)
                             .slideY(begin: -0.02, end: 0),
                         const SizedBox(height: 6),
                         Text(
                           'Dealer & reseller workspace',
-                          style: TextStyle(
-                            color: AppTone.muted,
-                            fontSize: 14,
-                          ),
-                        )
-                            .animate()
-                            .fadeIn(duration: 300.ms, delay: 100.ms),
+                          style: TextStyle(color: AppTone.muted, fontSize: 14),
+                        ).animate().fadeIn(duration: 300.ms, delay: 100.ms),
                         const SizedBox(height: 28),
                       ],
                     ),
@@ -1121,12 +1631,33 @@ class _LoginScreenState extends State<LoginScreen> {
       backgroundColor: bg,
       body: Stack(
         children: [
-          Positioned(top: -120, left: -80,
-            child: _DriftingBlob(color: AppTone.brand.withValues(alpha: 0.10), size: 480, delay: 0)),
-          Positioned(bottom: -80, right: -60,
-            child: _DriftingBlob(color: const Color(0xFF34D399).withValues(alpha: 0.08), size: 400, delay: 900)),
-          Positioned(top: 120, right: 80,
-            child: _DriftingBlob(color: AppTone.accent.withValues(alpha: 0.04), size: 260, delay: 1500)),
+          Positioned(
+            top: -120,
+            left: -80,
+            child: _DriftingBlob(
+              color: AppTone.brand.withValues(alpha: 0.10),
+              size: 480,
+              delay: 0,
+            ),
+          ),
+          Positioned(
+            bottom: -80,
+            right: -60,
+            child: _DriftingBlob(
+              color: const Color(0xFF34D399).withValues(alpha: 0.08),
+              size: 400,
+              delay: 900,
+            ),
+          ),
+          Positioned(
+            top: 120,
+            right: 80,
+            child: _DriftingBlob(
+              color: AppTone.accent.withValues(alpha: 0.04),
+              size: 260,
+              delay: 1500,
+            ),
+          ),
           const Positioned(top: 0, left: 0, right: 0, child: _ShimmerTopBar()),
           SafeArea(
             child: Center(
@@ -1223,40 +1754,42 @@ class _LoginHeroPanel extends StatelessWidget {
           const SizedBox(height: 14),
           Text(
             'Dealer and reseller operations\nin one controlled workspace.',
-            style: TextStyle(
-              color: AppTone.muted,
-              fontSize: 14,
-              height: 1.65,
-            ),
+            style: TextStyle(color: AppTone.muted, fontSize: 14, height: 1.65),
           ),
           const SizedBox(height: 32),
           // Feature list — clean vertical lines
-          ..._features.map((f) => Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Row(
-              children: [
-                Container(
-                  width: 2,
-                  height: 18,
-                  decoration: BoxDecoration(
-                    color: AppTone.brand.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(2),
+          ..._features.map(
+            (f) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 2,
+                    height: 18,
+                    decoration: BoxDecoration(
+                      color: AppTone.brand.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Icon(f.$1, size: 15, color: AppTone.brand.withValues(alpha: 0.7)),
-                const SizedBox(width: 8),
-                Text(
-                  f.$2,
-                  style: const TextStyle(
-                    color: Color(0xFF6B8AAA),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
+                  const SizedBox(width: 12),
+                  Icon(
+                    f.$1,
+                    size: 15,
+                    color: AppTone.brand.withValues(alpha: 0.7),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  Text(
+                    f.$2,
+                    style: const TextStyle(
+                      color: Color(0xFF6B8AAA),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          )),
+          ),
         ],
       ),
     );
@@ -1374,6 +1907,174 @@ class _SixDigitCodeInputState extends State<_SixDigitCodeInput> {
 
 // ─── Login-specific UI helpers ────────────────────────────────────────────
 
+class _PasswordResetSheet extends StatefulWidget {
+  const _PasswordResetSheet({required this.api, required this.initialEmail});
+
+  final ApiClient api;
+  final String initialEmail;
+
+  @override
+  State<_PasswordResetSheet> createState() => _PasswordResetSheetState();
+}
+
+class _PasswordResetSheetState extends State<_PasswordResetSheet> {
+  late final TextEditingController _email = TextEditingController(
+    text: widget.initialEmail,
+  );
+  final _otp = TextEditingController();
+  final _newPassword = TextEditingController();
+  bool _busy = false;
+  int _step = 0;
+  String? _error;
+  String? _resetToken;
+
+  @override
+  void dispose() {
+    _email.dispose();
+    _otp.dispose();
+    _newPassword.dispose();
+    super.dispose();
+  }
+
+  Future<void> _requestCode() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.api.post(
+        '/api/v1/auth/forgot-password',
+        data: {'email': _email.text.trim()},
+      );
+      setState(() => _step = 1);
+    } catch (e) {
+      setState(() => _error = readableError(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _verifyCode() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final res = await widget.api.post(
+        '/api/v1/auth/reset-password/verify',
+        data: {'email': _email.text.trim(), 'otp': _otp.text.trim()},
+      );
+      _resetToken = text(asMap(res.data)['resetToken']);
+      if (_resetToken == null || _resetToken!.isEmpty) {
+        throw Exception('Reset token missing');
+      }
+      setState(() => _step = 2);
+    } catch (e) {
+      setState(() => _error = readableError(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _resetPassword() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.api.post(
+        '/api/v1/auth/reset-password',
+        data: {'resetToken': _resetToken, 'newPassword': _newPassword.text},
+      );
+      if (mounted) {
+        Navigator.pop(context, 'Password changed. Please log in again.');
+      }
+    } catch (e) {
+      setState(() => _error = readableError(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _continue() async {
+    if (_step == 0) return _requestCode();
+    if (_step == 1) return _verifyCode();
+    return _resetPassword();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    final buttonText = switch (_step) {
+      0 => 'Send code',
+      1 => 'Verify code',
+      _ => 'Change password',
+    };
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 14, 20, 20 + bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              width: 42,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppTone.subtle,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            'Recover password',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'We will verify the account by email code before allowing a new password.',
+            style: TextStyle(color: AppTone.muted, height: 1.35),
+          ),
+          const SizedBox(height: 18),
+          if (_step == 0)
+            Input(_email, 'Account email')
+          else if (_step == 1) ...[
+            _InlineNotice(
+              message: 'If this account exists, we sent a code.',
+              tone: AppTone.info,
+              icon: Icons.mark_email_read_outlined,
+            ),
+            const SizedBox(height: 12),
+            Input(_otp, '6-digit email code'),
+          ] else
+            Input(_newPassword, 'New password', obscure: true),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            _InlineNotice(
+              message: _error!,
+              tone: AppTone.red,
+              icon: Icons.error_outline,
+            ),
+          ],
+          const SizedBox(height: 18),
+          FilledButton(
+            onPressed: _busy ? null : _continue,
+            child: _busy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Text(buttonText),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ShimmerTopBar extends StatelessWidget {
   const _ShimmerTopBar();
 
@@ -1381,21 +2082,33 @@ class _ShimmerTopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       height: 3,
-      child: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF00A86B), Color(0xFF34D399), Color(0xFF059669)],
-          ),
-        ),
-      )
-          .animate(onPlay: (c) => c.repeat())
-          .shimmer(duration: 2200.ms, color: Colors.white.withValues(alpha: 0.55)),
+      child:
+          Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Color(0xFF00A86B),
+                      Color(0xFF34D399),
+                      Color(0xFF059669),
+                    ],
+                  ),
+                ),
+              )
+              .animate(onPlay: (c) => c.repeat())
+              .shimmer(
+                duration: 2200.ms,
+                color: Colors.white.withValues(alpha: 0.55),
+              ),
     );
   }
 }
 
 class _DriftingBlob extends StatelessWidget {
-  const _DriftingBlob({required this.color, required this.size, this.delay = 0});
+  const _DriftingBlob({
+    required this.color,
+    required this.size,
+    this.delay = 0,
+  });
   final Color color;
   final double size;
   final int delay;
@@ -1449,7 +2162,10 @@ class _LightLoginInputState extends State<_LightLoginInput> {
   }
 
   @override
-  void dispose() { focus.dispose(); super.dispose(); }
+  void dispose() {
+    focus.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1516,7 +2232,9 @@ class _LightLoginInputState extends State<_LightLoginInput> {
           suffixIcon: widget.obscure
               ? IconButton(
                   icon: Icon(
-                    _obscured ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                    _obscured
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
                     size: 18,
                     color: focused ? AppTone.brand : AppTone.muted,
                   ),
@@ -1524,7 +2242,9 @@ class _LightLoginInputState extends State<_LightLoginInput> {
                 )
               : null,
           filled: true,
-          fillColor: focused ? const Color(0xFFF0FDF9) : const Color(0xFFF8F9FA),
+          fillColor: focused
+              ? const Color(0xFFF0FDF9)
+              : const Color(0xFFF8F9FA),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
             borderSide: const BorderSide(color: Color(0xFFE5E7EB), width: 1),
@@ -1568,73 +2288,100 @@ class _RoleDemoCardState extends State<_RoleDemoCard> {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTapDown: (_) => setState(() => _pressed = true),
-      onTapUp: (_) { setState(() => _pressed = false); widget.onPressed(); },
-      onTapCancel: () => setState(() => _pressed = false),
-      child: AnimatedContainer(
-        duration: _fast,
-        curve: Curves.easeOutCubic,
-        transform: Matrix4.identity()..scale(_pressed ? 0.97 : 1.0),
-        transformAlignment: Alignment.center,
-        padding: const EdgeInsets.fromLTRB(0, 0, 12, 0),
-        decoration: BoxDecoration(
-          color: _pressed ? widget.accent.withValues(alpha: 0.04) : const Color(0xFFF9FAFB),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: _pressed ? widget.accent.withValues(alpha: 0.4) : const Color(0xFFE5E7EB),
-            width: _pressed ? 1.5 : 1.0,
-          ),
-          boxShadow: _pressed
-              ? [BoxShadow(color: widget.accent.withValues(alpha: 0.10), blurRadius: 12, offset: const Offset(0, 4))]
-              : null,
-        ),
-        child: Row(
-          children: [
-            // Accent stripe
-            Container(
-              width: 4,
-              height: 56,
-              decoration: BoxDecoration(
-                color: widget.accent,
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(12),
-                  bottomLeft: Radius.circular(12),
-                ),
+          onTapDown: (_) => setState(() => _pressed = true),
+          onTapUp: (_) {
+            setState(() => _pressed = false);
+            widget.onPressed();
+          },
+          onTapCancel: () => setState(() => _pressed = false),
+          child: AnimatedContainer(
+            duration: _fast,
+            curve: Curves.easeOutCubic,
+            transform: Matrix4.identity()..scale(_pressed ? 0.97 : 1.0),
+            transformAlignment: Alignment.center,
+            padding: const EdgeInsets.fromLTRB(0, 0, 12, 0),
+            decoration: BoxDecoration(
+              color: _pressed
+                  ? widget.accent.withValues(alpha: 0.04)
+                  : const Color(0xFFF9FAFB),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _pressed
+                    ? widget.accent.withValues(alpha: 0.4)
+                    : const Color(0xFFE5E7EB),
+                width: _pressed ? 1.5 : 1.0,
               ),
+              boxShadow: _pressed
+                  ? [
+                      BoxShadow(
+                        color: widget.accent.withValues(alpha: 0.10),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ]
+                  : null,
             ),
-            const SizedBox(width: 12),
-            // Role icon
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: widget.accent.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(widget.icon, size: 16, color: widget.accent),
-            ),
-            const SizedBox(width: 10),
-            // Role name + email
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(widget.role, style: AppText.captionBold(color: AppTone.ink)),
-                  const SizedBox(height: 1),
-                  Text(
-                    widget.email,
-                    style: AppText.mono(size: 10, color: AppTone.muted, spacing: 0),
-                    overflow: TextOverflow.ellipsis,
+            child: Row(
+              children: [
+                // Accent stripe
+                Container(
+                  width: 4,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: widget.accent,
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(12),
+                      bottomLeft: Radius.circular(12),
+                    ),
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(width: 12),
+                // Role icon
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: widget.accent.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(widget.icon, size: 16, color: widget.accent),
+                ),
+                const SizedBox(width: 10),
+                // Role name + email
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.role,
+                        style: AppText.captionBold(color: AppTone.ink),
+                      ),
+                      const SizedBox(height: 1),
+                      Text(
+                        widget.email,
+                        style: AppText.mono(
+                          size: 10,
+                          color: AppTone.muted,
+                          spacing: 0,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  size: 11,
+                  color: widget.accent.withValues(alpha: 0.5),
+                ),
+              ],
             ),
-            Icon(Icons.arrow_forward_ios_rounded, size: 11, color: widget.accent.withValues(alpha: 0.5)),
-          ],
-        ),
-      ),
-    ).animate().fadeIn(duration: 260.ms, delay: 40.ms).slideY(begin: 0.04, end: 0, curve: Curves.easeOutCubic);
+          ),
+        )
+        .animate()
+        .fadeIn(duration: 260.ms, delay: 40.ms)
+        .slideY(begin: 0.04, end: 0, curve: Curves.easeOutCubic);
   }
 }
 
@@ -1651,9 +2398,7 @@ class _GlowBlob extends StatelessWidget {
         height: size,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: [color, Colors.transparent],
-          ),
+          gradient: RadialGradient(colors: [color, Colors.transparent]),
         ),
       ),
     );
@@ -1702,11 +2447,13 @@ class _LoginInputState extends State<_LoginInput> {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         boxShadow: focused
-            ? [BoxShadow(
-                color: AppTone.brand.withValues(alpha: 0.15),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
-              )]
+            ? [
+                BoxShadow(
+                  color: AppTone.brand.withValues(alpha: 0.15),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
+                ),
+              ]
             : null,
       ),
       child: TextField(
@@ -1741,7 +2488,9 @@ class _LoginInputState extends State<_LoginInput> {
           suffixIcon: widget.obscure
               ? IconButton(
                   icon: Icon(
-                    _obscured ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                    _obscured
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
                     size: 18,
                     color: const Color(0xFF4B6080),
                   ),
@@ -1792,11 +2541,13 @@ class _GradientLoginButton extends StatelessWidget {
               : null,
           color: onPressed == null ? const Color(0xFFD1FAE5) : null,
           boxShadow: onPressed != null
-              ? [BoxShadow(
-                  color: const Color(0xFF00A86B).withValues(alpha: 0.3),
-                  blurRadius: 16,
-                  offset: const Offset(0, 6),
-                )]
+              ? [
+                  BoxShadow(
+                    color: const Color(0xFF00A86B).withValues(alpha: 0.3),
+                    blurRadius: 16,
+                    offset: const Offset(0, 6),
+                  ),
+                ]
               : null,
         ),
         child: Material(
@@ -1818,7 +2569,9 @@ class _GradientLoginButton extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
-                          showOtp ? Icons.verified_rounded : Icons.arrow_forward_rounded,
+                          showOtp
+                              ? Icons.verified_rounded
+                              : Icons.arrow_forward_rounded,
                           color: Colors.white,
                           size: 18,
                         ),
@@ -1854,7 +2607,10 @@ class _DarkDemoButtonState extends State<_DarkDemoButton> {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTapDown: (_) => setState(() => _pressed = true),
-      onTapUp: (_) { setState(() => _pressed = false); widget.onPressed(); },
+      onTapUp: (_) {
+        setState(() => _pressed = false);
+        widget.onPressed();
+      },
       onTapCancel: () => setState(() => _pressed = false),
       child: AnimatedContainer(
         duration: _fast,
@@ -1866,10 +2622,18 @@ class _DarkDemoButtonState extends State<_DarkDemoButton> {
           color: _pressed ? const Color(0xFF0D1E30) : const Color(0xFF0A1220),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: _pressed ? AppTone.brand.withValues(alpha: 0.4) : const Color(0xFF1C2D45),
+            color: _pressed
+                ? AppTone.brand.withValues(alpha: 0.4)
+                : const Color(0xFF1C2D45),
           ),
           boxShadow: _pressed
-              ? [BoxShadow(color: AppTone.brand.withValues(alpha: 0.10), blurRadius: 10, offset: const Offset(0, 3))]
+              ? [
+                  BoxShadow(
+                    color: AppTone.brand.withValues(alpha: 0.10),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ]
               : null,
         ),
         child: Text(
@@ -1888,7 +2652,8 @@ class _AppNotification {
     required this.title,
     required this.body,
     this.targetTab,
-  }) : at = DateTime.now(), read = false;
+  }) : at = DateTime.now(),
+       read = false;
   final String type;
   final String title;
   final String body;
@@ -1921,11 +2686,15 @@ class _WorkspaceState extends State<Workspace> {
   int get _unreadCount => _notifications.where((n) => !n.read).length;
 
   void _pushNotification(_AppNotification n) {
-    setState(() { _notifications.insert(0, n); });
+    setState(() {
+      _notifications.insert(0, n);
+    });
   }
 
   void _markAllRead() {
-    setState(() { for (final n in _notifications) n.read = true; });
+    setState(() {
+      for (final n in _notifications) n.read = true;
+    });
   }
 
   @override
@@ -1940,30 +2709,42 @@ class _WorkspaceState extends State<Workspace> {
         // Dealer tabs:   0=Dashboard 1=Devices 2=Enroll 3=Keys 4=Tools
         final reseller = widget.session.user.isReseller;
         if (event.type == 'key_request_approved') {
-          final qty  = event.data['quantity'];
+          final qty = event.data['quantity'];
           final tier = event.data['tier'] ?? 'standard';
-          final tierLabel = tier == 'vip' ? 'VIP'
-              : tier == 'premium' ? 'Premium' : 'Standard';
-          _pushNotification(_AppNotification(
-            type: 'key_request_approved',
-            title: 'Keys Approved',
-            body: 'Admin approved $qty $tierLabel key${qty == 1 ? '' : 's'}. Tap to view your stock.',
-            targetTab: reseller ? 2 : 3, // Keys tab
-          ));
+          final tierLabel = tier == 'vip'
+              ? 'VIP'
+              : tier == 'premium'
+              ? 'Premium'
+              : 'Standard';
+          _pushNotification(
+            _AppNotification(
+              type: 'key_request_approved',
+              title: 'Keys Approved',
+              body:
+                  'Admin approved $qty $tierLabel key${qty == 1 ? '' : 's'}. Tap to view your stock.',
+              targetTab: reseller ? 2 : 3, // Keys tab
+            ),
+          );
         } else if (event.type == 'enrollment_complete') {
-          _pushNotification(_AppNotification(
-            type: 'enrollment_complete',
-            title: 'Device Enrolled',
-            body: '${event.data['deviceName'] ?? 'Device'} enrolled successfully. Tap to view.',
-            targetTab: reseller ? null : 1, // Dealer → Devices tab
-          ));
+          _pushNotification(
+            _AppNotification(
+              type: 'enrollment_complete',
+              title: 'Device Enrolled',
+              body:
+                  '${event.data['deviceName'] ?? 'Device'} enrolled successfully. Tap to view.',
+              targetTab: reseller ? null : 1, // Dealer → Devices tab
+            ),
+          );
         } else if (event.type == 'device_locked') {
-          _pushNotification(_AppNotification(
-            type: 'device_locked',
-            title: 'Device Locked',
-            body: '${event.data['deviceName'] ?? 'A device'} was locked. Tap to view.',
-            targetTab: reseller ? null : 1, // Dealer → Devices tab
-          ));
+          _pushNotification(
+            _AppNotification(
+              type: 'device_locked',
+              title: 'Device Locked',
+              body:
+                  '${event.data['deviceName'] ?? 'A device'} was locked. Tap to view.',
+              targetTab: reseller ? null : 1, // Dealer → Devices tab
+            ),
+          );
         }
       });
     }
@@ -1976,9 +2757,9 @@ class _WorkspaceState extends State<Workspace> {
   }
 
   void _setIndex(int i) => setState(() {
-        index = i;
-        _controlsVisible = true;
-      });
+    index = i;
+    _controlsVisible = true;
+  });
 
   bool get isReseller => widget.session.user.isReseller;
 
@@ -2225,23 +3006,26 @@ class _WorkspaceState extends State<Workspace> {
                           right: 12,
                           child: IgnorePointer(
                             ignoring: !_controlsVisible,
-                            child: _FloatingWorkspaceControls(
-                              user: widget.session.user,
-                              api: widget.api,
-                              onSettings: openSettings,
-                              notifications: _notifications,
-                              unreadCount: _unreadCount,
-                              onMarkAllRead: _markAllRead,
-                              onNavigateTo: _setIndex,
-                            )
-                                .animate(target: _controlsVisible ? 1.0 : 0.0)
-                                .fade(duration: _medium)
-                                .slideY(
-                                  begin: -0.8,
-                                  end: 0,
-                                  duration: _medium,
-                                  curve: Curves.easeOutCubic,
-                                ),
+                            child:
+                                _FloatingWorkspaceControls(
+                                      user: widget.session.user,
+                                      api: widget.api,
+                                      onSettings: openSettings,
+                                      notifications: _notifications,
+                                      unreadCount: _unreadCount,
+                                      onMarkAllRead: _markAllRead,
+                                      onNavigateTo: _setIndex,
+                                    )
+                                    .animate(
+                                      target: _controlsVisible ? 1.0 : 0.0,
+                                    )
+                                    .fade(duration: _medium)
+                                    .slideY(
+                                      begin: -0.8,
+                                      end: 0,
+                                      duration: _medium,
+                                      curve: Curves.easeOutCubic,
+                                    ),
                           ),
                         ),
                       ],
@@ -2390,7 +3174,10 @@ class _AlertBell extends StatelessWidget {
                   api: api,
                   accent: accent,
                   notifications: notifications,
-                  onNavigateTo: (tab) { Navigator.pop(context); onNavigateTo(tab); },
+                  onNavigateTo: (tab) {
+                    Navigator.pop(context);
+                    onNavigateTo(tab);
+                  },
                 ),
               );
             },
@@ -2432,19 +3219,27 @@ class _AlertBell extends StatelessWidget {
 
 IconData _notifIcon(String type) {
   switch (type) {
-    case 'key_request_approved': return Icons.key_rounded;
-    case 'enrollment_complete':  return Icons.phone_android_rounded;
-    case 'device_locked':        return Icons.lock_rounded;
-    default:                     return Icons.notifications_rounded;
+    case 'key_request_approved':
+      return Icons.key_rounded;
+    case 'enrollment_complete':
+      return Icons.phone_android_rounded;
+    case 'device_locked':
+      return Icons.lock_rounded;
+    default:
+      return Icons.notifications_rounded;
   }
 }
 
 Color _notifColor(String type) {
   switch (type) {
-    case 'key_request_approved': return const Color(0xFF10B981);
-    case 'enrollment_complete':  return const Color(0xFF3B82F6);
-    case 'device_locked':        return const Color(0xFFF59E0B);
-    default:                     return const Color(0xFF6B7280);
+    case 'key_request_approved':
+      return const Color(0xFF10B981);
+    case 'enrollment_complete':
+      return const Color(0xFF3B82F6);
+    case 'device_locked':
+      return const Color(0xFFF59E0B);
+    default:
+      return const Color(0xFF6B7280);
   }
 }
 
@@ -2490,7 +3285,11 @@ class _AlertCenterSheet extends StatelessWidget {
                         color: accent.withValues(alpha: 0.1),
                         shape: BoxShape.circle,
                       ),
-                      child: Icon(Icons.notifications_active_rounded, color: accent, size: 20),
+                      child: Icon(
+                        Icons.notifications_active_rounded,
+                        color: accent,
+                        size: 20,
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -2510,7 +3309,11 @@ class _AlertCenterSheet extends StatelessWidget {
                             notifications.isEmpty
                                 ? 'All clear'
                                 : '${notifications.length} notification${notifications.length == 1 ? '' : 's'}',
-                            style: TextStyle(fontSize: 12, color: AppTone.muted, fontWeight: FontWeight.w500),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppTone.muted,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ],
                       ),
@@ -2529,8 +3332,11 @@ class _AlertCenterSheet extends StatelessWidget {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.notifications_none_rounded,
-                                size: 56, color: AppTone.muted.withValues(alpha: 0.25)),
+                            Icon(
+                              Icons.notifications_none_rounded,
+                              size: 56,
+                              color: AppTone.muted.withValues(alpha: 0.25),
+                            ),
                             const SizedBox(height: 16),
                             Text(
                               'No notifications yet',
@@ -2544,7 +3350,11 @@ class _AlertCenterSheet extends StatelessWidget {
                             const SizedBox(height: 6),
                             Text(
                               'Key approvals and device events\nwill appear here in real time.',
-                              style: TextStyle(color: AppTone.muted, fontSize: 13, height: 1.5),
+                              style: TextStyle(
+                                color: AppTone.muted,
+                                fontSize: 13,
+                                height: 1.5,
+                              ),
                               textAlign: TextAlign.center,
                             ),
                           ],
@@ -2561,7 +3371,9 @@ class _AlertCenterSheet extends StatelessWidget {
                             color: Colors.transparent,
                             child: InkWell(
                               borderRadius: BorderRadius.circular(16),
-                              onTap: tappable ? () => onNavigateTo(n.targetTab!) : null,
+                              onTap: tappable
+                                  ? () => onNavigateTo(n.targetTab!)
+                                  : null,
                               child: Ink(
                                 decoration: BoxDecoration(
                                   color: AppTone.surface,
@@ -2581,7 +3393,8 @@ class _AlertCenterSheet extends StatelessWidget {
                                 child: Padding(
                                   padding: const EdgeInsets.all(16),
                                   child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       // Icon pill
                                       Container(
@@ -2598,13 +3411,18 @@ class _AlertCenterSheet extends StatelessWidget {
                                           ),
                                           shape: BoxShape.circle,
                                         ),
-                                        child: Icon(_notifIcon(n.type), color: color, size: 20),
+                                        child: Icon(
+                                          _notifIcon(n.type),
+                                          color: color,
+                                          size: 20,
+                                        ),
                                       ),
                                       const SizedBox(width: 14),
                                       // Text
                                       Expanded(
                                         child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
                                             Text(
                                               n.title,
@@ -2628,13 +3446,18 @@ class _AlertCenterSheet extends StatelessWidget {
                                             const SizedBox(height: 8),
                                             Row(
                                               children: [
-                                                Icon(Icons.schedule_rounded,
-                                                    size: 11, color: AppTone.muted.withValues(alpha: 0.5)),
+                                                Icon(
+                                                  Icons.schedule_rounded,
+                                                  size: 11,
+                                                  color: AppTone.muted
+                                                      .withValues(alpha: 0.5),
+                                                ),
                                                 const SizedBox(width: 4),
                                                 Text(
                                                   _timeAgo(n.at),
                                                   style: TextStyle(
-                                                    color: AppTone.muted.withValues(alpha: 0.6),
+                                                    color: AppTone.muted
+                                                        .withValues(alpha: 0.6),
                                                     fontSize: 11,
                                                     fontWeight: FontWeight.w600,
                                                     letterSpacing: 0.1,
@@ -2647,7 +3470,8 @@ class _AlertCenterSheet extends StatelessWidget {
                                                     style: TextStyle(
                                                       color: color,
                                                       fontSize: 12,
-                                                      fontWeight: FontWeight.w700,
+                                                      fontWeight:
+                                                          FontWeight.w700,
                                                       letterSpacing: 0.2,
                                                     ),
                                                   ),
@@ -2983,7 +3807,10 @@ class _NavButtonState extends State<_NavButton> {
               AnimatedContainer(
                 duration: _fast,
                 curve: Curves.easeOutCubic,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: active
                       ? widget.accent.withValues(alpha: 0.12)
@@ -3006,7 +3833,9 @@ class _NavButtonState extends State<_NavButton> {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: active ? widget.accent : AppTone.ink,
-                          fontWeight: active ? FontWeight.w900 : FontWeight.w700,
+                          fontWeight: active
+                              ? FontWeight.w900
+                              : FontWeight.w700,
                         ),
                       ),
                     ),
@@ -3015,7 +3844,9 @@ class _NavButtonState extends State<_NavButton> {
               ),
               // Left-edge active indicator bar
               Positioned(
-                left: 0, top: 8, bottom: 8,
+                left: 0,
+                top: 8,
+                bottom: 8,
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
                   curve: Curves.easeOutCubic,
@@ -3115,8 +3946,14 @@ class _DealerDashboardState extends State<DealerDashboard> {
       _sseSub = stream.listen((event) {
         if (!mounted) return;
         const relevant = {
-          'device_locked', 'device_unlocked', 'enrollment_complete',
-          'grace_expired', 'payment_recorded',
+          'device_locked',
+          'device_unlocked',
+          'device_decoupled',
+          'device_decoupling_requested',
+          'enrollment_complete',
+          'grace_expired',
+          'payment_recorded',
+          'device_health_changed',
         };
         if (relevant.contains(event.type)) {
           _reload?.call();
@@ -3136,9 +3973,14 @@ class _DealerDashboardState extends State<DealerDashboard> {
     return DataPage<Map<String, dynamic>>(
       title: 'Dealer dashboard',
       loader: () async {
-        final stats = asMap((await widget.api.get('/api/v1/dealer/stats')).data);
-        final keys = asMap((await widget.api.get('/api/v1/keys/my-keys')).data);
-        final devices = asMap((await widget.api.get('/api/v1/dealer/devices')).data);
+        final responses = await Future.wait([
+          widget.api.get('/api/v1/dealer/stats'),
+          widget.api.get('/api/v1/keys/my-keys'),
+          widget.api.get('/api/v1/dealer/devices'),
+        ]);
+        final stats = asMap(responses[0].data);
+        final keys = asMap(responses[1].data);
+        final devices = asMap(responses[2].data);
         return {
           'stats': stats,
           'keys': asList(keys, 'keys'),
@@ -3218,7 +4060,10 @@ class _DealerDashboardState extends State<DealerDashboard> {
             ),
             Section(
               title: 'Quick actions',
-              child: _DealerQuickActions(onNavigate: widget.onNavigate, api: widget.api),
+              child: _DealerQuickActions(
+                onNavigate: widget.onNavigate,
+                api: widget.api,
+              ),
             ),
             Section(
               title: 'Dashboard alerts',
@@ -3251,20 +4096,26 @@ class _DealerQuickActions extends StatelessWidget {
       _QuickAction(
         'Search devices',
         Icons.search_rounded,
-        () => Navigator.push(context,
-            MaterialPageRoute(builder: (_) => DeviceSearchScreen(api: api))),
+        () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => DeviceSearchScreen(api: api)),
+        ),
       ),
       _QuickAction(
         'Customer credit',
         Icons.credit_score_outlined,
-        () => Navigator.push(context,
-            MaterialPageRoute(builder: (_) => CustomerCreditScreen(api: api))),
+        () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => CustomerCreditScreen(api: api)),
+        ),
       ),
       _QuickAction(
         'Fraud center',
         Icons.shield_outlined,
-        () => Navigator.push(context,
-            MaterialPageRoute(builder: (_) => FraudCenterScreen(api: api))),
+        () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => FraudCenterScreen(api: api)),
+        ),
       ),
       _QuickAction(
         'Export NEIR',
@@ -3385,12 +4236,17 @@ class _WorkspaceClearPanel extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 36, height: 36,
+                width: 36,
+                height: 36,
                 decoration: BoxDecoration(
                   color: AppTone.brand.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.check_circle_rounded, color: AppTone.brand, size: 20),
+                child: const Icon(
+                  Icons.check_circle_rounded,
+                  color: AppTone.brand,
+                  size: 20,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -3509,7 +4365,15 @@ class DealerDevices extends StatelessWidget {
     return DataPage<Map<String, dynamic>>(
       title: 'Devices',
       loader: () async => asMap((await api.get('/api/v1/dealer/devices')).data),
-      sseEvents: const ['device_locked', 'device_unlocked', 'enrollment_complete', 'grace_expired'],
+      sseEvents: const [
+        'device_locked',
+        'device_unlocked',
+        'device_decoupled',
+        'device_decoupling_requested',
+        'enrollment_complete',
+        'grace_expired',
+        'device_health_changed',
+      ],
       builder: (context, data, reload) {
         final devices = asList(data, 'devices');
         return Page(
@@ -3622,11 +4486,13 @@ class _DealerDeviceListState extends State<DealerDeviceList> {
         else
           Column(
             children: filtered
-                .map((device) => DeviceTile(
-                      api: widget.api,
-                      device: device,
-                      onDeviceChanged: widget.onDevicesChanged,
-                    ))
+                .map(
+                  (device) => DeviceTile(
+                    api: widget.api,
+                    device: device,
+                    onDeviceChanged: widget.onDevicesChanged,
+                  ),
+                )
                 .toList(),
           ),
       ],
@@ -3648,16 +4514,30 @@ class DeviceTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final status = text(device['status'], fallback: 'unknown');
-    final connectionStatus =
-        text(device['device_connection_status'], fallback: 'unknown');
-    final customer = text(device['customer_name'], fallback: 'Customer not captured');
+    final connectionStatus = text(
+      device['device_connection_status'],
+      fallback: 'unknown',
+    );
+    final customer = text(
+      device['customer_name'],
+      fallback: 'Customer not captured',
+    );
     final lastSeen = _lastSeenLabel(device['last_seen_at']);
+    final brand = text(device['brand'], fallback: 'Unknown brand');
+    final model = text(device['model']);
     return _InfoTile(
-      icon: Icons.phone_android,
+      icon: _deviceStatusIcon(device),
       color: _connectionColor(connectionStatus),
+      leading: DeviceBrandIcon(
+        brand: brand,
+        model: model,
+        status: status,
+        lockLevel: text(device['lock_level']),
+        connectionStatus: connectionStatus,
+      ),
       title: text(device['device_name'], fallback: 'Device'),
       subtitle:
-          '$customer\n${text(device['brand'], fallback: 'Unknown brand')} ${text(device['model'])} - IMEI: ${_last4(text(device['imei'], fallback: 'unknown'))}\n$lastSeen',
+          '$customer\n$brand $model - IMEI: ${_last4(text(device['imei'], fallback: 'unknown'))}\n$lastSeen',
       trailing: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
         mainAxisSize: MainAxisSize.min,
@@ -3674,6 +4554,7 @@ class DeviceTile extends StatelessWidget {
         context: context,
         showDragHandle: true,
         isScrollControlled: true,
+        useSafeArea: true,
         builder: (_) => DeviceActions(
           api: api,
           device: device,
@@ -3682,6 +4563,176 @@ class DeviceTile extends StatelessWidget {
       ),
     );
   }
+}
+
+IconData _deviceStatusIcon(Map<String, dynamic> device) {
+  final status = text(device['status']).toLowerCase();
+  final lockLevel = text(device['lock_level']).toUpperCase();
+  if (status == 'locked' || lockLevel == 'FULL') {
+    return Icons.lock_rounded;
+  }
+  if (status == 'partial_lock' || lockLevel == 'SOFT') {
+    return Icons.lock_clock_rounded;
+  }
+  if (status == 'unlocked' || lockLevel == 'NONE') {
+    return Icons.lock_open_rounded;
+  }
+  if (status == 'decoupled') {
+    return Icons.verified_user_outlined;
+  }
+  return Icons.phone_android_rounded;
+}
+
+class DeviceBrandIcon extends StatelessWidget {
+  const DeviceBrandIcon({
+    super.key,
+    required this.brand,
+    required this.model,
+    required this.status,
+    required this.lockLevel,
+    required this.connectionStatus,
+  });
+
+  final String brand;
+  final String model;
+  final String status;
+  final String lockLevel;
+  final String connectionStatus;
+
+  @override
+  Widget build(BuildContext context) {
+    final profile = _brandProfile(brand);
+    final locked = status.toLowerCase() == 'locked' || lockLevel == 'FULL';
+    final partial =
+        status.toLowerCase() == 'partial_lock' || lockLevel == 'SOFT';
+    final offline = !{
+      'online',
+      'unknown',
+      '',
+    }.contains(connectionStatus.toLowerCase());
+    final stateColor = locked
+        ? AppTone.danger
+        : partial
+        ? AppTone.warning
+        : offline
+        ? AppTone.muted
+        : AppTone.brand;
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                profile.color.withValues(alpha: 0.95),
+                profile.color.withValues(alpha: 0.58),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: stateColor.withValues(alpha: 0.32)),
+            boxShadow: [
+              BoxShadow(
+                color: profile.color.withValues(alpha: 0.22),
+                blurRadius: 16,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Center(
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Icon(profile.icon, color: Colors.white, size: 30),
+                Positioned(
+                  top: 10,
+                  child: Container(
+                    width: 10,
+                    height: 2,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.7),
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        Positioned(
+          right: -4,
+          bottom: -4,
+          child: Container(
+            width: 22,
+            height: 22,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+              border: Border.all(color: stateColor, width: 2),
+            ),
+            child: Icon(
+              locked
+                  ? Icons.lock_rounded
+                  : partial
+                  ? Icons.lock_clock_rounded
+                  : Icons.lock_open_rounded,
+              size: 13,
+              color: stateColor,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _BrandProfile {
+  const _BrandProfile(this.icon, this.color);
+  final IconData icon;
+  final Color color;
+}
+
+_BrandProfile _brandProfile(String rawBrand) {
+  final brand = rawBrand.trim().toLowerCase();
+  if (brand.contains('samsung')) {
+    return const _BrandProfile(Icons.phone_android_rounded, Color(0xFF2563EB));
+  }
+  if (brand.contains('xiaomi') ||
+      brand.contains('redmi') ||
+      brand.contains('poco')) {
+    return const _BrandProfile(Icons.phone_android_rounded, Color(0xFFF97316));
+  }
+  if (brand.contains('oppo')) {
+    return const _BrandProfile(Icons.phone_android_rounded, Color(0xFF16A34A));
+  }
+  if (brand.contains('vivo')) {
+    return const _BrandProfile(Icons.phone_android_rounded, Color(0xFF4F46E5));
+  }
+  if (brand.contains('realme')) {
+    return const _BrandProfile(Icons.phone_android_rounded, Color(0xFFEAB308));
+  }
+  if (brand.contains('tecno')) {
+    return const _BrandProfile(Icons.phone_android_rounded, Color(0xFF0891B2));
+  }
+  if (brand.contains('infinix')) {
+    return const _BrandProfile(Icons.phone_android_rounded, Color(0xFF0F766E));
+  }
+  if (brand.contains('itel')) {
+    return const _BrandProfile(Icons.phone_android_rounded, Color(0xFF7C3AED));
+  }
+  if (brand.contains('honor') || brand.contains('huawei')) {
+    return const _BrandProfile(Icons.phone_android_rounded, Color(0xFFDC2626));
+  }
+  if (brand.contains('iphone') ||
+      brand.contains('apple') ||
+      brand.contains('ios')) {
+    return const _BrandProfile(Icons.phone_iphone_rounded, Color(0xFF111827));
+  }
+  return const _BrandProfile(Icons.smartphone_rounded, AppTone.info);
 }
 
 String _last4(String value) {
@@ -3697,6 +4748,8 @@ String _connectionLabel(String status) {
       return 'Delayed';
     case 'offline':
       return 'Offline';
+    case 'protection_degraded':
+      return 'Protection issue';
     case 'app_removed_suspected':
       return 'App alert';
     case 'never_seen':
@@ -3714,6 +4767,8 @@ Color _connectionColor(String status) {
       return AppTone.warning;
     case 'offline':
       return AppTone.muted;
+    case 'protection_degraded':
+      return AppTone.danger;
     case 'app_removed_suspected':
       return AppTone.danger;
     default:
@@ -3725,6 +4780,45 @@ String _lastSeenLabel(dynamic value) {
   final raw = text(value);
   if (raw.isEmpty) return 'No app heartbeat yet';
   return 'Last app heartbeat: ${formatDateTime(raw)}';
+}
+
+String _protectionIssueLabel(dynamic value) {
+  final raw = text(value);
+  const marker = 'permissions:degraded:';
+  final markerIndex = raw.indexOf(marker);
+  if (markerIndex < 0) {
+    return 'Protection degraded: one or more required permissions are disabled.';
+  }
+  final reasons = raw
+      .substring(markerIndex + marker.length)
+      .split(',')
+      .map((reason) => reason.trim())
+      .where((reason) => reason.isNotEmpty)
+      .map((reason) {
+        switch (reason) {
+          case 'overlay_disabled':
+            return 'overlay';
+          case 'location_disabled':
+            return 'location';
+          case 'background_location_disabled':
+            return 'background location';
+          case 'sms_disabled':
+            return 'SMS unlock';
+          case 'notifications_disabled':
+            return 'notifications';
+          case 'device_admin_inactive':
+            return 'device admin';
+          case 'battery_restricted':
+            return 'battery background access';
+          default:
+            return reason.replaceAll('_', ' ');
+        }
+      })
+      .toList();
+  if (reasons.isEmpty) {
+    return 'Protection degraded: one or more required permissions are disabled.';
+  }
+  return 'Protection degraded: ${reasons.join(', ')} disabled.';
 }
 
 class _StatusFilterChips extends StatelessWidget {
@@ -3772,204 +4866,394 @@ class DeviceActions extends StatelessWidget {
     final id = text(device['id']);
     final status = text(device['status'], fallback: 'unknown');
     final lock = text(device['lock_level'], fallback: 'NONE');
-    final connectionStatus =
-        text(device['device_connection_status'], fallback: 'unknown');
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: SingleChildScrollView(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        text(device['device_name'], fallback: 'Device'),
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
+    final connectionStatus = text(
+      device['device_connection_status'],
+      fallback: 'unknown',
+    );
+    final deviceName = text(device['device_name'], fallback: 'Device');
+    final connColor = _connectionColor(connectionStatus);
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        16,
+        4,
+        16,
+        MediaQuery.of(context).viewInsets.bottom + 16,
+      ),
+      child: SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── Header ─────────────────────────────────────────────────
+              Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: statusColor(status).withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    StatusPill(label: status, color: statusColor(status)),
+                    child: Icon(
+                      Icons.phone_android_rounded,
+                      color: statusColor(status),
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          deviceName,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: AppTone.ink,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            Container(
+                              width: 7,
+                              height: 7,
+                              decoration: BoxDecoration(
+                                color: connColor,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              _connectionLabel(connectionStatus),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: connColor,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  StatusPill(label: status, color: statusColor(status)),
+                ],
+              ),
+              if (connectionStatus == 'app_removed_suspected') ...[
+                const SizedBox(height: 10),
+                const _InlineNotice(
+                  message:
+                      'App alert: push token invalid — possible uninstall or tamper.',
+                  tone: AppTone.danger,
+                  icon: Icons.warning_amber_rounded,
+                ),
+              ] else if (connectionStatus == 'protection_degraded') ...[
+                const SizedBox(height: 10),
+                _InlineNotice(
+                  message: _protectionIssueLabel(
+                    device['last_heartbeat_source'],
+                  ),
+                  tone: AppTone.danger,
+                  icon: Icons.privacy_tip_outlined,
+                ),
+              ] else if (connectionStatus == 'offline' ||
+                  connectionStatus == 'delayed') ...[
+                const SizedBox(height: 10),
+                _InlineNotice(
+                  message:
+                      '${_connectionLabel(connectionStatus)} · Last seen: ${formatDateTime(device['last_seen_at'])}',
+                  tone: connectionStatus == 'delayed'
+                      ? AppTone.warning
+                      : AppTone.muted,
+                  icon: Icons.signal_wifi_connected_no_internet_4_outlined,
+                ),
+              ],
+              const SizedBox(height: 12),
+              // ── Info grid (2-col) ───────────────────────────────────────
+              _SoftPanel(
+                padding: const EdgeInsets.all(10),
+                child: Table(
+                  columnWidths: const {
+                    0: FlexColumnWidth(1),
+                    1: FlexColumnWidth(1),
+                  },
+                  children: [
+                    _infoRow(
+                      'IMEI',
+                      text(device['imei'], fallback: '—'),
+                      'Lock',
+                      lock,
+                    ),
+                    _infoRow(
+                      'EMI status',
+                      text(
+                        device['emi_status'] ?? device['agreement_status'],
+                        fallback: 'Not linked',
+                      ),
+                      'Customer',
+                      text(device['customer_name'], fallback: '—'),
+                    ),
+                    _infoRow(
+                      'Enrolled',
+                      formatDateTime(
+                        device['enrolled_at'] ?? device['created_at'],
+                      ),
+                      'Last heartbeat',
+                      formatDateTime(device['last_seen_at']),
+                    ),
+                    _infoRow(
+                      'Key ID',
+                      text(device['activation_key_id'], fallback: '—'),
+                      'Brand / Model',
+                      '${text(device['brand'], fallback: '?')} ${text(device['model'])}',
+                    ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                if (connectionStatus == 'app_removed_suspected') ...[
-                  const _InlineNotice(
-                    message:
-                        'App alert: push delivery says this app token is no longer valid. Treat this as uninstall/tamper suspected, not a normal offline state.',
-                    tone: AppTone.danger,
-                    icon: Icons.warning_amber_rounded,
-                  ),
-                  const SizedBox(height: 12),
-                ] else if (connectionStatus == 'offline' ||
-                    connectionStatus == 'delayed') ...[
-                  _InlineNotice(
-                    message:
-                        'Device is ${_connectionLabel(connectionStatus).toLowerCase()}. Last heartbeat: ${formatDateTime(device['last_seen_at'])}.',
-                    tone: connectionStatus == 'delayed'
-                        ? AppTone.warning
-                        : AppTone.muted,
-                    icon: Icons.signal_wifi_connected_no_internet_4_outlined,
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                _SoftPanel(
-                  child: Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      _DetailFact(
-                        'IMEI',
-                        text(device['imei'], fallback: 'unknown'),
-                      ),
-                      _DetailFact('Lock level', lock),
-                      _DetailFact(
-                        'EMI status',
-                        text(
-                          device['emi_status'] ?? device['agreement_status'],
-                          fallback: 'Not linked',
-                        ),
-                      ),
-                      _DetailFact(
-                        'Key ID',
-                        text(
-                          device['activation_key_id'],
-                          fallback: 'Not available',
-                        ),
-                      ),
-                      _DetailFact(
-                        'Enrolled',
-                        formatDateTime(
-                          device['enrolled_at'] ?? device['created_at'],
-                        ),
-                      ),
-                      _DetailFact(
-                        'Customer',
-                        text(device['customer_name'], fallback: 'Not captured'),
-                      ),
-                      _DetailFact(
-                        'Connection',
-                        _connectionLabel(connectionStatus),
-                      ),
-                      _DetailFact(
-                        'Last heartbeat',
-                        formatDateTime(device['last_seen_at']),
-                      ),
-                    ],
-                  ),
+              ),
+              const SizedBox(height: 12),
+              // ── Actions ────────────────────────────────────────────────
+              _SoftPanel(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 10,
                 ),
-                const SizedBox(height: 14),
-                _SoftPanel(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Text(
-                        'Sensitive actions',
-                        style: TextStyle(fontWeight: FontWeight.w900),
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          FilledButton.icon(
-                            onPressed: id.isEmpty
-                                ? null
-                                : () async {
-                                    final result = await showDialog<Map<String, dynamic>>(
-                                      context: context,
-                                      builder: (_) =>
-                                          LockDialog(api: api, deviceId: id),
-                                    );
-                                    if (result != null) {
-                                      await onDeviceChanged?.call();
-                                    }
-                                    if (result != null && context.mounted) {
-                                      Navigator.pop(context);
-                                    }
-                                  },
-                            icon: const Icon(Icons.lock_outline),
-                            label: const Text('Submit lock request'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: id.isEmpty
-                                ? null
-                                : () => showModalBottomSheet<void>(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _ActionBtn(
+                      icon: Icons.lock_outline,
+                      label: 'Lock',
+                      color: AppTone.danger,
+                      onTap: id.isEmpty
+                          ? null
+                          : () async {
+                              final result =
+                                  await showDialog<Map<String, dynamic>>(
                                     context: context,
-                                    isScrollControlled: true,
-                                    useSafeArea: true,
-                                    isDismissible: false,
-                                    enableDrag: false,
-                                    shape: const RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                                    ),
-                                    builder: (_) =>
-                                        LocationDialog(api: api, deviceId: id),
-                                  ),
-                            icon: const Icon(Icons.location_searching),
-                            label: const Text('Pull location'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: id.isEmpty
-                                ? null
-                                : () => showDialog<void>(
-                                    context: context,
-                                    builder: (_) => CustomerMessageDialog(
+                                    builder: (_) => LockDialog(
                                       api: api,
                                       deviceId: id,
+                                      connectionStatus: connectionStatus,
                                     ),
+                                  );
+                              if (result != null) await onDeviceChanged?.call();
+                              if (result != null && context.mounted)
+                                Navigator.pop(context);
+                            },
+                    ),
+                    _ActionBtn(
+                      icon: Icons.lock_open_outlined,
+                      label: 'Unlock',
+                      color: AppTone.brand,
+                      onTap: id.isEmpty
+                          ? null
+                          : () async {
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => UnlockFlowScreen(
+                                    api: api,
+                                    deviceId: id,
+                                    deviceName: deviceName,
                                   ),
-                            icon: const Icon(Icons.sms_outlined),
-                            label: const Text('Send message'),
+                                ),
+                              );
+                              await onDeviceChanged?.call();
+                            },
+                    ),
+                    _ActionBtn(
+                      icon: Icons.location_searching,
+                      label: 'Location',
+                      color: AppTone.accent,
+                      onTap: id.isEmpty
+                          ? null
+                          : () => showModalBottomSheet<void>(
+                              context: context,
+                              isScrollControlled: true,
+                              useSafeArea: true,
+                              isDismissible: false,
+                              enableDrag: false,
+                              shape: const RoundedRectangleBorder(
+                                borderRadius: BorderRadius.vertical(
+                                  top: Radius.circular(20),
+                                ),
+                              ),
+                              builder: (_) => LocationDialog(
+                                api: api,
+                                deviceId: id,
+                                connectionStatus: connectionStatus,
+                              ),
+                            ),
+                    ),
+                    _ActionBtn(
+                      icon: Icons.sms_outlined,
+                      label: 'Message',
+                      color: AppTone.info,
+                      onTap: id.isEmpty
+                          ? null
+                          : () => showDialog<void>(
+                              context: context,
+                              builder: (_) =>
+                                  CustomerMessageDialog(api: api, deviceId: id),
+                            ),
+                    ),
+                    _ActionBtn(
+                      icon: Icons.info_outline,
+                      label: 'Details',
+                      color: AppTone.muted,
+                      onTap: id.isEmpty
+                          ? null
+                          : () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => LockDetailScreen(
+                                  api: api,
+                                  deviceId: id,
+                                  deviceName: deviceName,
+                                ),
+                              ),
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (id.isNotEmpty &&
+                  ![
+                    'decoupled',
+                    'pending_decouple',
+                  ].contains(status.toLowerCase())) ...[
+                _SoftPanel(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: AppTone.amber.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.science_outlined,
+                          color: AppTone.amber,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'Testing only: release management from this device.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: AppTone.ink,
                           ),
-                          OutlinedButton.icon(
-                            onPressed: id.isEmpty
-                                ? null
-                                : () => Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => UnlockFlowScreen(
-                                        api: api,
-                                        deviceId: id,
-                                        deviceName: text(device['device_name'],
-                                            fallback: 'Device'),
-                                      ),
-                                    )),
-                            icon: const Icon(Icons.lock_open_outlined),
-                            label: const Text('Unlock device'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          final result = await showDialog<bool>(
+                            context: context,
+                            builder: (_) => TestDecoupleDialog(
+                              api: api,
+                              deviceId: id,
+                              deviceName: deviceName,
+                            ),
+                          );
+                          if (result == true) {
+                            await onDeviceChanged?.call();
+                            if (context.mounted) Navigator.pop(context);
+                          }
+                        },
+                        icon: const Icon(Icons.link_off_rounded, size: 16),
+                        label: const Text('Test release'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTone.amber,
+                          side: BorderSide(
+                            color: AppTone.amber.withValues(alpha: 0.55),
                           ),
-                          TextButton.icon(
-                            onPressed: id.isEmpty
-                                ? null
-                                : () => Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => LockDetailScreen(
-                                        api: api,
-                                        deviceId: id,
-                                        deviceName: text(device['device_name'],
-                                            fallback: 'Device'),
-                                      ),
-                                    )),
-                            icon: const Icon(Icons.info_outline),
-                            label: const Text('View lock detail'),
-                          ),
-                        ],
+                          visualDensity: VisualDensity.compact,
+                        ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 14),
-                if (id.isNotEmpty)
-                  _DeviceSettingsPanel(api: api, deviceId: id),
+                const SizedBox(height: 12),
               ],
-            ),
+              if (id.isNotEmpty) _DeviceSettingsPanel(api: api, deviceId: id),
+            ],
           ),
+        ),
+      ),
+    );
+  }
+
+  TableRow _infoRow(String l1, String v1, String l2, String v2) {
+    return TableRow(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+          child: _DetailFact(l1, v1),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+          child: _DetailFact(l2, v2),
+        ),
+      ],
+    );
+  }
+}
+
+class _ActionBtn extends StatelessWidget {
+  const _ActionBtn({
+    required this.icon,
+    required this.label,
+    required this.color,
+    this.onTap,
+  });
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    return GestureDetector(
+      onTap: onTap,
+      child: Opacity(
+        opacity: enabled ? 1.0 : 0.35,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -4002,7 +5286,8 @@ class _DeviceSettingsPanelState extends State<_DeviceSettingsPanel> {
       final data = asMap(res.data);
       if (mounted) {
         setState(() {
-          _graceHours = int.tryParse('${data['offline_grace_hours'] ?? 72}') ?? 72;
+          _graceHours =
+              int.tryParse('${data['offline_grace_hours'] ?? 72}') ?? 72;
           _lockLevel = text(data['default_lock_level'], fallback: 'FULL');
           _loaded = true;
         });
@@ -4017,7 +5302,10 @@ class _DeviceSettingsPanelState extends State<_DeviceSettingsPanel> {
     try {
       await widget.api.put(
         '/api/v1/dealer/devices/${widget.deviceId}/settings',
-        data: {'offline_grace_hours': _graceHours, 'default_lock_level': _lockLevel},
+        data: {
+          'offline_grace_hours': _graceHours,
+          'default_lock_level': _lockLevel,
+        },
       );
       if (mounted) snack(context, 'Device settings saved');
     } catch (e) {
@@ -4043,7 +5331,11 @@ class _DeviceSettingsPanelState extends State<_DeviceSettingsPanel> {
               },
               child: Row(
                 children: [
-                  const Icon(Icons.tune_outlined, size: 18, color: AppTone.muted),
+                  const Icon(
+                    Icons.tune_outlined,
+                    size: 18,
+                    color: AppTone.muted,
+                  ),
                   const SizedBox(width: 8),
                   const Expanded(
                     child: Text(
@@ -4067,9 +5359,13 @@ class _DeviceSettingsPanelState extends State<_DeviceSettingsPanel> {
                   value: _graceHours,
                   underline: const SizedBox.shrink(),
                   items: [24, 48, 72, 96, 120, 168]
-                      .map((h) => DropdownMenuItem(value: h, child: Text('${h}h')))
+                      .map(
+                        (h) => DropdownMenuItem(value: h, child: Text('${h}h')),
+                      )
                       .toList(),
-                  onChanged: (v) { if (v != null) setState(() => _graceHours = v); },
+                  onChanged: (v) {
+                    if (v != null) setState(() => _graceHours = v);
+                  },
                 ),
               ),
               _SettingsRow(
@@ -4081,7 +5377,9 @@ class _DeviceSettingsPanelState extends State<_DeviceSettingsPanel> {
                     DropdownMenuItem(value: 'SOFT', child: Text('SOFT')),
                     DropdownMenuItem(value: 'FULL', child: Text('FULL')),
                   ],
-                  onChanged: (v) { if (v != null) setState(() => _lockLevel = v); },
+                  onChanged: (v) {
+                    if (v != null) setState(() => _lockLevel = v);
+                  },
                 ),
               ),
               const SizedBox(height: 10),
@@ -4091,8 +5389,12 @@ class _DeviceSettingsPanelState extends State<_DeviceSettingsPanel> {
                   onPressed: _busy ? null : _save,
                   icon: _busy
                       ? const SizedBox(
-                          width: 14, height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
                         )
                       : const Icon(Icons.save_outlined, size: 16),
                   label: Text(_busy ? 'Saving…' : 'Save'),
@@ -4168,7 +5470,11 @@ class _EnrollmentPageState extends State<EnrollmentPage> {
     final stream = AppEventScope.of(context);
     if (stream == null) return;
     _sseSub = stream.listen((event) {
-      if (mounted && const {'enrollment_complete', 'key_request_approved'}.contains(event.type)) {
+      if (mounted &&
+          const {
+            'enrollment_complete',
+            'key_request_approved',
+          }.contains(event.type)) {
         setState(() => _keyCountFuture = _loadKeyCount());
       }
     });
@@ -4181,9 +5487,14 @@ class _EnrollmentPageState extends State<EnrollmentPage> {
   }
 
   Future<int> _loadKeyCount() async {
-    final res = await widget.api.get('/api/v1/keys/my-keys', query: {'status': 'assigned'});
+    final res = await widget.api.get(
+      '/api/v1/keys/my-keys',
+      query: {'status': 'assigned'},
+    );
     final keys = asList(asMap(res.data), 'keys');
-    return keys.where((k) => text(asMap(k)['status']).toLowerCase() == 'assigned').length;
+    return keys
+        .where((k) => text(asMap(k)['status']).toLowerCase() == 'assigned')
+        .length;
   }
 
   @override
@@ -4198,17 +5509,20 @@ class _EnrollmentPageState extends State<EnrollmentPage> {
           subtitle: 'Bind a new device to a customer',
           reload: () async => setState(() => _keyCountFuture = _loadKeyCount()),
           children: [
-            StatGrid(cards: [
-              StatCard(
-                'Keys in stock',
-                keyCount,
-                color: keyCount == 0 ? AppTone.danger : AppTone.brand,
-                icon: Icons.vpn_key_outlined,
-              ),
-            ]),
+            StatGrid(
+              cards: [
+                StatCard(
+                  'Keys in stock',
+                  keyCount,
+                  color: keyCount == 0 ? AppTone.danger : AppTone.brand,
+                  icon: Icons.vpn_key_outlined,
+                ),
+              ],
+            ),
             if (keyCount == 0 && !loading)
               const _InlineNotice(
-                message: 'No keys in stock. Ask your reseller to send stock before enrolling.',
+                message:
+                    'No keys in stock. Ask your reseller to send stock before enrolling.',
                 tone: AppTone.amber,
                 icon: Icons.key_off_outlined,
               ),
@@ -4216,15 +5530,19 @@ class _EnrollmentPageState extends State<EnrollmentPage> {
             FilledButton.icon(
               onPressed: keyCount == 0 || loading
                   ? null
-                  : () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => BindDeviceWizard(
-                            api: widget.api,
-                            requireEvidence: widget.requireEvidence,
+                  : () =>
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => BindDeviceWizard(
+                              api: widget.api,
+                              requireEvidence: widget.requireEvidence,
+                            ),
                           ),
+                        ).then(
+                          (_) =>
+                              setState(() => _keyCountFuture = _loadKeyCount()),
                         ),
-                      ).then((_) => setState(() => _keyCountFuture = _loadKeyCount())),
               icon: const Icon(Icons.add_circle_outline_rounded),
               label: const Text('Bind New Device'),
             ),
@@ -4265,7 +5583,11 @@ class _DealerKeysState extends State<DealerKeys> {
     final stream = AppEventScope.of(context);
     if (stream == null) return;
     _sseSub = stream.listen((event) {
-      if (mounted && const {'key_request_approved', 'grace_expired'}.contains(event.type)) {
+      if (mounted &&
+          const {
+            'key_request_approved',
+            'grace_expired',
+          }.contains(event.type)) {
         _fetch();
       }
     });
@@ -4282,13 +5604,18 @@ class _DealerKeysState extends State<DealerKeys> {
     if (mounted) setState(() => _reloading = true);
     try {
       final res = await widget.api.get('/api/v1/dealer/keys/inventory');
-      if (mounted) setState(() {
-        _inv = asMap(res.data);
-        _firstLoad = false;
-        _reloading = false;
-      });
+      if (mounted)
+        setState(() {
+          _inv = asMap(res.data);
+          _firstLoad = false;
+          _reloading = false;
+        });
     } catch (_) {
-      if (mounted) setState(() { _firstLoad = false; _reloading = false; });
+      if (mounted)
+        setState(() {
+          _firstLoad = false;
+          _reloading = false;
+        });
     }
   }
 
@@ -4301,10 +5628,12 @@ class _DealerKeysState extends State<DealerKeys> {
 
   @override
   Widget build(BuildContext context) {
-    final totalAssigned = _tierInt('standard', 'assigned') +
+    final totalAssigned =
+        _tierInt('standard', 'assigned') +
         _tierInt('premium', 'assigned') +
         _tierInt('vip', 'assigned');
-    final totalActivated = _tierInt('standard', 'activated') +
+    final totalActivated =
+        _tierInt('standard', 'activated') +
         _tierInt('premium', 'activated') +
         _tierInt('vip', 'activated');
 
@@ -4319,8 +5648,7 @@ class _DealerKeysState extends State<DealerKeys> {
           const Center(child: CircularProgressIndicator())
         else ...[
           // Subtle reload indicator — doesn't swap widget types, no animation restart
-          if (_reloading)
-            const LinearProgressIndicator(minHeight: 2),
+          if (_reloading) const LinearProgressIndicator(minHeight: 2),
           RepaintBoundary(
             child: NotificationListener<ScrollNotification>(
               onNotification: (_) => true,
@@ -4334,7 +5662,11 @@ class _DealerKeysState extends State<DealerKeys> {
                       assigned: _tierInt('standard', 'assigned'),
                       quota: _tierInt('standard', 'quota'),
                       selected: _tierFilter == 'standard',
-                      onTap: () => setState(() => _tierFilter = _tierFilter == 'standard' ? 'all' : 'standard'),
+                      onTap: () => setState(
+                        () => _tierFilter = _tierFilter == 'standard'
+                            ? 'all'
+                            : 'standard',
+                      ),
                     ),
                     const SizedBox(width: 12),
                     _KeyTierCard(
@@ -4342,7 +5674,11 @@ class _DealerKeysState extends State<DealerKeys> {
                       assigned: _tierInt('premium', 'assigned'),
                       quota: _tierInt('premium', 'quota'),
                       selected: _tierFilter == 'premium',
-                      onTap: () => setState(() => _tierFilter = _tierFilter == 'premium' ? 'all' : 'premium'),
+                      onTap: () => setState(
+                        () => _tierFilter = _tierFilter == 'premium'
+                            ? 'all'
+                            : 'premium',
+                      ),
                     ),
                     const SizedBox(width: 12),
                     _KeyTierCard(
@@ -4350,7 +5686,10 @@ class _DealerKeysState extends State<DealerKeys> {
                       assigned: _tierInt('vip', 'assigned'),
                       quota: _tierInt('vip', 'quota'),
                       selected: _tierFilter == 'vip',
-                      onTap: () => setState(() => _tierFilter = _tierFilter == 'vip' ? 'all' : 'vip'),
+                      onTap: () => setState(
+                        () =>
+                            _tierFilter = _tierFilter == 'vip' ? 'all' : 'vip',
+                      ),
                     ),
                   ],
                 ),
@@ -4368,7 +5707,6 @@ class _DealerKeysState extends State<DealerKeys> {
       ],
     );
   }
-
 }
 
 // ── Key Capacity Summary ──────────────────────────────────────────────────────
@@ -4379,7 +5717,11 @@ class _KeyCapacitySummary extends StatelessWidget {
   final String tierFilter;
 
   static const _tiers = ['standard', 'premium', 'vip'];
-  static const _tierLabel = {'standard': 'Standard', 'premium': 'Premium', 'vip': 'VIP'};
+  static const _tierLabel = {
+    'standard': 'Standard',
+    'premium': 'Premium',
+    'vip': 'VIP',
+  };
   static const _tierIcon = {
     'standard': Icons.vpn_key_outlined,
     'premium': Icons.stars_outlined,
@@ -4425,10 +5767,16 @@ class _KeyCapacitySummary extends StatelessWidget {
                     children: [
                       Icon(_tierIcon[tier], size: 16, color: color),
                       const SizedBox(width: 8),
-                      Text(_tierLabel[tier]!, style: AppText.titleSm(color: color)),
+                      Text(
+                        _tierLabel[tier]!,
+                        style: AppText.titleSm(color: color),
+                      ),
                       const Spacer(),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 3,
+                        ),
                         decoration: BoxDecoration(
                           color: color.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(999),
@@ -4453,11 +5801,23 @@ class _KeyCapacitySummary extends StatelessWidget {
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      _CapFact(label: 'Quota', value: '$quota', color: AppTone.muted),
+                      _CapFact(
+                        label: 'Quota',
+                        value: '$quota',
+                        color: AppTone.muted,
+                      ),
                       const SizedBox(width: 20),
-                      _CapFact(label: 'Ready', value: '$assigned', color: color),
+                      _CapFact(
+                        label: 'Ready',
+                        value: '$assigned',
+                        color: color,
+                      ),
                       const SizedBox(width: 20),
-                      _CapFact(label: 'Used', value: '$activated', color: AppTone.muted),
+                      _CapFact(
+                        label: 'Used',
+                        value: '$activated',
+                        color: AppTone.muted,
+                      ),
                     ],
                   ),
                 ],
@@ -4478,7 +5838,11 @@ class _KeyCapacitySummary extends StatelessWidget {
 }
 
 class _CapFact extends StatelessWidget {
-  const _CapFact({required this.label, required this.value, required this.color});
+  const _CapFact({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
   final String label;
   final String value;
   final Color color;
@@ -4524,13 +5888,21 @@ class _KeyTierCard extends StatelessWidget {
       label: 'Premium',
       colors: [Color(0xFF0A84FF), Color(0xFF30B0C7)],
       icon: Icons.stars_outlined,
-      features: ['All Standard features', 'Fraud center', 'Credit score display'],
+      features: [
+        'All Standard features',
+        'Fraud center',
+        'Credit score display',
+      ],
     ),
     'vip': _TierMeta(
       label: 'VIP',
       colors: [Color(0xFFBF5AF2), Color(0xFFFFD60A)],
       icon: Icons.workspace_premium_outlined,
-      features: ['All Premium features', 'bKash payment link', 'Custom grace periods'],
+      features: [
+        'All Premium features',
+        'bKash payment link',
+        'Custom grace periods',
+      ],
     ),
   };
 
@@ -4552,9 +5924,7 @@ class _KeyTierCard extends StatelessWidget {
             colors: m.colors,
           ),
           borderRadius: BorderRadius.circular(20),
-          border: selected
-              ? Border.all(color: Colors.white, width: 2.5)
-              : null,
+          border: selected ? Border.all(color: Colors.white, width: 2.5) : null,
           boxShadow: [
             BoxShadow(
               color: m.colors[0].withOpacity(0.35),
@@ -4611,22 +5981,27 @@ class _KeyTierCard extends StatelessWidget {
               style: const TextStyle(color: Colors.white60, fontSize: 10),
             ),
             const SizedBox(height: 10),
-            ...m.features.map((f) => Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Row(
-                children: [
-                  const Icon(Icons.check, color: Colors.white70, size: 11),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      f,
-                      style: const TextStyle(color: Colors.white70, fontSize: 10),
-                      overflow: TextOverflow.ellipsis,
+            ...m.features.map(
+              (f) => Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check, color: Colors.white70, size: 11),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        f,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 10,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            )),
+            ),
           ],
         ),
       ),
@@ -4964,16 +6339,16 @@ class _PadtSupportPanel extends StatefulWidget {
 
 class _PadtSupportPanelState extends State<_PadtSupportPanel> {
   String? _selectedDeviceId;
-  int _graceHours = 4;          // default grace period
+  int _graceHours = 4; // default grace period
   bool _smsBusy = false;
   bool _revokeBusy = false;
   List<Map<String, dynamic>> _pendingPadt = [];
-  Map<String, dynamic>? _activeGrace;   // active grace unlock for selected device
+  Map<String, dynamic>? _activeGrace; // active grace unlock for selected device
 
   static const _graceOptions = [
-    (hours: 2,  label: '2 hours'),
-    (hours: 4,  label: '4 hours'),
-    (hours: 8,  label: '8 hours'),
+    (hours: 2, label: '2 hours'),
+    (hours: 4, label: '4 hours'),
+    (hours: 8, label: '8 hours'),
     (hours: 24, label: '24 hours'),
   ];
 
@@ -4998,7 +6373,9 @@ class _PadtSupportPanelState extends State<_PadtSupportPanel> {
 
   Future<void> _loadActiveGrace(String deviceId) async {
     try {
-      final res = await widget.api.get('/api/v1/dealer/devices/$deviceId/grace-unlock');
+      final res = await widget.api.get(
+        '/api/v1/dealer/devices/$deviceId/grace-unlock',
+      );
       if (mounted) {
         setState(() {
           _activeGrace = asMap(res.data)['active'] as Map<String, dynamic>?;
@@ -5047,7 +6424,10 @@ class _PadtSupportPanelState extends State<_PadtSupportPanel> {
           'The device will lock at its next server check-in or when it loses connectivity.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
             style: FilledButton.styleFrom(backgroundColor: AppTone.danger),
@@ -5062,7 +6442,10 @@ class _PadtSupportPanelState extends State<_PadtSupportPanel> {
       await widget.api.delete('/api/v1/dealer/devices/$id/grace-unlock');
       if (mounted) {
         setState(() => _activeGrace = null);
-        snack(context, 'Grace period revoked. Device will re-lock on next check-in.');
+        snack(
+          context,
+          'Grace period revoked. Device will re-lock on next check-in.',
+        );
       }
     } catch (e) {
       if (mounted) snack(context, readableError(e));
@@ -5097,7 +6480,10 @@ class _PadtSupportPanelState extends State<_PadtSupportPanel> {
           itemHeight: 56,
           menuMaxHeight: 280,
           items: devices.map((d) {
-            final name = text(d['device_name'] ?? d['model'], fallback: 'Device');
+            final name = text(
+              d['device_name'] ?? d['model'],
+              fallback: 'Device',
+            );
             final imei = text(d['imei'], fallback: '');
             return DropdownMenuItem(
               value: text(d['id']),
@@ -5105,9 +6491,19 @@ class _PadtSupportPanelState extends State<_PadtSupportPanel> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(name, style: AppText.bodyBold(), overflow: TextOverflow.ellipsis, maxLines: 1),
+                  Text(
+                    name,
+                    style: AppText.bodyBold(),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
                   if (imei.isNotEmpty)
-                    Text(imei, style: AppText.mono(size: 11, color: AppTone.muted), overflow: TextOverflow.ellipsis, maxLines: 1),
+                    Text(
+                      imei,
+                      style: AppText.mono(size: 11, color: AppTone.muted),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
                 ],
               ),
             );
@@ -5133,7 +6529,11 @@ class _PadtSupportPanelState extends State<_PadtSupportPanel> {
             ),
             child: Row(
               children: [
-                const Icon(Icons.lock_open_outlined, color: AppTone.brand, size: 20),
+                const Icon(
+                  Icons.lock_open_outlined,
+                  color: AppTone.brand,
+                  size: 20,
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -5141,11 +6541,17 @@ class _PadtSupportPanelState extends State<_PadtSupportPanel> {
                     children: [
                       const Text(
                         'Grace period active',
-                        style: TextStyle(fontWeight: FontWeight.w700, color: AppTone.brand),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: AppTone.brand,
+                        ),
                       ),
                       Text(
                         '${_activeGrace!['grace_hours']}h unlock · expires ${formatDateTime(_activeGrace!['expires_at'])}',
-                        style: const TextStyle(fontSize: 12, color: AppTone.muted),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppTone.muted,
+                        ),
                       ),
                     ],
                   ),
@@ -5154,7 +6560,11 @@ class _PadtSupportPanelState extends State<_PadtSupportPanel> {
                   onPressed: _revokeBusy ? null : _revokeGrace,
                   style: TextButton.styleFrom(foregroundColor: AppTone.danger),
                   child: _revokeBusy
-                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
                       : const Text('Re-lock'),
                 ),
               ],
@@ -5166,7 +6576,11 @@ class _PadtSupportPanelState extends State<_PadtSupportPanel> {
         // ── Grace period selector ────────────────────────────────────────
         const Text(
           'Grace period duration',
-          style: TextStyle(fontSize: 12, color: AppTone.muted, fontWeight: FontWeight.w600),
+          style: TextStyle(
+            fontSize: 12,
+            color: AppTone.muted,
+            fontWeight: FontWeight.w600,
+          ),
         ),
         const SizedBox(height: 6),
         Wrap(
@@ -5193,11 +6607,17 @@ class _PadtSupportPanelState extends State<_PadtSupportPanel> {
           runSpacing: 10,
           children: [
             FilledButton.icon(
-              onPressed: _selectedDeviceId == null || _smsBusy ? null : _sendSmsOtp,
+              onPressed: _selectedDeviceId == null || _smsBusy
+                  ? null
+                  : _sendSmsOtp,
               icon: _smsBusy
                   ? const SizedBox(
-                      width: 16, height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
                     )
                   : const Icon(Icons.sms_outlined),
               label: Text(_smsBusy ? 'Sending…' : 'Send SMS unlock code'),
@@ -5228,7 +6648,8 @@ class _PadtSupportPanelState extends State<_PadtSupportPanel> {
               child: _InfoTile(
                 icon: Icons.pending_outlined,
                 color: AppTone.warning,
-                title: '${text(pt['brand'])} ${text(pt['model'])}'.trim().isEmpty
+                title:
+                    '${text(pt['brand'])} ${text(pt['model'])}'.trim().isEmpty
                     ? 'Device'
                     : '${text(pt['brand'])} ${text(pt['model'])}'.trim(),
                 subtitle: 'IMEI: ${text(pt['imei'])} · Expires: $expiry',
@@ -5319,10 +6740,7 @@ class _ResellerTierCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          Container(
-            height: 1,
-            color: Colors.white.withOpacity(0.25),
-          ),
+          Container(height: 1, color: Colors.white.withOpacity(0.25)),
           const SizedBox(height: 8),
           Text(
             '$assigned sent to dealers',
@@ -5416,7 +6834,7 @@ class ResellerDashboard extends StatelessWidget {
               onPressed: () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => CreditSummaryScreen(api: api),
+                  builder: (_) => reseller_credit.CreditSummaryScreen(api: api),
                 ),
               ),
             ),
@@ -5478,7 +6896,9 @@ class _CreditSummaryScreenState extends State<CreditSummaryScreen> {
           reload: reload,
           children: [
             if (entries.isEmpty)
-              const Empty('No credit entries yet. Entries appear when you send keys to dealers.')
+              const Empty(
+                'No credit entries yet. Entries appear when you send keys to dealers.',
+              )
             else ...[
               if (pending.isNotEmpty)
                 Section(
@@ -5486,11 +6906,14 @@ class _CreditSummaryScreenState extends State<CreditSummaryScreen> {
                   child: Column(
                     children: pending.asMap().entries.map((e) {
                       return _CreditEntryCard(
-                        entry: e.value,
-                        onSettle: _settling
-                            ? null
-                            : () => _settle(e.value['id'] as String, reload),
-                      ).animate(delay: (40 * e.key).ms).fadeIn(duration: 180.ms);
+                            entry: e.value,
+                            onSettle: _settling
+                                ? null
+                                : () =>
+                                      _settle(e.value['id'] as String, reload),
+                          )
+                          .animate(delay: (40 * e.key).ms)
+                          .fadeIn(duration: 180.ms);
                     }).toList(),
                   ),
                 ),
@@ -5551,7 +6974,9 @@ class _CreditEntryCard extends StatelessWidget {
         color: AppTone.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: isPending ? AppTone.warning.withValues(alpha: 0.4) : AppTone.line,
+          color: isPending
+              ? AppTone.warning.withValues(alpha: 0.4)
+              : AppTone.line,
         ),
       ),
       child: Column(
@@ -5569,7 +6994,10 @@ class _CreditEntryCard extends StatelessWidget {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: (isPending ? AppTone.warning : AppTone.emerald)
                       .withValues(alpha: 0.12),
@@ -5772,26 +7200,28 @@ class ResellerKeys extends StatelessWidget {
           api.get('/api/v1/reseller/dealers'),
           api.get('/api/v1/reseller/credit'),
         ]);
-        final quota    = asMap(results[0].data);
+        final quota = asMap(results[0].data);
         final requests = asList(asMap(results[1].data), 'requests');
-        final dealers  = asList(asMap(results[2].data), 'dealers');
+        final dealers = asList(asMap(results[2].data), 'dealers');
         final movement = asList(asMap(results[3].data), 'entries');
         return {
-          'quota':    quota,
+          'quota': quota,
           'requests': requests,
-          'dealers':  dealers,
+          'dealers': dealers,
           'movement': movement,
         };
       },
       builder: (context, data, reload) {
-        final quota    = asMap(data['quota']);
-        final requests = (data['requests'] as List<Map<String, dynamic>>?) ?? [];
-        final dealers  = (data['dealers']  as List<Map<String, dynamic>>?) ?? [];
-        final movement = (data['movement'] as List<Map<String, dynamic>>?) ?? [];
+        final quota = asMap(data['quota']);
+        final requests =
+            (data['requests'] as List<Map<String, dynamic>>?) ?? [];
+        final dealers = (data['dealers'] as List<Map<String, dynamic>>?) ?? [];
+        final movement =
+            (data['movement'] as List<Map<String, dynamic>>?) ?? [];
 
         final qStandard = (quota['quota_standard'] as num?)?.toInt() ?? 0;
-        final qPremium  = (quota['quota_premium']  as num?)?.toInt() ?? 0;
-        final qVip      = (quota['quota_vip']      as num?)?.toInt() ?? 0;
+        final qPremium = (quota['quota_premium'] as num?)?.toInt() ?? 0;
+        final qVip = (quota['quota_vip'] as num?)?.toInt() ?? 0;
         final totalQuota = qStandard + qPremium + qVip;
 
         final pendingRequests = requests
@@ -5813,11 +7243,23 @@ class ResellerKeys extends StatelessWidget {
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
-                      _ResellerTierCard(tier: 'standard', available: qStandard, assigned: 0),
+                      _ResellerTierCard(
+                        tier: 'standard',
+                        available: qStandard,
+                        assigned: 0,
+                      ),
                       const SizedBox(width: 12),
-                      _ResellerTierCard(tier: 'premium',  available: qPremium,  assigned: 0),
+                      _ResellerTierCard(
+                        tier: 'premium',
+                        available: qPremium,
+                        assigned: 0,
+                      ),
                       const SizedBox(width: 12),
-                      _ResellerTierCard(tier: 'vip',      available: qVip,      assigned: 0),
+                      _ResellerTierCard(
+                        tier: 'vip',
+                        available: qVip,
+                        assigned: 0,
+                      ),
                     ],
                   ),
                 ),
@@ -5856,14 +7298,15 @@ class ResellerKeys extends StatelessWidget {
                               showDragHandle: true,
                               useSafeArea: true,
                               builder: (_) => SizedBox(
-                                height: MediaQuery.sizeOf(context).height * 0.86,
+                                height:
+                                    MediaQuery.sizeOf(context).height * 0.86,
                                 child: _SendKeysWizard(
                                   api: api,
                                   dealers: dealers,
                                   tierQuota: {
                                     'standard': qStandard,
-                                    'premium':  qPremium,
-                                    'vip':      qVip,
+                                    'premium': qPremium,
+                                    'vip': qVip,
                                   },
                                   onAssigned: reload,
                                 ),
@@ -5879,94 +7322,118 @@ class ResellerKeys extends StatelessWidget {
             Section(
               title: 'Stock movement',
               child: movement.isEmpty
-                  ? const Empty('No transfers yet. Send quota to a dealer to see movement here.')
+                  ? const Empty(
+                      'No transfers yet. Send quota to a dealer to see movement here.',
+                    )
                   : Column(
-                      children: movement.take(20).toList().asMap().entries.map((e) {
+                      children: movement.take(20).toList().asMap().entries.map((
+                        e,
+                      ) {
                         final entry = e.value;
-                        final dealerName = text(entry['dealer_name'], fallback: 'Dealer');
-                        final qty        = entry['keys_quantity'] as int? ?? 0;
-                        final tier       = text(entry['tier'], fallback: 'standard');
-                        final status     = text(entry['status'], fallback: 'pending');
-                        final date       = formatDateTime(entry['created_at']);
-                        final tierColor  = switch (tier) {
+                        final dealerName = text(
+                          entry['dealer_name'],
+                          fallback: 'Dealer',
+                        );
+                        final qty = entry['keys_quantity'] as int? ?? 0;
+                        final tier = text(entry['tier'], fallback: 'standard');
+                        final status = text(
+                          entry['status'],
+                          fallback: 'pending',
+                        );
+                        final date = formatDateTime(entry['created_at']);
+                        final tierColor = switch (tier) {
                           'premium' => const Color(0xFF0A84FF),
-                          'vip'     => const Color(0xFFBF5AF2),
-                          _         => AppTone.muted,
+                          'vip' => const Color(0xFFBF5AF2),
+                          _ => AppTone.muted,
                         };
-                        final tierLabel  = switch (tier) {
+                        final tierLabel = switch (tier) {
                           'premium' => 'Premium',
-                          'vip'     => 'VIP',
-                          _         => 'Standard',
+                          'vip' => 'VIP',
+                          _ => 'Standard',
                         };
                         return Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: AppTone.surface,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppTone.line),
-                          ),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 36, height: 36,
-                                decoration: BoxDecoration(
-                                  color: tierColor.withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    '$qty',
-                                    style: TextStyle(
-                                      color: tierColor,
-                                      fontWeight: FontWeight.w900,
-                                      fontSize: 13,
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 12,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTone.surface,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: AppTone.line),
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: tierColor.withValues(alpha: 0.12),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        '$qty',
+                                        style: TextStyle(
+                                          color: tierColor,
+                                          fontWeight: FontWeight.w900,
+                                          fontSize: 13,
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      '$qty $tierLabel → $dealerName',
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 14),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '$qty $tierLabel → $dealerName',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                        Text(
+                                          date,
+                                          style: const TextStyle(
+                                            color: AppTone.muted,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                    Text(date,
-                                        style: const TextStyle(
-                                            color: AppTone.muted, fontSize: 12)),
-                                  ],
-                                ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: (status == 'settled'
-                                          ? AppTone.emerald
-                                          : AppTone.warning)
-                                      .withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  status == 'settled' ? 'Paid' : 'Pending',
-                                  style: TextStyle(
-                                    color: status == 'settled'
-                                        ? AppTone.emerald
-                                        : AppTone.warning,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
                                   ),
-                                ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 3,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color:
+                                          (status == 'settled'
+                                                  ? AppTone.emerald
+                                                  : AppTone.warning)
+                                              .withValues(alpha: 0.12),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      status == 'settled' ? 'Paid' : 'Pending',
+                                      style: TextStyle(
+                                        color: status == 'settled'
+                                            ? AppTone.emerald
+                                            : AppTone.warning,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                        ).animate(delay: (30 * e.key).ms).fadeIn(duration: 180.ms);
+                            )
+                            .animate(delay: (30 * e.key).ms)
+                            .fadeIn(duration: 180.ms);
                       }).toList(),
                     ),
             ),
@@ -6158,9 +7625,12 @@ class _SettingsPageState extends State<SettingsPage> {
       final data = asMap(res.data);
       if (!mounted) return;
       setState(() {
-        _graceHours = int.tryParse('${data['offline_grace_hours'] ?? 72}') ?? 72;
-        _warnHours = int.tryParse('${data['warning_threshold_hours'] ?? 12}') ?? 12;
-        _checkinMinutes = int.tryParse('${data['checkin_interval_minutes'] ?? 360}') ?? 360;
+        _graceHours =
+            int.tryParse('${data['offline_grace_hours'] ?? 72}') ?? 72;
+        _warnHours =
+            int.tryParse('${data['warning_threshold_hours'] ?? 12}') ?? 12;
+        _checkinMinutes =
+            int.tryParse('${data['checkin_interval_minutes'] ?? 360}') ?? 360;
         _lockLevel = text(data['default_lock_level'], fallback: 'FULL');
         _shopNameCtrl.text = text(data['lock_screen_dealer_name']);
         _phoneCtrl.text = text(data['lock_screen_dealer_phone']);
@@ -6214,7 +7684,9 @@ class _SettingsPageState extends State<SettingsPage> {
       final stamp = DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
       final file = File('${dir.path}/emi_locker_vault_$stamp.json');
       await file.writeAsString(json);
-      await Share.shareXFiles([XFile(file.path)], text: 'EMI Locker offline vault backup');
+      await Share.shareXFiles([
+        XFile(file.path),
+      ], text: 'EMI Locker offline vault backup');
     } catch (e) {
       if (mounted) snack(context, readableError(e));
     }
@@ -6337,21 +7809,35 @@ class _SettingsPageState extends State<SettingsPage> {
                 const Divider(height: 22),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.devices_outlined, color: AppTone.muted),
-                  title: const Text('Trusted devices',
-                      style: TextStyle(fontWeight: FontWeight.w700)),
-                  subtitle: const Text('Devices that can log in without email verification.'),
-                  trailing: const Icon(Icons.chevron_right, color: AppTone.muted),
+                  leading: const Icon(
+                    Icons.devices_outlined,
+                    color: AppTone.muted,
+                  ),
+                  title: const Text(
+                    'Allowed login devices',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  subtitle: const Text(
+                    'New phones need email verification before they are allowed.',
+                  ),
+                  trailing: const Icon(
+                    Icons.chevron_right,
+                    color: AppTone.muted,
+                  ),
                   onTap: () => showModalBottomSheet(
                     context: context,
                     isScrollControlled: true,
                     backgroundColor: AppTone.surface,
                     shape: const RoundedRectangleBorder(
-                      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                      borderRadius: BorderRadius.vertical(
+                        top: Radius.circular(20),
+                      ),
                     ),
                     builder: (_) => _TrustedDevicesSheet(api: widget.api),
                   ),
                 ),
+                const Divider(height: 22),
+                _GoogleAuthStatusTile(api: widget.api),
                 const Divider(height: 22),
                 Input(current, 'Current password', obscure: true),
                 const SizedBox(height: 12),
@@ -6617,7 +8103,9 @@ class _DealerDefaultsPanel extends StatelessWidget {
             items: [24, 48, 72, 96, 120, 168]
                 .map((h) => DropdownMenuItem(value: h, child: Text('${h}h')))
                 .toList(),
-            onChanged: (v) { if (v != null) onGraceChanged(v); },
+            onChanged: (v) {
+              if (v != null) onGraceChanged(v);
+            },
           ),
         ),
         _SettingsRow(
@@ -6629,7 +8117,9 @@ class _DealerDefaultsPanel extends StatelessWidget {
             items: [6, 12, 24, 48]
                 .map((h) => DropdownMenuItem(value: h, child: Text('${h}h')))
                 .toList(),
-            onChanged: (v) { if (v != null) onWarnChanged(v); },
+            onChanged: (v) {
+              if (v != null) onWarnChanged(v);
+            },
           ),
         ),
         _SettingsRow(
@@ -6639,13 +8129,15 @@ class _DealerDefaultsPanel extends StatelessWidget {
             value: checkinMinutes,
             underline: const SizedBox.shrink(),
             items: const [
-              DropdownMenuItem(value: 60,   child: Text('1h')),
-              DropdownMenuItem(value: 180,  child: Text('3h')),
-              DropdownMenuItem(value: 360,  child: Text('6h')),
-              DropdownMenuItem(value: 720,  child: Text('12h')),
+              DropdownMenuItem(value: 60, child: Text('1h')),
+              DropdownMenuItem(value: 180, child: Text('3h')),
+              DropdownMenuItem(value: 360, child: Text('6h')),
+              DropdownMenuItem(value: 720, child: Text('12h')),
               DropdownMenuItem(value: 1440, child: Text('24h')),
             ],
-            onChanged: (v) { if (v != null) onCheckinChanged(v); },
+            onChanged: (v) {
+              if (v != null) onCheckinChanged(v);
+            },
           ),
         ),
         _SettingsRow(
@@ -6658,7 +8150,9 @@ class _DealerDefaultsPanel extends StatelessWidget {
               DropdownMenuItem(value: 'SOFT', child: Text('SOFT')),
               DropdownMenuItem(value: 'FULL', child: Text('FULL')),
             ],
-            onChanged: (v) { if (v != null) onLockLevelChanged(v); },
+            onChanged: (v) {
+              if (v != null) onLockLevelChanged(v);
+            },
           ),
         ),
         const SizedBox(height: 12),
@@ -6668,8 +8162,12 @@ class _DealerDefaultsPanel extends StatelessWidget {
             onPressed: busy ? null : onSave,
             icon: busy
                 ? const SizedBox(
-                    width: 16, height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
                   )
                 : const Icon(Icons.save_outlined),
             label: Text(busy ? 'Saving…' : 'Save defaults'),
@@ -6716,8 +8214,12 @@ class _LockScreenBrandingPanel extends StatelessWidget {
             onPressed: busy ? null : onSave,
             icon: busy
                 ? const SizedBox(
-                    width: 16, height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
                   )
                 : const Icon(Icons.save_outlined),
             label: Text(busy ? 'Saving…' : 'Save branding'),
@@ -6748,7 +8250,9 @@ class _VaultStatusPanel extends StatelessWidget {
           child: Row(
             children: [
               Icon(
-                snap != null ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
+                snap != null
+                    ? Icons.cloud_done_outlined
+                    : Icons.cloud_off_outlined,
                 color: snap != null ? AppTone.brand : AppTone.muted,
               ),
               const SizedBox(width: 10),
@@ -6762,7 +8266,10 @@ class _VaultStatusPanel extends StatelessWidget {
                       )
                     : const Text(
                         'No cached data yet. Browse your devices or keys to populate the vault.',
-                        style: TextStyle(color: AppTone.muted, fontWeight: FontWeight.w700),
+                        style: TextStyle(
+                          color: AppTone.muted,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
               ),
             ],
@@ -6800,11 +8307,7 @@ class _VaultStatusPanel extends StatelessWidget {
 }
 
 class _SettingsRow extends StatelessWidget {
-  const _SettingsRow({
-    required this.label,
-    required this.child,
-    this.subtitle,
-  });
+  const _SettingsRow({required this.label, required this.child, this.subtitle});
   final String label;
   final String? subtitle;
   final Widget child;
@@ -6819,7 +8322,10 @@ class _SettingsRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
+                Text(
+                  label,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
                 if (subtitle != null)
                   Text(
                     subtitle!,
@@ -6884,11 +8390,19 @@ class _TrustedDevicesSheetState extends State<_TrustedDevicesSheet> {
                 ),
               ),
               const SizedBox(height: 16),
-              const Text('Trusted Devices',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTone.ink)),
+              const Text(
+                'Allowed login devices',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: AppTone.ink,
+                ),
+              ),
               const SizedBox(height: 4),
-              const Text('Devices below can log in with only your password.',
-                  style: TextStyle(fontSize: 13, color: AppTone.muted)),
+              const Text(
+                'Devices below can log in without a fresh email code.',
+                style: TextStyle(fontSize: 13, color: AppTone.muted),
+              ),
               const SizedBox(height: 16),
               Expanded(
                 child: FutureBuilder<List<Map<String, dynamic>>>(
@@ -6900,8 +8414,10 @@ class _TrustedDevicesSheetState extends State<_TrustedDevicesSheet> {
                     final devices = snap.data ?? [];
                     if (devices.isEmpty) {
                       return const Center(
-                        child: Text('No trusted devices yet.',
-                            style: TextStyle(color: AppTone.muted)),
+                        child: Text(
+                          'No allowed devices yet.',
+                          style: TextStyle(color: AppTone.muted),
+                        ),
                       );
                     }
                     return ListView.separated(
@@ -6910,28 +8426,51 @@ class _TrustedDevicesSheetState extends State<_TrustedDevicesSheet> {
                       separatorBuilder: (_, _i) => const Divider(height: 1),
                       itemBuilder: (_, i) {
                         final d = devices[i];
-                        final name = text(d['device_name']).isEmpty ? 'Unknown device' : text(d['device_name']);
+                        final name = text(d['device_name']).isEmpty
+                            ? 'Unknown device'
+                            : text(d['device_name']);
                         final lastUsed = text(d['last_used_at']);
                         return ListTile(
                           contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.phone_android_outlined, color: AppTone.muted),
-                          title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                          leading: const Icon(
+                            Icons.phone_android_outlined,
+                            color: AppTone.muted,
+                          ),
+                          title: Text(
+                            name,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
                           subtitle: lastUsed.isNotEmpty
-                              ? Text('Last used: ${lastUsed.substring(0, 10)}',
-                                  style: const TextStyle(fontSize: 12))
+                              ? Text(
+                                  'Last used: ${lastUsed.substring(0, 10)}',
+                                  style: const TextStyle(fontSize: 12),
+                                )
                               : null,
                           trailing: IconButton(
-                            icon: const Icon(Icons.delete_outline, color: AppTone.danger),
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              color: AppTone.danger,
+                            ),
                             tooltip: 'Remove device',
                             onPressed: () async {
                               final confirm = await showDialog<bool>(
                                 context: context,
                                 builder: (_) => AlertDialog(
                                   title: const Text('Remove device?'),
-                                  content: Text('$name will need email verification on next login.'),
+                                  content: Text(
+                                    '$name will need email verification on next login.',
+                                  ),
                                   actions: [
-                                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-                                    TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Remove')),
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(context, false),
+                                      child: const Text('Cancel'),
+                                    ),
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(context, true),
+                                      child: const Text('Remove'),
+                                    ),
                                   ],
                                 ),
                               );
@@ -6999,10 +8538,155 @@ class _ConnectionStatusCard extends StatelessWidget {
   }
 }
 
-class LockDialog extends StatefulWidget {
-  const LockDialog({super.key, required this.api, required this.deviceId});
+class TestDecoupleDialog extends StatefulWidget {
+  const TestDecoupleDialog({
+    super.key,
+    required this.api,
+    required this.deviceId,
+    required this.deviceName,
+  });
+
   final ApiClient api;
   final String deviceId;
+  final String deviceName;
+
+  @override
+  State<TestDecoupleDialog> createState() => _TestDecoupleDialogState();
+}
+
+class _TestDecoupleDialogState extends State<TestDecoupleDialog> {
+  final _confirm = TextEditingController();
+  bool _busy = false;
+  String _status = '';
+
+  @override
+  void dispose() {
+    _confirm.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_busy) return;
+    if (_confirm.text.trim() != 'DECOUPLE') {
+      setState(() => _status = 'Type DECOUPLE exactly to continue.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _status = 'Sending test release command...';
+    });
+    try {
+      final response = await widget.api
+          .post(
+            '/api/v1/dealer/devices/${widget.deviceId}/test-decouple',
+            data: {'confirm': 'DECOUPLE'},
+          )
+          .timeout(const Duration(seconds: 12));
+      final data = asMap(response.data);
+      if (!mounted) return;
+      setState(() {
+        _status = text(
+          data['message'],
+          fallback: 'Command sent. Waiting for device confirmation.',
+        );
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      Navigator.pop(context, true);
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Test release sent. Device should confirm by heartbeat.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _status = readableError(e);
+      });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Test release device?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'This is only for QA. It asks the user app to remove Device Owner/admin control from ${widget.deviceName}.',
+          ),
+          const SizedBox(height: 12),
+          const _InlineNotice(
+            message:
+                'After release, this test phone may need a fresh QR enrollment before EMI controls work again.',
+            tone: AppTone.warning,
+            icon: Icons.warning_amber_rounded,
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _confirm,
+            enabled: !_busy,
+            textCapitalization: TextCapitalization.characters,
+            decoration: const InputDecoration(
+              labelText: 'Type DECOUPLE',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          if (_status.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              _status,
+              style: TextStyle(
+                color:
+                    _status.toLowerCase().contains('failed') ||
+                        _status.toLowerCase().contains('disabled') ||
+                        _status.toLowerCase().contains('error')
+                    ? AppTone.danger
+                    : AppTone.muted,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          onPressed: _busy ? null : _submit,
+          icon: _busy
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.link_off_rounded),
+          label: Text(_busy ? 'Sending...' : 'Release test device'),
+        ),
+      ],
+    );
+  }
+}
+
+class LockDialog extends StatefulWidget {
+  const LockDialog({
+    super.key,
+    required this.api,
+    required this.deviceId,
+    this.connectionStatus = 'unknown',
+  });
+  final ApiClient api;
+  final String deviceId;
+  final String connectionStatus;
 
   @override
   State<LockDialog> createState() => _LockDialogState();
@@ -7014,56 +8698,203 @@ class _LockDialogState extends State<LockDialog> {
   bool _busy = false;
   String _status = '';
   bool _success = false;
+  bool _confirmed = false;
+  CancelToken? _cancelToken;
+  static const _requestTimeout = Duration(seconds: 7);
+  static const _confirmationPollInterval = Duration(seconds: 1);
+  static const _confirmationAttempts = 3;
+
+  bool get _deviceOffline => const [
+    'offline',
+    'delayed',
+    'app_removed_suspected',
+    'never_seen',
+  ].contains(widget.connectionStatus);
+
+  void _cancel() {
+    _cancelToken?.cancel('user_cancelled');
+    Navigator.pop(context, null);
+  }
 
   Future<void> submit() async {
     if (_busy) return;
+    _cancelToken = CancelToken();
     setState(() {
       _busy = true;
       _success = false;
-      _status = 'Submitting lock request. Please wait...';
+      _confirmed = false;
+      _status = 'Submitting lock request...';
     });
     try {
-      final response = await widget.api.post(
-        '/api/v1/lock/request',
-        data: {
-          'deviceId': widget.deviceId,
-          'reason': reason,
-          'note': note.text,
-        },
-      ).timeout(const Duration(seconds: 20));
+      final requestStartedAt = DateTime.now();
+      final response = await widget.api
+          .post(
+            '/api/v1/lock/request',
+            data: {
+              'deviceId': widget.deviceId,
+              'reason': reason,
+              'note': note.text,
+            },
+            cancelToken: _cancelToken,
+          )
+          .timeout(_requestTimeout);
+
       final root = asMap(response.data);
       final data = asMap(root['data']);
       final lockLevel = text(data['lockLevel'], fallback: '');
       final fcm = asMap(asMap(data['delivery'])['fcm']);
       final fcmOk = fcm['success'] == true;
+      final expectedState = _expectedDeviceState(reason);
+
+      if (!mounted) return;
+      setState(() {
+        _success = true;
+        _status = fcmOk
+            ? 'Command sent. Waiting for device heartbeat...'
+            : _deviceOffline
+            ? 'Lock recorded. Device is offline, so this will apply when it reconnects.'
+            : 'Lock recorded. Delivery confirmation is pending.';
+      });
+      final confirmed = fcmOk && !_deviceOffline
+          ? await _waitForDeviceConfirmation(
+              expectedState,
+              requestStartedAt,
+            ).timeout(const Duration(seconds: 4), onTimeout: () => false)
+          : false;
+      if (!mounted) return;
+      setState(() {
+        _confirmed = confirmed;
+        _status = confirmed
+            ? 'Device confirmed: lock is active.'
+            : _deviceOffline
+            ? _status
+            : 'Request accepted. Device confirmation is still pending.';
+      });
+
+      if (confirmed) {
+        await Future<void>.delayed(const Duration(milliseconds: 900));
+      }
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      Navigator.pop(context, {
+        ...data,
+        'deviceConfirmed': confirmed,
+        'pending': !confirmed,
+      });
+      final suffix = lockLevel.isEmpty ? '' : ' ($lockLevel)';
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            confirmed
+                ? 'Device confirmed locked$suffix.'
+                : 'Lock request accepted$suffix. Confirmation pending.',
+          ),
+        ),
+      );
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) {
+        return; // user cancelled — silent
+      }
+      if (mounted) {
+        final mayBeProcessing =
+            e.type == DioExceptionType.receiveTimeout ||
+            e.type == DioExceptionType.connectionTimeout ||
+            e.type == DioExceptionType.sendTimeout;
+        setState(() {
+          _success = mayBeProcessing;
+          _status = mayBeProcessing
+              ? 'Command may still be processing. Refreshing status shortly.'
+              : 'Request failed. Refresh device status to check current state.';
+        });
+        snack(context, readableError(e));
+      }
+    } on TimeoutException {
       if (mounted) {
         setState(() {
           _success = true;
-          _status = fcmOk
-              ? 'Device locked successfully. Command delivered to the phone.'
-              : 'Device marked locked. Phone delivery is still pending.';
+          _status = 'Command may still be processing. Refreshing status shortly.';
         });
-        await Future<void>.delayed(const Duration(milliseconds: 500));
-        if (!mounted) return;
-        final messenger = ScaffoldMessenger.of(context);
-        Navigator.pop(context, data);
-        final suffix = lockLevel.isEmpty ? '' : ' ($lockLevel)';
-        messenger.showSnackBar(
-          SnackBar(content: Text('Device locked successfully$suffix.')),
-        );
+        snack(context, 'Command submitted. Confirmation is pending.');
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _status = 'The request did not finish. Please refresh device status before trying again.';
+          _status =
+              'Request failed. Refresh device status to check current state.';
         });
         snack(context, readableError(e));
       }
     } finally {
       if (mounted) {
-        setState(() => _busy = false);
+        setState(() {
+          _busy = false;
+          _cancelToken = null;
+        });
       }
     }
+  }
+
+  String _expectedDeviceState(String reason) {
+    switch (reason) {
+      case 'TERMS_VIOLATION':
+      case 'SUSPECTED_FRAUD':
+      case 'SUSPECTED_SALE':
+        return 'PARTIAL_LOCK';
+      case 'EMI_OVERDUE':
+      case 'DEVICE_STOLEN':
+      default:
+        return 'FULL_LOCK';
+    }
+  }
+
+  Future<bool> _waitForDeviceConfirmation(
+    String expectedState,
+    DateTime requestStartedAt,
+  ) async {
+    final expected = expectedState.toUpperCase();
+    for (var attempt = 0; attempt < _confirmationAttempts; attempt += 1) {
+      await Future<void>.delayed(_confirmationPollInterval);
+      if (!mounted) return false;
+      try {
+        final response = await widget.api
+            .get('/api/v1/dealer/devices')
+            .timeout(const Duration(seconds: 4));
+        final devices = asList(asMap(response.data), 'devices');
+        Map<String, dynamic>? device;
+        for (final item in devices) {
+          final candidate = asMap(item);
+          if (text(candidate['id']) == widget.deviceId) {
+            device = candidate;
+            break;
+          }
+        }
+        if (_heartbeatConfirmsState(device, expected, requestStartedAt)) {
+          return true;
+        }
+      } catch (error) {
+        if (kDebugMode) {
+          debugPrint('Lock confirmation poll failed: $error');
+        }
+      }
+    }
+    return false;
+  }
+
+  bool _heartbeatConfirmsState(
+    Map<String, dynamic>? device,
+    String expected,
+    DateTime requestStartedAt,
+  ) {
+    if (device == null) return false;
+    final source = text(device['last_heartbeat_source']).toUpperCase();
+    if (!source.contains('LOCK_STATE:$expected')) return false;
+
+    final lastSeen = DateTime.tryParse(text(device['last_seen_at']));
+    if (lastSeen == null) return true;
+
+    return lastSeen.isAfter(
+      requestStartedAt.subtract(const Duration(seconds: 30)),
+    );
   }
 
   @override
@@ -7080,7 +8911,18 @@ class _LockDialogState extends State<LockDialog> {
         width: 420,
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (_deviceOffline) ...[
+              _InlineNotice(
+                message: widget.connectionStatus == 'app_removed_suspected'
+                    ? 'App may be uninstalled. Lock will be recorded but cannot be enforced until app is restored.'
+                    : 'Device is offline. Lock command will be queued and delivered when the device reconnects.',
+                tone: AppTone.warning,
+                icon: Icons.signal_wifi_connected_no_internet_4_outlined,
+              ),
+              const SizedBox(height: 12),
+            ],
             DropdownButtonFormField<String>(
               initialValue: reason,
               decoration: const InputDecoration(labelText: 'Reason'),
@@ -7106,7 +8948,9 @@ class _LockDialogState extends State<LockDialog> {
                   child: Text('Partial lock test'),
                 ),
               ],
-              onChanged: _busy ? null : (value) => setState(() => reason = value ?? reason),
+              onChanged: _busy
+                  ? null
+                  : (v) => setState(() => reason = v ?? reason),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -7114,52 +8958,72 @@ class _LockDialogState extends State<LockDialog> {
               enabled: !_busy,
               maxLength: 200,
               maxLines: 3,
-              decoration: const InputDecoration(labelText: 'Note'),
+              decoration: const InputDecoration(labelText: 'Note (optional)'),
             ),
             if (_busy || _status.isNotEmpty) ...[
               const SizedBox(height: 8),
-              if (_busy) const LinearProgressIndicator(minHeight: 3),
-              const SizedBox(height: 10),
+              if (_busy && !_success)
+                const LinearProgressIndicator(minHeight: 3),
+              const SizedBox(height: 6),
               InlineNotice(
                 message: _status,
-                tone: _success ? AppTone.brand : AppTone.info,
-                icon: _success ? Icons.check_circle_outline : Icons.sync_rounded,
+                tone: _confirmed
+                    ? AppTone.brand
+                    : _success
+                    ? AppTone.warning
+                    : AppTone.info,
+                icon: _confirmed
+                    ? Icons.check_circle_outline
+                    : Icons.sync_rounded,
               ),
             ],
           ],
         ),
       ),
       actions: [
+        // Cancel is ALWAYS enabled — user can abort at any time
         TextButton(
-          onPressed: _busy ? null : () => Navigator.pop(context, false),
-          child: const Text('Cancel'),
+          onPressed: _cancel,
+          child: Text(_success ? 'Close' : 'Cancel'),
         ),
-        FilledButton.icon(
-          onPressed: _busy ? null : submit,
-          icon: _busy
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.lock_outline),
-          label: Text(_busy ? 'Submitting...' : 'Submit'),
-        ),
+        if (!_success)
+          FilledButton.icon(
+            onPressed: _busy ? null : submit,
+            icon: _busy
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.lock_outline),
+            label: Text(_busy ? 'Submitting…' : 'Submit'),
+          ),
       ],
     );
   }
 }
 
 class LocationDialog extends StatefulWidget {
-  const LocationDialog({super.key, required this.api, required this.deviceId});
+  const LocationDialog({
+    super.key,
+    required this.api,
+    required this.deviceId,
+    this.connectionStatus = 'unknown',
+  });
   final ApiClient api;
   final String deviceId;
+  final String connectionStatus;
 
   @override
   State<LocationDialog> createState() => _LocationDialogState();
 }
 
 class _LocationDialogState extends State<LocationDialog> {
+  static final Map<String, DateTime> _devicePullGuards = {};
+
   String message = 'Ready.';
   bool _busy = false;
   Timer? _pollTimer;
@@ -7170,6 +9034,13 @@ class _LocationDialogState extends State<LocationDialog> {
   bool _locationIsPrevious = false;
   int _pollAttempts = 0;
 
+  bool get _deviceOffline => const [
+    'offline',
+    'delayed',
+    'app_removed_suspected',
+    'never_seen',
+  ].contains(widget.connectionStatus);
+
   @override
   void dispose() {
     _pollTimer?.cancel();
@@ -7178,21 +9049,43 @@ class _LocationDialogState extends State<LocationDialog> {
   }
 
   Future<void> pull() async {
-    if (_busy || _cooldownActive) return;
+    if (_busy || _pullGuardActive) {
+      setState(() {
+        message =
+            'A location pull is already waiting. Please try again shortly.';
+      });
+      return;
+    }
+    if (_deviceOffline) {
+      await _showPreviousLocation(
+        widget.connectionStatus == 'app_removed_suspected'
+            ? 'App may be uninstalled. Showing last known location.'
+            : 'Device is offline. Showing last known location.',
+      );
+      return;
+    }
     _pollTimer?.cancel();
     _pollTimer = null;
+    _devicePullGuards[widget.deviceId] = DateTime.now().add(
+      const Duration(seconds: 30),
+    );
     setState(() {
       _location = null;
       _locationIsPrevious = false;
       _pullId = null;
       _pollAttempts = 0;
     });
-    setState(() { _busy = true; message = 'Sending pull request…'; });
+    setState(() {
+      _busy = true;
+      message = 'Sending pull request…';
+    });
     try {
-      final response = await widget.api.post(
-        '/api/v1/location/${widget.deviceId}/pull',
-        data: <String, dynamic>{},
-      );
+      final response = await widget.api
+          .post(
+            '/api/v1/location/${widget.deviceId}/pull',
+            data: <String, dynamic>{},
+          )
+          .timeout(const Duration(seconds: 12));
       final data = asMap(response.data);
       final payload = asMap(data['data']);
       final pullId = text(payload['pullId']);
@@ -7204,6 +9097,36 @@ class _LocationDialogState extends State<LocationDialog> {
       });
       _startPolling();
     } catch (e) {
+      _clearPullGuard();
+      setState(() => message = readableError(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _showPreviousLocation(String fallbackMessage) async {
+    setState(() {
+      _busy = true;
+      _location = null;
+      _locationIsPrevious = false;
+      message = 'Checking last known location...';
+    });
+    try {
+      final response = await widget.api
+          .get('/api/v1/location/${widget.deviceId}/history?limit=1')
+          .timeout(const Duration(seconds: 5));
+      final rows = asList(response.data, 'data');
+      final Map<String, dynamic>? previous =
+          rows.isEmpty ? null : asMap(rows.first);
+      if (!mounted) return;
+      setState(() {
+        _location = previous == null || previous.isEmpty ? null : previous;
+        _locationIsPrevious = _location != null;
+        message =
+            _location == null ? 'No previous location is available.' : fallbackMessage;
+      });
+    } catch (e) {
+      if (!mounted) return;
       setState(() => message = readableError(e));
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -7249,6 +9172,7 @@ class _LocationDialogState extends State<LocationDialog> {
       if (match != null) {
         _pollTimer?.cancel();
         _pollTimer = null;
+        _clearPullGuard();
         setState(() {
           _location = match;
           _locationIsPrevious = false;
@@ -7258,9 +9182,10 @@ class _LocationDialogState extends State<LocationDialog> {
         return;
       }
 
-      if (_pollAttempts >= 30) {
+      if (_pollAttempts >= 15) {
         _pollTimer?.cancel();
         _pollTimer = null;
+        _clearPullGuard();
         Map<String, dynamic>? previous;
         for (final row in rows) {
           final candidate = asMap(row);
@@ -7274,8 +9199,8 @@ class _LocationDialogState extends State<LocationDialog> {
           _location = previous;
           _locationIsPrevious = previous != null;
           message = previous == null
-              ? 'No fresh response within 60 seconds. Device may be offline.'
-              : 'No fresh response within 60 seconds. Showing last known location.';
+              ? 'No fresh response within 30 seconds. Device may be offline.'
+              : 'No fresh response within 30 seconds. Showing last known location.';
         });
       } else {
         setState(() {
@@ -7291,13 +9216,25 @@ class _LocationDialogState extends State<LocationDialog> {
   }
 
   bool get _cooldownActive {
-    final until = _cooldownUntil;
+    final until = _cooldownUntil ?? _devicePullGuards[widget.deviceId];
     return until != null && DateTime.now().isBefore(until);
+  }
+
+  bool get _pullGuardActive => _busy || _cooldownActive;
+
+  void _clearPullGuard() {
+    final until = _devicePullGuards[widget.deviceId];
+    if (until == null || DateTime.now().isAfter(until)) {
+      _devicePullGuards.remove(widget.deviceId);
+    }
   }
 
   void _startCooldown() {
     _cooldownTimer?.cancel();
-    setState(() => _cooldownUntil = DateTime.now().add(const Duration(seconds: 10)));
+    setState(
+      () => _cooldownUntil = DateTime.now().add(const Duration(seconds: 10)),
+    );
+    _devicePullGuards[widget.deviceId] = _cooldownUntil!;
     _cooldownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
         timer.cancel();
@@ -7305,6 +9242,7 @@ class _LocationDialogState extends State<LocationDialog> {
       }
       if (!_cooldownActive) {
         timer.cancel();
+        _devicePullGuards.remove(widget.deviceId);
         setState(() => _cooldownUntil = null);
       } else {
         setState(() {});
@@ -7340,7 +9278,8 @@ class _LocationDialogState extends State<LocationDialog> {
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onVerticalDragEnd: (details) {
-              if (details.primaryVelocity != null && details.primaryVelocity! > 300) {
+              if (details.primaryVelocity != null &&
+                  details.primaryVelocity! > 300) {
                 Navigator.pop(context);
               }
             },
@@ -7348,13 +9287,18 @@ class _LocationDialogState extends State<LocationDialog> {
               padding: const EdgeInsets.fromLTRB(20, 10, 16, 10),
               child: Row(
                 children: [
-                  const Icon(Icons.location_on_outlined, size: 20, color: AppTone.brand),
+                  const Icon(
+                    Icons.location_on_outlined,
+                    size: 20,
+                    color: AppTone.brand,
+                  ),
                   const SizedBox(width: 8),
                   Text('Pull location', style: AppText.title()),
                   const Spacer(),
                   // Visual handle pill
                   Container(
-                    width: 36, height: 4,
+                    width: 36,
+                    height: 4,
                     decoration: BoxDecoration(
                       color: AppTone.subtle,
                       borderRadius: BorderRadius.circular(2),
@@ -7464,13 +9408,19 @@ class _LocationDialogState extends State<LocationDialog> {
                     onPressed: (_busy || _cooldownActive) ? null : pull,
                     child: _busy
                         ? const SizedBox(
-                            width: 16, height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
                           )
                         : Text(
                             _cooldownActive
                                 ? 'Ready in ${cooldownSeconds}s'
-                                : location == null ? 'Pull now' : 'Pull again',
+                                : location == null
+                                ? 'Pull now'
+                                : 'Pull again',
                             style: AppText.button(),
                           ),
                   ),
@@ -7478,7 +9428,10 @@ class _LocationDialogState extends State<LocationDialog> {
                 if (mapsUrl.isNotEmpty) ...[
                   const SizedBox(width: 10),
                   OutlinedButton.icon(
-                    onPressed: () => launchUrl(Uri.parse(mapsUrl), mode: LaunchMode.externalApplication),
+                    onPressed: () => launchUrl(
+                      Uri.parse(mapsUrl),
+                      mode: LaunchMode.externalApplication,
+                    ),
                     icon: const Icon(Icons.open_in_new, size: 16),
                     label: const Text('Maps'),
                   ),
@@ -7507,9 +9460,9 @@ class _LocationValue extends StatelessWidget {
         children: [
           Text(
             label,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: AppTone.muted,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.labelMedium?.copyWith(color: AppTone.muted),
           ),
           SelectableText(
             text(value, fallback: 'Unknown'),
@@ -7784,7 +9737,10 @@ class _RequestKeysDialogState extends State<RequestKeysDialog> {
             ? const SizedBox(
                 width: 16,
                 height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
               )
             : const Icon(Icons.send_outlined),
         label: Text(busy ? 'Submitting…' : 'Submit request'),
@@ -7799,110 +9755,116 @@ class _RequestKeysDialogState extends State<RequestKeysDialog> {
       child: ScrollConfiguration(
         behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
         child: SingleChildScrollView(
-        child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _QuotaStrip(
-            monthlyQuota: monthlyQuota,
-            usedKeys: usedKeys,
-            remainingQuota: remainingQuota,
-            maxPerRequest: maxPerRequest,
-          ),
-          const SizedBox(height: 18),
-          // ── Tier selection ───────────────────────────────────────────
-          const Text(
-            'Key tier',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: AppTone.ink,
-            ),
-          ),
-          const SizedBox(height: 8),
-          _TierOption(
-            tier: 'standard',
-            count: 0,
-            quantity: requestedQuantity,
-            selected: _tier == 'standard',
-            onTap: () => setState(() => _tier = 'standard'),
-            alwaysEnabled: true,
-          ),
-          const SizedBox(height: 8),
-          _TierOption(
-            tier: 'premium',
-            count: 0,
-            quantity: requestedQuantity,
-            selected: _tier == 'premium',
-            onTap: () => setState(() => _tier = 'premium'),
-            alwaysEnabled: true,
-          ),
-          const SizedBox(height: 8),
-          _TierOption(
-            tier: 'vip',
-            count: 0,
-            quantity: requestedQuantity,
-            selected: _tier == 'vip',
-            onTap: () => setState(() => _tier = 'vip'),
-            alwaysEnabled: true,
-          ),
-          const SizedBox(height: 18),
-          // ── Quantity ─────────────────────────────────────────────────
-          QuantityStepper(
-            controller: quantity,
-            label: 'Quantity',
-            min: 1,
-            max: maxPerRequest,
-            onChanged: () => setState(() => error = null),
-          ),
-          const SizedBox(height: 14),
-          // ── Justification ─────────────────────────────────────────────
-          TextField(
-            controller: justification,
-            maxLines: 3,
-            onChanged: (_) => setState(() => error = null),
-            decoration: InputDecoration(
-              labelText: 'Justification for admin',
-              alignLabelWithHint: true,
-              prefixIcon: const Icon(Icons.notes_outlined),
-              filled: true,
-              fillColor: AppTone.surface,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppTone.line),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _QuotaStrip(
+                monthlyQuota: monthlyQuota,
+                usedKeys: usedKeys,
+                remainingQuota: remainingQuota,
+                maxPerRequest: maxPerRequest,
               ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppTone.line),
+              const SizedBox(height: 18),
+              // ── Tier selection ───────────────────────────────────────────
+              const Text(
+                'Key tier',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: AppTone.ink,
+                ),
               ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppTone.accent, width: 1.5),
+              const SizedBox(height: 8),
+              _TierOption(
+                tier: 'standard',
+                count: 0,
+                quantity: requestedQuantity,
+                selected: _tier == 'standard',
+                onTap: () => setState(() => _tier = 'standard'),
+                alwaysEnabled: true,
               ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          _RequestPreview(
-            quantity: requestedQuantity <= 0 ? 0 : requestedQuantity,
-            remainingAfter: (remainingQuota - requestedQuantity).clamp(0, remainingQuota),
-          ),
-          AnimatedSize(
-            duration: _medium,
-            child: error == null
-                ? const SizedBox.shrink()
-                : Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: _InlineNotice(
-                      message: error!,
-                      tone: AppTone.red,
-                      icon: Icons.error_outline,
+              const SizedBox(height: 8),
+              _TierOption(
+                tier: 'premium',
+                count: 0,
+                quantity: requestedQuantity,
+                selected: _tier == 'premium',
+                onTap: () => setState(() => _tier = 'premium'),
+                alwaysEnabled: true,
+              ),
+              const SizedBox(height: 8),
+              _TierOption(
+                tier: 'vip',
+                count: 0,
+                quantity: requestedQuantity,
+                selected: _tier == 'vip',
+                onTap: () => setState(() => _tier = 'vip'),
+                alwaysEnabled: true,
+              ),
+              const SizedBox(height: 18),
+              // ── Quantity ─────────────────────────────────────────────────
+              QuantityStepper(
+                controller: quantity,
+                label: 'Quantity',
+                min: 1,
+                max: maxPerRequest,
+                onChanged: () => setState(() => error = null),
+              ),
+              const SizedBox(height: 14),
+              // ── Justification ─────────────────────────────────────────────
+              TextField(
+                controller: justification,
+                maxLines: 3,
+                onChanged: (_) => setState(() => error = null),
+                decoration: InputDecoration(
+                  labelText: 'Justification for admin',
+                  alignLabelWithHint: true,
+                  prefixIcon: const Icon(Icons.notes_outlined),
+                  filled: true,
+                  fillColor: AppTone.surface,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: AppTone.line),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: AppTone.line),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(
+                      color: AppTone.accent,
+                      width: 1.5,
                     ),
                   ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              _RequestPreview(
+                quantity: requestedQuantity <= 0 ? 0 : requestedQuantity,
+                remainingAfter: (remainingQuota - requestedQuantity).clamp(
+                  0,
+                  remainingQuota,
+                ),
+              ),
+              AnimatedSize(
+                duration: _medium,
+                child: error == null
+                    ? const SizedBox.shrink()
+                    : Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: _InlineNotice(
+                          message: error!,
+                          tone: AppTone.red,
+                          icon: Icons.error_outline,
+                        ),
+                      ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
-    ),
-    ),
     ),
   );
 }
@@ -7998,26 +9960,35 @@ class _AssignKeysDialogState extends State<AssignKeysDialog> {
     final q = asMap((await widget.api.get('/api/v1/reseller/quota')).data);
     return {
       'standard': (q['quota_standard'] as num?)?.toInt() ?? 0,
-      'premium':  (q['quota_premium']  as num?)?.toInt() ?? 0,
-      'vip':      (q['quota_vip']      as num?)?.toInt() ?? 0,
+      'premium': (q['quota_premium'] as num?)?.toInt() ?? 0,
+      'vip': (q['quota_vip'] as num?)?.toInt() ?? 0,
     };
   }
 
   Future<void> _submit(Map<String, int> quota) async {
     final avail = quota[_tier] ?? 0;
-    if (_quantity <= 0) { setState(() => error = 'Enter a valid quantity.'); return; }
+    if (_quantity <= 0) {
+      setState(() => error = 'Enter a valid quantity.');
+      return;
+    }
     if (_quantity > avail) {
       setState(() => error = 'Only $avail $_tierLabel keys available.');
       return;
     }
-    setState(() { busy = true; error = null; });
+    setState(() {
+      busy = true;
+      error = null;
+    });
     try {
       await widget.api.post(
         '/api/v1/reseller/dealers/${widget.dealerId}/assign-keys',
         data: {'quantity': _quantity, 'tier': _tier},
       );
       await widget.onAssigned?.call();
-      if (mounted) { Navigator.pop(context); snack(context, '$_quantity $_tierLabel keys sent'); }
+      if (mounted) {
+        Navigator.pop(context);
+        snack(context, '$_quantity $_tierLabel keys sent');
+      }
     } catch (e) {
       if (mounted) setState(() => error = readableError(e));
     } finally {
@@ -8025,26 +9996,41 @@ class _AssignKeysDialogState extends State<AssignKeysDialog> {
     }
   }
 
-  String get _tierLabel => _tier == 'vip' ? 'VIP' : _tier == 'premium' ? 'Premium' : 'Standard';
+  String get _tierLabel => _tier == 'vip'
+      ? 'VIP'
+      : _tier == 'premium'
+      ? 'Premium'
+      : 'Standard';
 
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<Map<String, int>>(
       future: _loadQuota(),
       builder: (context, snapshot) {
-        final quota   = snapshot.data ?? const {'standard': 0, 'premium': 0, 'vip': 0};
-        final avail   = quota[_tier] ?? 0;
+        final quota =
+            snapshot.data ?? const {'standard': 0, 'premium': 0, 'vip': 0};
+        final avail = quota[_tier] ?? 0;
         final loading = snapshot.connectionState != ConnectionState.done;
         return _DialogShell(
           icon: Icons.outgoing_mail,
           title: 'Assign keys',
           subtitle: 'Send keys to ${widget.dealerName ?? 'this dealer'}.',
           actions: [
-            TextButton(onPressed: busy ? null : () => Navigator.pop(context), child: const Text('Cancel')),
+            TextButton(
+              onPressed: busy ? null : () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
             FilledButton.icon(
               onPressed: busy || loading ? null : () => _submit(quota),
               icon: busy
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
                   : const Icon(Icons.send_outlined),
               label: Text(busy ? 'Sending…' : 'Send keys'),
             ),
@@ -8054,7 +10040,10 @@ class _AssignKeysDialogState extends State<AssignKeysDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // ── Tier selector ──────────────────────────────────────────
-              const Text('Key tier', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+              const Text(
+                'Key tier',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+              ),
               const SizedBox(height: 8),
               Row(
                 children: [
@@ -8065,7 +10054,10 @@ class _AssignKeysDialogState extends State<AssignKeysDialog> {
                         count: quota[t] ?? 0,
                         quantity: _quantity,
                         selected: _tier == t,
-                        onTap: () => setState(() { _tier = t; error = null; }),
+                        onTap: () => setState(() {
+                          _tier = t;
+                          error = null;
+                        }),
                       ),
                     ),
                     if (t != 'vip') const SizedBox(width: 8),
@@ -8087,7 +10079,11 @@ class _AssignKeysDialogState extends State<AssignKeysDialog> {
                     ? const SizedBox.shrink()
                     : Padding(
                         padding: const EdgeInsets.only(top: 10),
-                        child: _InlineNotice(message: error!, tone: AppTone.red, icon: Icons.error_outline),
+                        child: _InlineNotice(
+                          message: error!,
+                          tone: AppTone.red,
+                          icon: Icons.error_outline,
+                        ),
                       ),
               ),
             ],
@@ -8141,10 +10137,10 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
   int get _availableCount => _tierCount(_selectedTier);
   int _tierCount(String t) => widget.tierQuota[t] ?? 0;
   String get _tierLabel => switch (_selectedTier) {
-        'premium' => 'Premium',
-        'vip' => 'VIP',
-        _ => 'Standard',
-      };
+    'premium' => 'Premium',
+    'vip' => 'VIP',
+    _ => 'Standard',
+  };
 
   Map<String, dynamic>? get _selectedDealer {
     for (final d in widget.dealers) {
@@ -8158,7 +10154,9 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
     final q = _searchQuery.toLowerCase();
     return widget.dealers.where((d) {
       return text(d['name']).toLowerCase().contains(q) ||
-          text(d['business_name'] ?? d['shop_name']).toLowerCase().contains(q) ||
+          text(
+            d['business_name'] ?? d['shop_name'],
+          ).toLowerCase().contains(q) ||
           text(d['phone']).toLowerCase().contains(q);
     }).toList();
   }
@@ -8415,8 +10413,10 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
               hintText: 'Search by name, shop, phone…',
               prefixIcon: Icon(Icons.search),
               border: InputBorder.none,
-              contentPadding:
-                  EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 14,
+              ),
             ),
             onChanged: (v) => setState(() => _searchQuery = v),
           ),
@@ -8447,94 +10447,95 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
             final status = text(dealer['status'], fallback: 'active');
             return Padding(
               padding: const EdgeInsets.only(bottom: 8),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(14),
-                onTap: () {
-                  setState(() => _selectedDealerId = id);
-                  Future.delayed(const Duration(milliseconds: 200), () {
-                    if (mounted) setState(() => _step = 1);
-                  });
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: _selectedDealerId == id
-                        ? AppTone.accentLight
-                        : AppTone.surface,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: _selectedDealerId == id
-                          ? AppTone.accent
-                          : AppTone.line,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 44,
-                        height: 44,
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [AppTone.accent, AppTone.brand],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Center(
-                          child: Text(
-                            initials,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w900,
-                              fontSize: 16,
+              child:
+                  InkWell(
+                        borderRadius: BorderRadius.circular(14),
+                        onTap: () {
+                          setState(() => _selectedDealerId = id);
+                          Future.delayed(const Duration(milliseconds: 200), () {
+                            if (mounted) setState(() => _step = 1);
+                          });
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: _selectedDealerId == id
+                                ? AppTone.accentLight
+                                : AppTone.surface,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: _selectedDealerId == id
+                                  ? AppTone.accent
+                                  : AppTone.line,
                             ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              name,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 15,
-                              ),
-                            ),
-                            if (shop.isNotEmpty)
-                              Text(
-                                shop,
-                                style: const TextStyle(
-                                  color: AppTone.muted,
-                                  fontSize: 13,
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 44,
+                                height: 44,
+                                decoration: const BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [AppTone.accent, AppTone.brand],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  ),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    initials,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: 16,
+                                    ),
+                                  ),
                                 ),
                               ),
-                            if (phone.isNotEmpty)
-                              Text(
-                                phone,
-                                style: const TextStyle(
-                                  color: AppTone.muted,
-                                  fontSize: 12,
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      name,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 15,
+                                      ),
+                                    ),
+                                    if (shop.isNotEmpty)
+                                      Text(
+                                        shop,
+                                        style: const TextStyle(
+                                          color: AppTone.muted,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    if (phone.isNotEmpty)
+                                      Text(
+                                        phone,
+                                        style: const TextStyle(
+                                          color: AppTone.muted,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                  ],
                                 ),
                               ),
-                          ],
+                              const SizedBox(width: 8),
+                              StatusPill(
+                                label: status,
+                                color: statusColor(status),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      StatusPill(
-                        label: status,
-                        color: statusColor(status),
-                      ),
-                    ],
-                  ),
-                ),
-              )
-                  .animate(delay: (30 * i).ms)
-                  .fadeIn(duration: 180.ms)
-                  .slideY(begin: 0.03, end: 0),
+                      )
+                      .animate(delay: (30 * i).ms)
+                      .fadeIn(duration: 180.ms)
+                      .slideY(begin: 0.03, end: 0),
             );
           }),
         const SizedBox(height: 20),
@@ -8595,14 +10596,11 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
         Align(
           alignment: Alignment.centerLeft,
           child: Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
               color: AppTone.brandLight,
               borderRadius: BorderRadius.circular(999),
-              border: Border.all(
-                color: AppTone.brand.withValues(alpha: 0.25),
-              ),
+              border: Border.all(color: AppTone.brand.withValues(alpha: 0.25)),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -8760,10 +10758,7 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _InfoRow(
-                'Dealer',
-                text(dealer['name'], fallback: 'Dealer'),
-              ),
+              _InfoRow('Dealer', text(dealer['name'], fallback: 'Dealer')),
               const SizedBox(height: 6),
               _InfoRow('Tier', _tierLabel),
               const SizedBox(height: 6),
@@ -8794,7 +10789,9 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
                   ? AppTone.brand
                   : Color.lerp(AppTone.warning, AppTone.brand, progress)!;
               return GestureDetector(
-                onLongPressStart: _apiBusy || _holdComplete ? null : _onHoldStart,
+                onLongPressStart: _apiBusy || _holdComplete
+                    ? null
+                    : _onHoldStart,
                 onLongPressEnd: (_) => _onHoldCancel(),
                 onLongPressCancel: _onHoldCancel,
                 child: SizedBox(
@@ -8842,7 +10839,9 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
-                                      progress == 0 ? 'Hold' : '${(progress * 100).toInt()}%',
+                                      progress == 0
+                                          ? 'Hold'
+                                          : '${(progress * 100).toInt()}%',
                                       style: TextStyle(
                                         color: color,
                                         fontWeight: FontWeight.w800,
@@ -8912,19 +10911,20 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
               width: 96,
               height: 96,
               child: Center(
-                child: const Icon(
-                  Icons.check_rounded,
-                  color: AppTone.brand,
-                  size: 44,
-                )
-                    .animate(delay: 600.ms)
-                    .scale(
-                      begin: const Offset(0, 0),
-                      end: const Offset(1, 1),
-                      curve: Curves.elasticOut,
-                      duration: 500.ms,
-                    )
-                    .fadeIn(duration: 200.ms),
+                child:
+                    const Icon(
+                          Icons.check_rounded,
+                          color: AppTone.brand,
+                          size: 44,
+                        )
+                        .animate(delay: 600.ms)
+                        .scale(
+                          begin: const Offset(0, 0),
+                          end: const Offset(1, 1),
+                          curve: Curves.elasticOut,
+                          duration: 500.ms,
+                        )
+                        .fadeIn(duration: 200.ms),
               ),
             ),
           ),
@@ -8943,14 +10943,14 @@ class _SendKeysWizardState extends State<_SendKeysWizard>
         ),
         const SizedBox(height: 4),
         const Text(
-          'Keys Sent!',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.w900,
-            color: AppTone.ink,
-          ),
-        )
+              'Keys Sent!',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.w900,
+                color: AppTone.ink,
+              ),
+            )
             .animate(delay: 400.ms)
             .fadeIn(duration: 300.ms)
             .slideY(begin: 0.1, end: 0),
@@ -9016,9 +11016,7 @@ class _TierOption extends StatelessWidget {
         decoration: BoxDecoration(
           gradient: selected
               ? LinearGradient(
-                  colors: grad
-                      .map((c) => c.withValues(alpha: 0.12))
-                      .toList(),
+                  colors: grad.map((c) => c.withValues(alpha: 0.12)).toList(),
                 )
               : null,
           color: selected ? null : AppTone.surface,
@@ -9036,8 +11034,10 @@ class _TierOption extends StatelessWidget {
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: disabled
-                      ? [AppTone.muted.withValues(alpha: 0.4),
-                         AppTone.muted.withValues(alpha: 0.2)]
+                      ? [
+                          AppTone.muted.withValues(alpha: 0.4),
+                          AppTone.muted.withValues(alpha: 0.2),
+                        ]
                       : grad,
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
@@ -9063,8 +11063,8 @@ class _TierOption extends StatelessWidget {
                     disabled
                         ? 'Out of stock'
                         : !enough
-                            ? '$count available — need $quantity'
-                            : '$count keys available',
+                        ? '$count available — need $quantity'
+                        : '$count keys available',
                     style: TextStyle(
                       color: !enough && !disabled
                           ? AppTone.warning
@@ -9084,7 +11084,9 @@ class _TierOption extends StatelessWidget {
             else
               Icon(
                 Icons.radio_button_unchecked,
-                color: disabled ? AppTone.muted.withValues(alpha: 0.4) : AppTone.line,
+                color: disabled
+                    ? AppTone.muted.withValues(alpha: 0.4)
+                    : AppTone.line,
               ),
           ],
         ),
@@ -9117,8 +11119,8 @@ class _WizardStepIndicator extends StatelessWidget {
                 color: done
                     ? AppTone.brand
                     : active
-                        ? AppTone.accent
-                        : AppTone.line,
+                    ? AppTone.accent
+                    : AppTone.line,
                 borderRadius: BorderRadius.circular(999),
               ),
             ),
@@ -9147,8 +11149,9 @@ class _LargeQuantityStepper extends StatelessWidget {
   void setQuantity(int value) {
     final next = value.clamp(min, effectiveMax).toInt();
     controller.text = '$next';
-    controller.selection =
-        TextSelection.collapsed(offset: controller.text.length);
+    controller.selection = TextSelection.collapsed(
+      offset: controller.text.length,
+    );
     onChanged?.call();
   }
 
@@ -9194,7 +11197,9 @@ class _LargeQuantityStepper extends StatelessWidget {
           width: 56,
           height: 56,
           child: IconButton(
-            onPressed: value >= effectiveMax ? null : () => setQuantity(value + 1),
+            onPressed: value >= effectiveMax
+                ? null
+                : () => setQuantity(value + 1),
             icon: const Icon(Icons.add, size: 26),
             style: IconButton.styleFrom(
               foregroundColor: AppTone.surface,
@@ -9218,19 +11223,13 @@ class _InfoRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Text(
-          label,
-          style: const TextStyle(color: AppTone.muted, fontSize: 13),
-        ),
+        Text(label, style: const TextStyle(color: AppTone.muted, fontSize: 13)),
         const SizedBox(width: 12),
         Expanded(
           child: Text(
             value,
             textAlign: TextAlign.end,
-            style: const TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 14,
-            ),
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
           ),
         ),
       ],
@@ -9254,10 +11253,10 @@ class _ArcHoldPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = (size.shortestSide / 2) - strokeWidth / 2;
-    final rect   = Rect.fromCircle(center: center, radius: radius);
-    final paint  = Paint()
-      ..style      = PaintingStyle.stroke
-      ..strokeCap  = StrokeCap.round
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
       ..strokeWidth = strokeWidth;
 
     // Track ring
@@ -9354,31 +11353,70 @@ class _DealerPreview extends StatelessWidget {
 
 // District → Division mapping for Bangladesh
 const _districtDivision = <String, String>{
-  'Dhaka': 'Dhaka', 'Gazipur': 'Dhaka', 'Narayanganj': 'Dhaka',
-  'Narsingdi': 'Dhaka', 'Manikganj': 'Dhaka', 'Munshiganj': 'Dhaka',
-  'Tangail': 'Dhaka', 'Kishoreganj': 'Dhaka', 'Rajbari': 'Dhaka',
-  'Faridpur': 'Dhaka', 'Madaripur': 'Dhaka', 'Shariatpur': 'Dhaka',
+  'Dhaka': 'Dhaka',
+  'Gazipur': 'Dhaka',
+  'Narayanganj': 'Dhaka',
+  'Narsingdi': 'Dhaka',
+  'Manikganj': 'Dhaka',
+  'Munshiganj': 'Dhaka',
+  'Tangail': 'Dhaka',
+  'Kishoreganj': 'Dhaka',
+  'Rajbari': 'Dhaka',
+  'Faridpur': 'Dhaka',
+  'Madaripur': 'Dhaka',
+  'Shariatpur': 'Dhaka',
   'Gopalganj': 'Dhaka',
-  'Chittagong': 'Chittagong', "Cox's Bazar": 'Chittagong',
-  'Noakhali': 'Chittagong', 'Feni': 'Chittagong', 'Lakshmipur': 'Chittagong',
-  'Chandpur': 'Chittagong', 'Comilla': 'Chittagong', 'Brahmanbaria': 'Chittagong',
-  'Bandarban': 'Chittagong', 'Rangamati': 'Chittagong', 'Khagrachhari': 'Chittagong',
-  'Rajshahi': 'Rajshahi', 'Bogura': 'Rajshahi', 'Joypurhat': 'Rajshahi',
-  'Naogaon': 'Rajshahi', 'Natore': 'Rajshahi', 'Chapai Nawabganj': 'Rajshahi',
-  'Pabna': 'Rajshahi', 'Sirajganj': 'Rajshahi',
-  'Khulna': 'Khulna', 'Jessore': 'Khulna', 'Satkhira': 'Khulna',
-  'Bagerhat': 'Khulna', 'Narail': 'Khulna', 'Magura': 'Khulna',
-  'Jhenaidah': 'Khulna', 'Kushtia': 'Khulna', 'Meherpur': 'Khulna',
+  'Chittagong': 'Chittagong',
+  "Cox's Bazar": 'Chittagong',
+  'Noakhali': 'Chittagong',
+  'Feni': 'Chittagong',
+  'Lakshmipur': 'Chittagong',
+  'Chandpur': 'Chittagong',
+  'Comilla': 'Chittagong',
+  'Brahmanbaria': 'Chittagong',
+  'Bandarban': 'Chittagong',
+  'Rangamati': 'Chittagong',
+  'Khagrachhari': 'Chittagong',
+  'Rajshahi': 'Rajshahi',
+  'Bogura': 'Rajshahi',
+  'Joypurhat': 'Rajshahi',
+  'Naogaon': 'Rajshahi',
+  'Natore': 'Rajshahi',
+  'Chapai Nawabganj': 'Rajshahi',
+  'Pabna': 'Rajshahi',
+  'Sirajganj': 'Rajshahi',
+  'Khulna': 'Khulna',
+  'Jessore': 'Khulna',
+  'Satkhira': 'Khulna',
+  'Bagerhat': 'Khulna',
+  'Narail': 'Khulna',
+  'Magura': 'Khulna',
+  'Jhenaidah': 'Khulna',
+  'Kushtia': 'Khulna',
+  'Meherpur': 'Khulna',
   'Chuadanga': 'Khulna',
-  'Barishal': 'Barishal', 'Patuakhali': 'Barishal', 'Bhola': 'Barishal',
-  'Pirojpur': 'Barishal', 'Jhalokati': 'Barishal', 'Barguna': 'Barishal',
-  'Sylhet': 'Sylhet', 'Habiganj': 'Sylhet', 'Moulvibazar': 'Sylhet',
+  'Barishal': 'Barishal',
+  'Patuakhali': 'Barishal',
+  'Bhola': 'Barishal',
+  'Pirojpur': 'Barishal',
+  'Jhalokati': 'Barishal',
+  'Barguna': 'Barishal',
+  'Sylhet': 'Sylhet',
+  'Habiganj': 'Sylhet',
+  'Moulvibazar': 'Sylhet',
   'Sunamganj': 'Sylhet',
-  'Rangpur': 'Rangpur', 'Dinajpur': 'Rangpur', 'Gaibandha': 'Rangpur',
-  'Kurigram': 'Rangpur', 'Lalmonirhat': 'Rangpur', 'Nilphamari': 'Rangpur',
-  'Panchagarh': 'Rangpur', 'Thakurgaon': 'Rangpur',
-  'Mymensingh': 'Mymensingh', 'Jamalpur': 'Mymensingh',
-  'Netrokona': 'Mymensingh', 'Sherpur': 'Mymensingh',
+  'Rangpur': 'Rangpur',
+  'Dinajpur': 'Rangpur',
+  'Gaibandha': 'Rangpur',
+  'Kurigram': 'Rangpur',
+  'Lalmonirhat': 'Rangpur',
+  'Nilphamari': 'Rangpur',
+  'Panchagarh': 'Rangpur',
+  'Thakurgaon': 'Rangpur',
+  'Mymensingh': 'Mymensingh',
+  'Jamalpur': 'Mymensingh',
+  'Netrokona': 'Mymensingh',
+  'Sherpur': 'Mymensingh',
 };
 
 class _CreateDealerWizard extends StatefulWidget {
@@ -9394,35 +11432,35 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
   int _step = 0;
 
   // Step 0 — Identity
-  final _nameCtrl     = TextEditingController();
-  final _phoneCtrl    = TextEditingController();
-  final _emailCtrl    = TextEditingController();
+  final _nameCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
 
   // Step 1 — Business
-  final _shopCtrl     = TextEditingController();
-  final _bizCtrl      = TextEditingController();
+  final _shopCtrl = TextEditingController();
+  final _bizCtrl = TextEditingController();
 
   // Step 2 — Address (Google Maps style)
-  final _streetCtrl   = TextEditingController(); // house/road/area
-  final _thanaCtrl    = TextEditingController(); // upazila/thana
+  final _streetCtrl = TextEditingController(); // house/road/area
+  final _thanaCtrl = TextEditingController(); // upazila/thana
   String? _district;
   String? _division; // auto-populated from district
 
   // Step 3 — Documents
-  final _licenseCtrl  = TextEditingController();
-  final _nidCtrl      = TextEditingController();
+  final _licenseCtrl = TextEditingController();
+  final _nidCtrl = TextEditingController();
 
   // Dealer photo
   XFile? _photo;
 
   // Step 3 — Password
-  final _pwCtrl       = TextEditingController();
-  final _pwConfCtrl   = TextEditingController();
-  bool _showPw        = false;
-  bool _showPwConf    = false;
+  final _pwCtrl = TextEditingController();
+  final _pwConfCtrl = TextEditingController();
+  bool _showPw = false;
+  bool _showPwConf = false;
 
   // Step 4 — Submit
-  bool _busy          = false;
+  bool _busy = false;
   Object? _error;
 
   String? _step0Error;
@@ -9430,8 +11468,19 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
 
   @override
   void dispose() {
-    for (final c in [_nameCtrl, _phoneCtrl, _emailCtrl, _shopCtrl, _bizCtrl,
-        _streetCtrl, _thanaCtrl, _licenseCtrl, _nidCtrl, _pwCtrl, _pwConfCtrl]) {
+    for (final c in [
+      _nameCtrl,
+      _phoneCtrl,
+      _emailCtrl,
+      _shopCtrl,
+      _bizCtrl,
+      _streetCtrl,
+      _thanaCtrl,
+      _licenseCtrl,
+      _nidCtrl,
+      _pwCtrl,
+      _pwConfCtrl,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -9463,7 +11512,10 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
   }
 
   Future<void> _submit() async {
-    setState(() { _busy = true; _error = null; });
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
     try {
       String? photoUrl;
       if (_photo != null) {
@@ -9476,19 +11528,19 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
       await widget.api.post(
         '/api/v1/reseller/dealers',
         data: {
-          'name':         _nameCtrl.text.trim(),
-          'email':        _emailCtrl.text.trim(),
-          'phone':        _phoneCtrl.text.trim(),
-          'shopName':     _shopCtrl.text.trim(),
+          'name': _nameCtrl.text.trim(),
+          'email': _emailCtrl.text.trim(),
+          'phone': _phoneCtrl.text.trim(),
+          'shopName': _shopCtrl.text.trim(),
           'businessName': _bizCtrl.text.trim(),
-          'address':      _streetCtrl.text.trim(),
-          'thana':        _thanaCtrl.text.trim(),
-          'district':     _district,
-          'division':     _division,
+          'address': _streetCtrl.text.trim(),
+          'thana': _thanaCtrl.text.trim(),
+          'district': _district,
+          'division': _division,
           'tradeLicense': _licenseCtrl.text.trim(),
-          'nid':          _nidCtrl.text.trim(),
-          'photoUrl':     photoUrl,
-          'password':     _pwCtrl.text,
+          'nid': _nidCtrl.text.trim(),
+          'photoUrl': photoUrl,
+          'password': _pwCtrl.text,
         },
       );
       if (mounted) {
@@ -9496,7 +11548,11 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
         widget.onCreated();
       }
     } catch (e) {
-      if (mounted) setState(() { _error = e; _busy = false; });
+      if (mounted)
+        setState(() {
+          _error = e;
+          _busy = false;
+        });
     }
   }
 
@@ -9521,10 +11577,7 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
                     child: child,
                   ),
                 ),
-                child: KeyedSubtree(
-                  key: ValueKey(_step),
-                  child: _buildStep(),
-                ),
+                child: KeyedSubtree(key: ValueKey(_step), child: _buildStep()),
               ),
             ),
           ),
@@ -9551,11 +11604,15 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
   Widget _stepIdentity() => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      const Text('Dealer identity',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+      const Text(
+        'Dealer identity',
+        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+      ),
       const SizedBox(height: 4),
-      const Text('Basic contact info and photo',
-          style: TextStyle(color: AppTone.muted)),
+      const Text(
+        'Basic contact info and photo',
+        style: TextStyle(color: AppTone.muted),
+      ),
       const SizedBox(height: 20),
       // Photo picker
       Center(
@@ -9589,7 +11646,11 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.white, width: 2),
                 ),
-                child: const Icon(Icons.camera_alt, size: 14, color: Colors.white),
+                child: const Icon(
+                  Icons.camera_alt,
+                  size: 14,
+                  color: Colors.white,
+                ),
               ),
             ],
           ),
@@ -9597,23 +11658,40 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
       ),
       const SizedBox(height: 6),
       const Center(
-        child: Text('Tap to add photo',
-            style: TextStyle(color: AppTone.muted, fontSize: 12)),
+        child: Text(
+          'Tap to add photo',
+          style: TextStyle(color: AppTone.muted, fontSize: 12),
+        ),
       ),
       const SizedBox(height: 20),
-      _WizardField(label: 'Full name', controller: _nameCtrl,
-          hint: 'e.g. Karim Traders', icon: Icons.person_outline),
+      _WizardField(
+        label: 'Full name',
+        controller: _nameCtrl,
+        hint: 'e.g. Karim Traders',
+        icon: Icons.person_outline,
+      ),
       const SizedBox(height: 12),
-      _WizardField(label: 'Phone number', controller: _phoneCtrl,
-          hint: '01XXXXXXXXX', icon: Icons.phone_outlined,
-          keyboardType: TextInputType.phone),
+      _WizardField(
+        label: 'Phone number',
+        controller: _phoneCtrl,
+        hint: '01XXXXXXXXX',
+        icon: Icons.phone_outlined,
+        keyboardType: TextInputType.phone,
+      ),
       const SizedBox(height: 12),
-      _WizardField(label: 'Email address', controller: _emailCtrl,
-          hint: 'dealer@example.com', icon: Icons.email_outlined,
-          keyboardType: TextInputType.emailAddress),
+      _WizardField(
+        label: 'Email address',
+        controller: _emailCtrl,
+        hint: 'dealer@example.com',
+        icon: Icons.email_outlined,
+        keyboardType: TextInputType.emailAddress,
+      ),
       if (_step0Error != null) ...[
         const SizedBox(height: 8),
-        Text(_step0Error!, style: const TextStyle(color: AppTone.danger, fontSize: 13)),
+        Text(
+          _step0Error!,
+          style: const TextStyle(color: AppTone.danger, fontSize: 13),
+        ),
       ],
       const SizedBox(height: 20),
     ],
@@ -9624,17 +11702,29 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
   Widget _stepBusiness() => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      const Text('Business details',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+      const Text(
+        'Business details',
+        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+      ),
       const SizedBox(height: 4),
-      const Text('Shop and business info',
-          style: TextStyle(color: AppTone.muted)),
+      const Text(
+        'Shop and business info',
+        style: TextStyle(color: AppTone.muted),
+      ),
       const SizedBox(height: 20),
-      _WizardField(label: 'Shop name', controller: _shopCtrl,
-          hint: 'e.g. Karim Mobile Shop', icon: Icons.storefront_outlined),
+      _WizardField(
+        label: 'Shop name',
+        controller: _shopCtrl,
+        hint: 'e.g. Karim Mobile Shop',
+        icon: Icons.storefront_outlined,
+      ),
       const SizedBox(height: 12),
-      _WizardField(label: 'Business name (optional)', controller: _bizCtrl,
-          hint: 'Registered business name', icon: Icons.business_outlined),
+      _WizardField(
+        label: 'Business name (optional)',
+        controller: _bizCtrl,
+        hint: 'Registered business name',
+        icon: Icons.business_outlined,
+      ),
       const SizedBox(height: 20),
     ],
   );
@@ -9644,11 +11734,15 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
   Widget _stepAddress() => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      const Text('Location',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+      const Text(
+        'Location',
+        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+      ),
       const SizedBox(height: 4),
-      const Text('Full address — will be used for map integration',
-          style: TextStyle(color: AppTone.muted)),
+      const Text(
+        'Full address — will be used for map integration',
+        style: TextStyle(color: AppTone.muted),
+      ),
       const SizedBox(height: 20),
       _WizardField(
         label: 'House / Road / Area',
@@ -9677,9 +11771,14 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
       Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Division',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
-                  color: AppTone.ink)),
+          const Text(
+            'Division',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppTone.ink,
+            ),
+          ),
           const SizedBox(height: 6),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -9706,7 +11805,8 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
       ),
       const SizedBox(height: 12),
       const _InlineNotice(
-        message: 'Map pin will be added in a future update. Address is saved for now.',
+        message:
+            'Map pin will be added in a future update. Address is saved for now.',
         tone: AppTone.info,
         icon: Icons.info_outline,
       ),
@@ -9719,11 +11819,15 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
   Widget _stepDocuments() => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      const Text('Identity documents',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+      const Text(
+        'Identity documents',
+        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+      ),
       const SizedBox(height: 4),
-      const Text('NID and trade license',
-          style: TextStyle(color: AppTone.muted)),
+      const Text(
+        'NID and trade license',
+        style: TextStyle(color: AppTone.muted),
+      ),
       const SizedBox(height: 20),
       _WizardField(
         label: 'NID number',
@@ -9754,40 +11858,56 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
   Widget _stepPassword() => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      const Text('Set access password',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+      const Text(
+        'Set access password',
+        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+      ),
       const SizedBox(height: 4),
-      const Text('Tell this password to the dealer in person',
-          style: TextStyle(color: AppTone.muted)),
+      const Text(
+        'Tell this password to the dealer in person',
+        style: TextStyle(color: AppTone.muted),
+      ),
       const SizedBox(height: 20),
       _WizardField(
-        label: 'Temporary password', controller: _pwCtrl,
-        hint: 'At least 8 characters', icon: Icons.lock_outline,
+        label: 'Temporary password',
+        controller: _pwCtrl,
+        hint: 'At least 8 characters',
+        icon: Icons.lock_outline,
         obscure: !_showPw,
         suffixIcon: IconButton(
-          icon: Icon(_showPw ? Icons.visibility_off : Icons.visibility,
-              color: AppTone.muted),
+          icon: Icon(
+            _showPw ? Icons.visibility_off : Icons.visibility,
+            color: AppTone.muted,
+          ),
           onPressed: () => setState(() => _showPw = !_showPw),
         ),
       ),
       const SizedBox(height: 12),
       _WizardField(
-        label: 'Confirm password', controller: _pwConfCtrl,
-        hint: 'Repeat password', icon: Icons.lock_outline,
+        label: 'Confirm password',
+        controller: _pwConfCtrl,
+        hint: 'Repeat password',
+        icon: Icons.lock_outline,
         obscure: !_showPwConf,
         suffixIcon: IconButton(
-          icon: Icon(_showPwConf ? Icons.visibility_off : Icons.visibility,
-              color: AppTone.muted),
+          icon: Icon(
+            _showPwConf ? Icons.visibility_off : Icons.visibility,
+            color: AppTone.muted,
+          ),
           onPressed: () => setState(() => _showPwConf = !_showPwConf),
         ),
       ),
       if (_step3Error != null) ...[
         const SizedBox(height: 8),
-        Text(_step3Error!, style: const TextStyle(color: AppTone.danger, fontSize: 13)),
+        Text(
+          _step3Error!,
+          style: const TextStyle(color: AppTone.danger, fontSize: 13),
+        ),
       ],
       const SizedBox(height: 12),
       const _InlineNotice(
-        message: 'The dealer will log in with their email and this password. '
+        message:
+            'The dealer will log in with their email and this password. '
             'They can change it after first login.',
         tone: AppTone.warning,
         icon: Icons.warning_amber_rounded,
@@ -9801,18 +11921,24 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
   Widget _stepReview() => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      const Text('Review & confirm',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+      const Text(
+        'Review & confirm',
+        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+      ),
       const SizedBox(height: 4),
-      const Text('Check everything before creating the account',
-          style: TextStyle(color: AppTone.muted)),
+      const Text(
+        'Check everything before creating the account',
+        style: TextStyle(color: AppTone.muted),
+      ),
       const SizedBox(height: 20),
       Row(
         children: [
           CircleAvatar(
             radius: 30,
             backgroundColor: AppTone.accentLight,
-            backgroundImage: _photo != null ? FileImage(File(_photo!.path)) : null,
+            backgroundImage: _photo != null
+                ? FileImage(File(_photo!.path))
+                : null,
             child: _photo == null
                 ? const Icon(Icons.person, color: AppTone.accent)
                 : null,
@@ -9822,10 +11948,17 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(_nameCtrl.text.trim(),
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-                Text(_emailCtrl.text.trim(),
-                    style: const TextStyle(color: AppTone.muted, fontSize: 13)),
+                Text(
+                  _nameCtrl.text.trim(),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
+                ),
+                Text(
+                  _emailCtrl.text.trim(),
+                  style: const TextStyle(color: AppTone.muted, fontSize: 13),
+                ),
               ],
             ),
           ),
@@ -9838,18 +11971,38 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
           children: [
             _ReviewSection('Identity', [
               _InfoRow('Phone', _phoneCtrl.text.trim()),
-              _InfoRow('NID',   _nidCtrl.text.trim().isEmpty ? '—' : _nidCtrl.text.trim()),
+              _InfoRow(
+                'NID',
+                _nidCtrl.text.trim().isEmpty ? '—' : _nidCtrl.text.trim(),
+              ),
             ]),
             const Divider(height: 24),
             _ReviewSection('Business', [
-              _InfoRow('Shop',     _shopCtrl.text.trim().isEmpty ? '—' : _shopCtrl.text.trim()),
-              _InfoRow('Business', _bizCtrl.text.trim().isEmpty ? '—' : _bizCtrl.text.trim()),
-              _InfoRow('License',  _licenseCtrl.text.trim().isEmpty ? '—' : _licenseCtrl.text.trim()),
+              _InfoRow(
+                'Shop',
+                _shopCtrl.text.trim().isEmpty ? '—' : _shopCtrl.text.trim(),
+              ),
+              _InfoRow(
+                'Business',
+                _bizCtrl.text.trim().isEmpty ? '—' : _bizCtrl.text.trim(),
+              ),
+              _InfoRow(
+                'License',
+                _licenseCtrl.text.trim().isEmpty
+                    ? '—'
+                    : _licenseCtrl.text.trim(),
+              ),
             ]),
             const Divider(height: 24),
             _ReviewSection('Location', [
-              _InfoRow('Area',     _streetCtrl.text.trim().isEmpty ? '—' : _streetCtrl.text.trim()),
-              _InfoRow('Thana',    _thanaCtrl.text.trim().isEmpty ? '—' : _thanaCtrl.text.trim()),
+              _InfoRow(
+                'Area',
+                _streetCtrl.text.trim().isEmpty ? '—' : _streetCtrl.text.trim(),
+              ),
+              _InfoRow(
+                'Thana',
+                _thanaCtrl.text.trim().isEmpty ? '—' : _thanaCtrl.text.trim(),
+              ),
               _InfoRow('District', _district ?? '—'),
               _InfoRow('Division', _division ?? '—'),
             ]),
@@ -9888,11 +12041,20 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
             width: 96,
             height: 96,
             child: Center(
-              child: const Icon(Icons.check_rounded, color: AppTone.brand, size: 44)
-                  .animate(delay: 600.ms)
-                  .scale(begin: const Offset(0, 0), end: const Offset(1, 1),
-                      curve: Curves.elasticOut, duration: 500.ms)
-                  .fadeIn(duration: 200.ms),
+              child:
+                  const Icon(
+                        Icons.check_rounded,
+                        color: AppTone.brand,
+                        size: 44,
+                      )
+                      .animate(delay: 600.ms)
+                      .scale(
+                        begin: const Offset(0, 0),
+                        end: const Offset(1, 1),
+                        curve: Curves.elasticOut,
+                        duration: 500.ms,
+                      )
+                      .fadeIn(duration: 200.ms),
             ),
           ),
         ),
@@ -9919,76 +12081,116 @@ class _CreateDealerWizardState extends State<_CreateDealerWizard> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
       child: switch (_step) {
-        0 => Row(children: [
+        0 => Row(
+          children: [
             const Spacer(),
             FilledButton.icon(
-              onPressed: () { if (_validateStep0()) setState(() => _step = 1); },
+              onPressed: () {
+                if (_validateStep0()) setState(() => _step = 1);
+              },
               icon: const Icon(Icons.arrow_forward),
               label: const Text('Business info'),
             ),
-          ]),
-        1 => Row(children: [
-            TextButton.icon(onPressed: () => setState(() => _step = 0),
-                icon: const Icon(Icons.arrow_back), label: const Text('Back')),
+          ],
+        ),
+        1 => Row(
+          children: [
+            TextButton.icon(
+              onPressed: () => setState(() => _step = 0),
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Back'),
+            ),
             const Spacer(),
             FilledButton.icon(
               onPressed: () => setState(() => _step = 2),
               icon: const Icon(Icons.arrow_forward),
               label: const Text('Location'),
             ),
-          ]),
-        2 => Row(children: [
-            TextButton.icon(onPressed: () => setState(() => _step = 1),
-                icon: const Icon(Icons.arrow_back), label: const Text('Back')),
+          ],
+        ),
+        2 => Row(
+          children: [
+            TextButton.icon(
+              onPressed: () => setState(() => _step = 1),
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Back'),
+            ),
             const Spacer(),
             FilledButton.icon(
               onPressed: () => setState(() => _step = 3),
               icon: const Icon(Icons.arrow_forward),
               label: const Text('Documents'),
             ),
-          ]),
-        3 => Row(children: [
-            TextButton.icon(onPressed: () => setState(() => _step = 2),
-                icon: const Icon(Icons.arrow_back), label: const Text('Back')),
+          ],
+        ),
+        3 => Row(
+          children: [
+            TextButton.icon(
+              onPressed: () => setState(() => _step = 2),
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Back'),
+            ),
             const Spacer(),
             FilledButton.icon(
               onPressed: () => setState(() => _step = 4),
               icon: const Icon(Icons.arrow_forward),
               label: const Text('Set password'),
             ),
-          ]),
-        4 => Row(children: [
-            TextButton.icon(onPressed: () => setState(() => _step = 3),
-                icon: const Icon(Icons.arrow_back), label: const Text('Back')),
+          ],
+        ),
+        4 => Row(
+          children: [
+            TextButton.icon(
+              onPressed: () => setState(() => _step = 3),
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Back'),
+            ),
             const Spacer(),
             FilledButton.icon(
-              onPressed: () { if (_validateStep3()) setState(() => _step = 5); },
+              onPressed: () {
+                if (_validateStep3()) setState(() => _step = 5);
+              },
               icon: const Icon(Icons.arrow_forward),
               label: const Text('Review'),
             ),
-          ]),
-        5 => Row(children: [
+          ],
+        ),
+        5 => Row(
+          children: [
             TextButton.icon(
-              onPressed: _busy ? null : () => setState(() { _step = 4; _error = null; }),
-              icon: const Icon(Icons.arrow_back), label: const Text('Back'),
+              onPressed: _busy
+                  ? null
+                  : () => setState(() {
+                      _step = 4;
+                      _error = null;
+                    }),
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Back'),
             ),
             const Spacer(),
             FilledButton.icon(
               onPressed: _busy ? null : _submit,
               icon: _busy
-                  ? const SizedBox(width: 16, height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
                   : const Icon(Icons.person_add),
               label: Text(_busy ? 'Creating…' : 'Create dealer'),
             ),
-          ]),
+          ],
+        ),
         _ => SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Done'),
-            ),
+          width: double.infinity,
+          child: FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Done'),
           ),
+        ),
       },
     );
   }
@@ -10085,8 +12287,11 @@ class _WizardFieldState extends State<_WizardField> {
             ),
             decoration: InputDecoration(
               hintText: widget.hint,
-              prefixIcon: Icon(widget.icon, size: 20,
-                  color: _focused ? AppTone.accent : AppTone.muted),
+              prefixIcon: Icon(
+                widget.icon,
+                size: 20,
+                color: _focused ? AppTone.accent : AppTone.muted,
+              ),
               suffixIcon: widget.suffixIcon,
               filled: true,
               fillColor: _focused ? AppTone.accentLight : AppTone.surface,
@@ -10102,8 +12307,10 @@ class _WizardFieldState extends State<_WizardField> {
                 borderRadius: BorderRadius.circular(14),
                 borderSide: const BorderSide(color: AppTone.accent, width: 2),
               ),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 15,
+              ),
             ),
           ),
         ),
@@ -10122,9 +12329,14 @@ class _DistrictDropdown extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('District',
-            style: TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w600, color: AppTone.ink)),
+        const Text(
+          'District',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: AppTone.ink,
+          ),
+        ),
         const SizedBox(height: 6),
         DropdownButtonFormField<String>(
           value: value,
@@ -10134,17 +12346,21 @@ class _DistrictDropdown extends StatelessWidget {
             filled: true,
             fillColor: AppTone.surface,
             border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppTone.line)),
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppTone.line),
+            ),
             enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppTone.line)),
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppTone.line),
+            ),
             focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide:
-                    const BorderSide(color: AppTone.accent, width: 1.5)),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppTone.accent, width: 1.5),
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 14,
+            ),
           ),
           items: (_districtDivision.keys.toList()..sort())
               .map((d) => DropdownMenuItem(value: d, child: Text(d)))
@@ -10166,12 +12382,15 @@ class _ReviewSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title,
-            style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: AppTone.muted,
-                letterSpacing: 0.5)),
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: AppTone.muted,
+            letterSpacing: 0.5,
+          ),
+        ),
         const SizedBox(height: 8),
         ...rows,
       ],
@@ -10191,8 +12410,10 @@ class DataPage<T> extends StatefulWidget {
   final String title;
   final Future<T> Function() loader;
   final Widget Function(BuildContext, T, Future<void> Function()) builder;
+
   /// When provided, a successful load syncs device/key data to LocalVault.
   final String? dealerId;
+
   /// SSE event types that should trigger an automatic reload.
   final List<String> sseEvents;
 
@@ -10227,7 +12448,9 @@ class _DataPageState<T> extends State<DataPage<T>> {
   // Manual pull-to-refresh — shows loading spinner
   Future<void> reload() async {
     final next = widget.loader();
-    setState(() { future = next; });
+    setState(() {
+      future = next;
+    });
     await next;
   }
 
@@ -10236,7 +12459,11 @@ class _DataPageState<T> extends State<DataPage<T>> {
     final next = widget.loader();
     try {
       final result = await next;
-      if (mounted) setState(() { _lastData = result; future = Future.value(result); });
+      if (mounted)
+        setState(() {
+          _lastData = result;
+          future = Future.value(result);
+        });
     } catch (_) {
       // silently ignore — current data stays shown
     }
@@ -10283,13 +12510,11 @@ class _DataPageState<T> extends State<DataPage<T>> {
                 };
                 return Stack(
                   children: [
-                    widget.builder(
-                      context,
-                      syntheticData as T,
-                      reload,
-                    ),
+                    widget.builder(context, syntheticData as T, reload),
                     const Positioned(
-                      top: 0, left: 0, right: 0,
+                      top: 0,
+                      left: 0,
+                      right: 0,
                       child: _OfflineBanner(),
                     ),
                   ],
@@ -10343,28 +12568,31 @@ class _OfflineBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.transparent,
-      child: Container(
-        color: AppTone.warning.withValues(alpha: 0.92),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Row(
-          children: const [
-            Icon(Icons.cloud_off_outlined, color: Colors.white, size: 16),
-            SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Viewing cached data — changes require connectivity.',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12,
+          color: Colors.transparent,
+          child: Container(
+            color: AppTone.warning.withValues(alpha: 0.92),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: const [
+                Icon(Icons.cloud_off_outlined, color: Colors.white, size: 16),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Viewing cached data — changes require connectivity.',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
-          ],
-        ),
-      ),
-    ).animate().fadeIn(duration: _fast).slideY(begin: -0.5, end: 0, duration: _fast);
+          ),
+        )
+        .animate()
+        .fadeIn(duration: _fast)
+        .slideY(begin: -0.5, end: 0, duration: _fast);
   }
 }
 
@@ -10395,12 +12623,13 @@ class _PageState extends State<Page> with SingleTickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _radarAnim = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1400),
-    )..addListener(() {
-      if (mounted) setState(() {});
-    });
+    _radarAnim =
+        AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 1400),
+        )..addListener(() {
+          if (mounted) setState(() {});
+        });
   }
 
   @override
@@ -10412,22 +12641,31 @@ class _PageState extends State<Page> with SingleTickerProviderStateMixin {
   Future<void> _onRefresh() async {
     if (_refreshing || widget.reload == null) return;
     setState(() => _refreshing = true);
+    _radarAnim.value = 0;
     _radarAnim.repeat();
     try {
       await widget.reload!();
     } finally {
       _radarAnim.stop();
       _radarAnim.reset();
-      if (mounted) setState(() { _refreshing = false; _pullOffset = 0; });
+      if (mounted)
+        setState(() {
+          _refreshing = false;
+          _pullOffset = 0;
+        });
     }
   }
 
   bool _handleScroll(ScrollNotification n) {
     if (widget.reload == null || _refreshing) return false;
-    if (n is OverscrollNotification && n.metrics.extentBefore < 1.0 && n.overscroll < 0) {
+    if (n is OverscrollNotification &&
+        n.metrics.extentBefore < 1.0 &&
+        n.overscroll < 0) {
       final next = (_pullOffset + (-n.overscroll) * 0.55).clamp(0.0, 110.0);
       if (next != _pullOffset) setState(() => _pullOffset = next);
-    } else if (n is ScrollUpdateNotification && (n.scrollDelta ?? 0) > 0 && _pullOffset > 0) {
+    } else if (n is ScrollUpdateNotification &&
+        (n.scrollDelta ?? 0) > 0 &&
+        _pullOffset > 0) {
       // Only setState when we're actually collapsing the pull indicator —
       // never during normal scroll (avoids re-triggering .animate() on children).
       final next = (_pullOffset - n.scrollDelta! * 0.5).clamp(0.0, 110.0);
@@ -10463,32 +12701,33 @@ class _PageState extends State<Page> with SingleTickerProviderStateMixin {
     ];
 
     final scrollable = LayoutBuilder(
-      builder: (context, constraints) => NotificationListener<ScrollNotification>(
-        onNotification: _handleScroll,
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: EdgeInsets.fromLTRB(
-            constraints.maxWidth > 980 ? 28 : 16,
-            max(
-              constraints.maxWidth < 600 ? 72.0 : 18.0,
-              _refreshing ? 94.0 : _pullOffset.clamp(0.0, 94.0),
-            ),
-            constraints.maxWidth > 980 ? 28 : 16,
-            24,
-          ),
-          children: [
-            Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 1180),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: pageChildren,
+      builder: (context, constraints) =>
+          NotificationListener<ScrollNotification>(
+            onNotification: _handleScroll,
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: EdgeInsets.fromLTRB(
+                constraints.maxWidth > 980 ? 28 : 16,
+                max(
+                  constraints.maxWidth < 600 ? 72.0 : 18.0,
+                  _refreshing ? 94.0 : _pullOffset.clamp(0.0, 94.0),
                 ),
+                constraints.maxWidth > 980 ? 28 : 16,
+                24,
               ),
+              children: [
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1180),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: pageChildren,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
     );
 
     if (widget.reload == null) return scrollable;
@@ -10497,19 +12736,22 @@ class _PageState extends State<Page> with SingleTickerProviderStateMixin {
       children: [
         scrollable,
         Positioned(
-          top: 0, left: 0, right: 0,
-          child: _RadarPullIndicator(
-            pullProgress: (_pullOffset / 80.0).clamp(0.0, 1.0),
-            refreshing: _refreshing,
+          top: 0,
+          left: 0,
+          right: 0,
+          child: AnimatedBuilder(
             animation: _radarAnim,
+            builder: (_, __) => _RadarPullIndicator(
+              pullProgress: (_pullOffset / 80.0).clamp(0.0, 1.0),
+              refreshing: _refreshing,
+              animation: _radarAnim,
+            ),
           ),
         ),
       ],
     );
   }
 }
-
-
 
 // ─── Radar pull-to-refresh ─────────────────────────────────────────────────
 
@@ -10531,9 +12773,13 @@ class _RadarPainter extends CustomPainter {
     final r = size.width / 2;
 
     // Dark fill
-    canvas.drawCircle(c, r, Paint()
-      ..color = const Color(0xFF0A1628)
-      ..style = PaintingStyle.fill);
+    canvas.drawCircle(
+      c,
+      r,
+      Paint()
+        ..color = const Color(0xFF0A1628)
+        ..style = PaintingStyle.fill,
+    );
 
     // Concentric grid rings
     final ringP = Paint()
@@ -10586,10 +12832,14 @@ class _RadarPainter extends CustomPainter {
     canvas.drawCircle(c, 2.5, Paint()..color = _brand);
 
     // Outer ring border
-    canvas.drawCircle(c, r - 0.5, Paint()
-      ..color = _brand.withValues(alpha: 0.25)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2);
+    canvas.drawCircle(
+      c,
+      r - 0.5,
+      Paint()
+        ..color = _brand.withValues(alpha: 0.25)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2,
+    );
   }
 
   @override
@@ -10659,28 +12909,43 @@ class _PulsingRingsPainter extends CustomPainter {
       final phase = (t + i * 0.2) % 1.0;
       final r = maxR * (0.15 + phase * 0.85);
       final opacity = (1 - phase) * (1 - phase) * 0.38;
-      canvas.drawCircle(c, r, Paint()
-        ..color = _brand.withValues(alpha: opacity)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.0 + (1 - phase) * 1.2);
+      canvas.drawCircle(
+        c,
+        r,
+        Paint()
+          ..color = _brand.withValues(alpha: opacity)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.0 + (1 - phase) * 1.2,
+      );
     }
 
     // Inner glow
-    canvas.drawCircle(c, maxR * 0.28, Paint()
-      ..shader = RadialGradient(
-        colors: [
-          _brand.withValues(alpha: 0.22),
-          _brand.withValues(alpha: 0.0),
-        ],
-      ).createShader(Rect.fromCircle(center: c, radius: maxR * 0.28)));
+    canvas.drawCircle(
+      c,
+      maxR * 0.28,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            _brand.withValues(alpha: 0.22),
+            _brand.withValues(alpha: 0.0),
+          ],
+        ).createShader(Rect.fromCircle(center: c, radius: maxR * 0.28)),
+    );
 
     // Center circle (hosts icon)
-    canvas.drawCircle(c, maxR * 0.13, Paint()
-      ..color = _brand.withValues(alpha: 0.13));
-    canvas.drawCircle(c, maxR * 0.13, Paint()
-      ..color = _brand.withValues(alpha: 0.55)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5);
+    canvas.drawCircle(
+      c,
+      maxR * 0.13,
+      Paint()..color = _brand.withValues(alpha: 0.13),
+    );
+    canvas.drawCircle(
+      c,
+      maxR * 0.13,
+      Paint()
+        ..color = _brand.withValues(alpha: 0.55)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
   }
 
   @override
@@ -11271,6 +13536,7 @@ class _InfoTile extends StatefulWidget {
     required this.color,
     required this.title,
     required this.subtitle,
+    this.leading,
     this.trailing,
     this.onTap,
   });
@@ -11278,6 +13544,7 @@ class _InfoTile extends StatefulWidget {
   final Color color;
   final String title;
   final String subtitle;
+  final Widget? leading;
   final Widget? trailing;
   final VoidCallback? onTap;
 
@@ -11312,15 +13579,16 @@ class _InfoTileState extends State<_InfoTile> {
             ),
             child: Row(
               children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: widget.color.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Icon(widget.icon, color: widget.color),
-                ),
+                widget.leading ??
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: widget.color.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(widget.icon, color: widget.color),
+                    ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -11377,13 +13645,13 @@ class StatusPill extends StatelessWidget {
         children: [
           if (_isActive) ...[
             Container(
-              width: 6,
-              height: 6,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: color,
-              ),
-            )
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: color,
+                  ),
+                )
                 .animate(onPlay: (c) => c.repeat(reverse: false))
                 .scale(
                   begin: const Offset(1, 1),
@@ -11713,6 +13981,23 @@ class _InlineNotice extends StatelessWidget {
   }
 }
 
+class _AppSplashLoader extends StatelessWidget {
+  const _AppSplashLoader();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: AppTone.page,
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [LockyMascot(size: 140, label: 'Loading…')],
+        ),
+      ),
+    );
+  }
+}
+
 class _LoadingPage extends StatelessWidget {
   const _LoadingPage({required this.title});
   final String title;
@@ -11790,13 +14075,13 @@ class SkeletonBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: width == double.infinity ? null : width,
-      height: height,
-      decoration: BoxDecoration(
-        color: AppTone.line,
-        borderRadius: BorderRadius.circular(8),
-      ),
-    )
+          width: width == double.infinity ? null : width,
+          height: height,
+          decoration: BoxDecoration(
+            color: AppTone.line,
+            borderRadius: BorderRadius.circular(8),
+          ),
+        )
         .animate(onPlay: (controller) => controller.repeat(reverse: true))
         .fade(begin: 0.45, end: 1, duration: 720.ms);
   }
@@ -12203,9 +14488,7 @@ class _FraudCenterEntryState extends State<_FraudCenterEntry> {
       final res = await widget.api.get('/api/v1/alerts');
       final data = asMap(res.data);
       final list = (data['alerts'] as List? ?? []).map(asMap).toList();
-      final open = list
-          .where((a) => text(a['status']) != 'resolved')
-          .length;
+      final open = list.where((a) => text(a['status']) != 'resolved').length;
       if (mounted) setState(() => _openCount = open);
     } catch (_) {}
   }
@@ -12225,9 +14508,10 @@ class _FraudCenterEntryState extends State<_FraudCenterEntry> {
             child: Text(
               '$_openCount open',
               style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700),
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         Expanded(
@@ -12248,6 +14532,110 @@ class _FraudCenterEntryState extends State<_FraudCenterEntry> {
 }
 
 // ── Google Drive status tile for SettingsPage ─────────────────────────────────
+
+class _GoogleAuthStatusTile extends StatefulWidget {
+  const _GoogleAuthStatusTile({required this.api});
+
+  final ApiClient api;
+
+  @override
+  State<_GoogleAuthStatusTile> createState() => _GoogleAuthStatusTileState();
+}
+
+class _GoogleAuthStatusTileState extends State<_GoogleAuthStatusTile> {
+  bool _loading = true;
+  bool _busy = false;
+  bool _bound = false;
+  String _email = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final res = await widget.api.get('/api/v1/auth/google/status');
+      final data = asMap(res.data);
+      if (!mounted) return;
+      setState(() {
+        _bound = data['bound'] == true;
+        _email = text(data['google_email']);
+      });
+    } catch (e) {
+      if (mounted) snack(context, readableError(e));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _bind() async {
+    setState(() => _busy = true);
+    try {
+      final identity = await DealerGoogleAuth.signInForIdToken();
+      if (identity == null) return;
+      final res = await widget.api.post(
+        '/api/v1/auth/google/bind',
+        data: {'idToken': identity.idToken},
+      );
+      final data = asMap(res.data);
+      if (!mounted) return;
+      setState(() {
+        _bound = data['bound'] == true;
+        _email = text(data['google_email'], fallback: identity.email);
+      });
+      snack(context, 'Google account connected.');
+    } catch (e) {
+      if (mounted) snack(context, readableError(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(Icons.account_circle_outlined, color: AppTone.muted),
+        title: Text(
+          'Google account',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        subtitle: Text('Checking connection...'),
+      );
+    }
+
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(
+        _bound ? Icons.account_circle : Icons.account_circle_outlined,
+        color: _bound ? AppTone.brand : AppTone.muted,
+      ),
+      title: const Text(
+        'Google account',
+        style: TextStyle(fontWeight: FontWeight.w700),
+      ),
+      subtitle: Text(
+        _bound
+            ? 'Connected to $_email. New phones still need email verification.'
+            : 'Connect Google for login and recovery. New phones still need email verification.',
+      ),
+      trailing: TextButton(
+        onPressed: _busy ? null : _bind,
+        child: _busy
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Text(_bound ? 'Change' : 'Connect'),
+      ),
+    );
+  }
+}
 
 class _GoogleDriveStatusTile extends StatefulWidget {
   const _GoogleDriveStatusTile();
@@ -12271,7 +14659,12 @@ class _GoogleDriveStatusTileState extends State<_GoogleDriveStatusTile> {
   Future<void> _check() async {
     final bound = await GoogleVault.isBound();
     final email = await GoogleVault.boundEmail() ?? '';
-    if (mounted) setState(() { _isBound = bound; _email = email; _loading = false; });
+    if (mounted)
+      setState(() {
+        _isBound = bound;
+        _email = email;
+        _loading = false;
+      });
   }
 
   Future<void> _syncNow() async {
@@ -12306,14 +14699,21 @@ class _GoogleDriveStatusTileState extends State<_GoogleDriveStatusTile> {
         Expanded(
           child: Text(
             _isBound ? _email : 'Not connected',
-            style: TextStyle(color: _isBound ? AppTone.ink : AppTone.muted, fontSize: 13),
+            style: TextStyle(
+              color: _isBound ? AppTone.ink : AppTone.muted,
+              fontSize: 13,
+            ),
             overflow: TextOverflow.ellipsis,
           ),
         ),
         if (_isBound)
           IconButton(
             icon: _syncing
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                 : const Icon(Icons.sync_rounded, size: 18),
             tooltip: 'Sync now',
             onPressed: _syncing ? null : _syncNow,
@@ -12322,7 +14722,9 @@ class _GoogleDriveStatusTileState extends State<_GoogleDriveStatusTile> {
         TextButton(
           onPressed: () => Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => const GoogleDriveOnboardingScreen()),
+            MaterialPageRoute(
+              builder: (_) => const GoogleDriveOnboardingScreen(),
+            ),
           ).then((_) => _check()),
           child: const Text('Configure'),
         ),

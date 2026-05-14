@@ -2,6 +2,7 @@
  * Global Error Handler Middleware
  */
 const logger = require('../utils/logger');
+const errorStore = require('../utils/errorStore');
 
 function buildErrorResponse(statusCode, code, message) {
   return {
@@ -15,6 +16,7 @@ function sendError(res, statusCode, code, message) {
   return res.status(statusCode).json(buildErrorResponse(statusCode, code, message));
 }
 
+// eslint-disable-next-line no-unused-vars
 const errorHandler = (err, req, res, next) => {
   // 1. Log full error for internal tracking
   logger.error({
@@ -25,10 +27,18 @@ const errorHandler = (err, req, res, next) => {
     user: req.user ? req.user.id : 'anonymous'
   });
 
-  // 2. Handle specific error types
-  
+  // 2. Push to in-memory error store (admin panel + dev monitoring)
+  errorStore.push(err, {
+    method: req.method,
+    path: req.path,
+    userId: req.user ? req.user.id : null
+  });
+
+  // 3. Handle specific error types
+
   // PostgreSQL errors
-  if (err.code === '23505') { // Unique violation
+  if (err.code === '23505') {
+    // Unique violation
     return sendError(res, 409, 'CONFLICT', 'A resource with this identifier already exists.');
   }
 
@@ -46,14 +56,14 @@ const errorHandler = (err, req, res, next) => {
     return sendError(res, 400, 'VALIDATION_ERROR', err.message);
   }
 
-  // 3. Default to 500 Internal Server Error
+  // 4. Default to 500 Internal Server Error
   const isProduction = process.env.NODE_ENV === 'production';
   const statusCode = err.status || err.statusCode || 500;
-  
+
   const response = buildErrorResponse(
     statusCode,
-    statusCode === 500 ? 'INTERNAL_SERVER_ERROR' : (err.name || 'ERROR'),
-    (isProduction && statusCode === 500) ? 'An unexpected error occurred.' : err.message
+    statusCode === 500 ? 'INTERNAL_SERVER_ERROR' : err.name || 'ERROR',
+    isProduction && statusCode === 500 ? 'An unexpected error occurred.' : err.message
   );
 
   // Never expose stack trace to client

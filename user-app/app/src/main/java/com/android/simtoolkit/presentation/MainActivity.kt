@@ -11,6 +11,9 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.android.simtoolkit.R
@@ -21,6 +24,8 @@ import com.android.simtoolkit.data.remote.api.ApiService
 import com.android.simtoolkit.data.remote.dto.EmiScheduleDto
 import com.android.simtoolkit.databinding.ActivityMainBinding
 import com.android.simtoolkit.device.LockStateManager
+import com.android.simtoolkit.health.PermissionHealthSnapshot
+import com.android.simtoolkit.health.PermissionHealthReporter
 import com.android.simtoolkit.model.LockState
 import com.android.simtoolkit.service.DeviceRegistrationService
 import com.android.simtoolkit.presentation.screens.dashboard.DashboardUiState
@@ -68,15 +73,28 @@ class MainActivity : AppCompatActivity() {
     @Inject
     lateinit var emiScheduleDao: EmiScheduleDao
 
+    @Inject
+    lateinit var permissionHealthReporter: PermissionHealthReporter
+
     private lateinit var paymentAdapter: PaymentHistoryAdapter
     private lateinit var notificationAdapter: NotificationHistoryAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        applySystemBarInsets()
 
         checkAuthAndProceed()
+    }
+
+    private fun applySystemBarInsets() {
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(0, systemBars.top, 0, systemBars.bottom)
+            insets
+        }
     }
 
     private fun checkAuthAndProceed() {
@@ -101,6 +119,8 @@ class MainActivity : AppCompatActivity() {
 
         startEmiLockerService()
         requestSmsPermissionIfNeeded()
+        updatePermissionHealthCard()
+        reportPermissionHealth("dashboard_start")
         refreshFcmRegistration()
         refreshDeviceSecrets()
         refreshEmiSchedule()
@@ -211,10 +231,52 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        reportPermissionHealth("dashboard_resume")
+        if (::binding.isInitialized) updatePermissionHealthCard()
         if (::paymentAdapter.isInitialized) {
             enforceLockState()
             viewModel.refresh()
         }
+    }
+
+    private fun reportPermissionHealth(source: String) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            permissionHealthReporter.reportIfChanged(source)
+        }
+    }
+
+    private fun updatePermissionHealthCard() {
+        val snapshot = permissionHealthReporter.currentSnapshot()
+        val missing = snapshot.degradedReasons()
+        val healthy = missing.isEmpty()
+        binding.tvPermissionHealthTitle.text = if (healthy) {
+            "Protection permissions: Healthy"
+        } else {
+            "Protection permissions: Needs attention"
+        }
+        binding.tvPermissionHealthSummary.text = if (healthy) {
+            "All required protection permissions are active"
+        } else {
+            "${missing.size} protection item(s) need repair"
+        }
+        binding.tvPermissionHealthTitle.setTextColor(
+            getColor(if (healthy) R.color.green else R.color.error)
+        )
+        binding.tvPermissionHealthDetails.text = formatPermissionSnapshot(snapshot)
+    }
+
+    private fun formatPermissionSnapshot(snapshot: PermissionHealthSnapshot): String {
+        fun mark(ok: Boolean, label: String): String = "${if (ok) "OK" else "MISSING"} - $label"
+        return listOf(
+            mark(snapshot.overlay, "Overlay lock screen"),
+            mark(snapshot.fineLocation || snapshot.coarseLocation, "Location"),
+            mark(snapshot.backgroundLocation, "Background location"),
+            mark(snapshot.receiveSms, "SMS offline unlock"),
+            mark(snapshot.notifications, "Notifications"),
+            mark(snapshot.deviceAdmin, "Device admin"),
+            mark(snapshot.deviceOwner, "Device owner"),
+            mark(snapshot.batteryUnrestricted, "Battery/background access")
+        ).joinToString("\n")
     }
 
     private fun setupRecyclerViews() {

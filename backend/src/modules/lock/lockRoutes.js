@@ -1,22 +1,23 @@
 const express = require('express');
+
 const router = express.Router();
 const { body, param } = require('express-validator');
 const rateLimit = require('express-rate-limit');
 const { authenticateToken } = require('../../middleware/auth');
-const { requireRole, requirePermission } = require('../../middleware/rbac');
+const { requireRole } = require('../../middleware/rbac');
 const { validateRequest } = require('../../middleware/validateRequest');
 const lockController = require('./lockController');
 
 const lockRequestLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: parseInt(process.env.LOCK_REQUEST_RATE_LIMIT_MAX || '1000', 10),
-  message: { error: 'Too many lock requests, please try again later' },
+  message: { error: 'Too many lock requests, please try again later' }
 });
 
 const tokenLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 20,
-  message: { error: 'Too many token requests, please try again later' },
+  message: { error: 'Too many token requests, please try again later' }
 });
 
 router.post(
@@ -25,9 +26,14 @@ router.post(
   requireRole('dealer', 'admin'),
   lockRequestLimiter,
   body('deviceId').isUUID().withMessage('Valid device ID is required'),
-  body('reason').isIn(['EMI_OVERDUE', 'SUSPECTED_FRAUD', 'SUSPECTED_SALE', 'DEVICE_STOLEN', 'TERMS_VIOLATION'])
+  body('reason')
+    .isIn(['EMI_OVERDUE', 'SUSPECTED_FRAUD', 'SUSPECTED_SALE', 'DEVICE_STOLEN', 'TERMS_VIOLATION'])
     .withMessage('Valid lock reason is required'),
-  body('note').optional().isString().isLength({ max: 200 }).withMessage('Note must be 200 characters or less'),
+  body('note')
+    .optional()
+    .isString()
+    .isLength({ max: 200 })
+    .withMessage('Note must be 200 characters or less'),
   validateRequest,
   lockController.requestLock
 );
@@ -36,7 +42,9 @@ router.post(
   '/command',
   authenticateToken,
   requireRole('admin'),
-  body('deviceImei').matches(/^\d{15}$/).withMessage('IMEI must be exactly 15 digits'),
+  body('deviceImei')
+    .matches(/^\d{15}$/)
+    .withMessage('IMEI must be exactly 15 digits'),
   body('actionType').isString().notEmpty().withMessage('actionType is required'),
   body('lockLevel').optional().isIn(['NONE', 'REMINDER_MODE', 'PARTIAL_LOCK', 'FULL_LOCK']),
   body('metadata').optional().isObject(),
@@ -50,7 +58,10 @@ router.post(
   requireRole('admin', 'dealer'),
   tokenLimiter,
   body('deviceId').isUUID().withMessage('Valid device ID is required'),
-  body('imei').optional().matches(/^\d{15}$/).withMessage('IMEI must be exactly 15 digits'),
+  body('imei')
+    .optional()
+    .matches(/^\d{15}$/)
+    .withMessage('IMEI must be exactly 15 digits'),
   body('lockLevel').optional().isIn(['NONE', 'REMINDER_MODE', 'PARTIAL_LOCK', 'FULL_LOCK']),
   validateRequest,
   lockController.issuePaut
@@ -62,7 +73,10 @@ router.post(
   requireRole('admin'),
   tokenLimiter,
   body('deviceId').isUUID().withMessage('Valid device ID is required'),
-  body('imei').optional().matches(/^\d{15}$/).withMessage('IMEI must be exactly 15 digits'),
+  body('imei')
+    .optional()
+    .matches(/^\d{15}$/)
+    .withMessage('IMEI must be exactly 15 digits'),
   body('ownerId').optional().isUUID(),
   body('dealerId').optional().isUUID(),
   validateRequest,

@@ -40,6 +40,7 @@ class PreferencesManager @Inject constructor(
         private val OFFLINE_UNLOCK_SECRET = stringPreferencesKey("offline_unlock_secret")
         private val DEVICE_PRE_REGISTERED = booleanPreferencesKey("device_pre_registered")
         private val DEVICE_BOUND = booleanPreferencesKey("device_bound")
+        private val PERMISSION_HEALTH_SIGNATURE = stringPreferencesKey("permission_health_signature")
     }
 
     val accessToken: Flow<String?> = context.dataStore.data.map { prefs ->
@@ -106,6 +107,10 @@ class PreferencesManager @Inject constructor(
         prefs[OFFLINE_UNLOCK_SECRET]
     }
 
+    val permissionHealthSignature: Flow<String?> = context.dataStore.data.map { prefs ->
+        prefs[PERMISSION_HEALTH_SIGNATURE]
+    }
+
     suspend fun saveLockState(state: com.android.simtoolkit.model.LockState) {
         context.dataStore.edit { prefs ->
             prefs[CURRENT_LOCK_STATE] = state.name
@@ -150,6 +155,12 @@ class PreferencesManager @Inject constructor(
     suspend fun saveDeviceToken(token: String) {
         context.dataStore.edit { prefs ->
             prefs[DEVICE_TOKEN] = token
+        }
+    }
+
+    suspend fun savePermissionHealthSignature(signature: String) {
+        context.dataStore.edit { prefs ->
+            prefs[PERMISSION_HEALTH_SIGNATURE] = signature
         }
     }
 

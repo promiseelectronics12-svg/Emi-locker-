@@ -21,6 +21,8 @@ void openEventSource({
     'enrollment_complete',
     'device_locked',
     'device_unlocked',
+    'device_decoupled',
+    'device_decoupling_requested',
     'grace_expired',
     'new_alert',
   ];

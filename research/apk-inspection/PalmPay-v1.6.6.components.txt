@@ -1,0 +1,1 @@
+launchable-activity: name='com.transsnet.palmpay.ui.activity.SplashActivity'  label='' icon=''

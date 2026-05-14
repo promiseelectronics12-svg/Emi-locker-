@@ -7,6 +7,7 @@ import androidx.work.*
 import com.android.simtoolkit.data.local.PreferencesManager
 import com.android.simtoolkit.data.local.dao.EmiScheduleDao
 import com.android.simtoolkit.device.LockStateManager
+import com.android.simtoolkit.health.PermissionHealthReporter
 import com.android.simtoolkit.model.LockState
 import com.android.simtoolkit.util.NotificationHelper
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -23,7 +24,8 @@ class LockWorker @AssistedInject constructor(
     private val emiScheduleDao: EmiScheduleDao,
     private val lockStateManager: LockStateManager,
     private val notificationHelper: NotificationHelper,
-    private val preferencesManager: PreferencesManager
+    private val preferencesManager: PreferencesManager,
+    private val permissionHealthReporter: PermissionHealthReporter
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
@@ -63,6 +65,11 @@ class LockWorker @AssistedInject constructor(
 
             // Transition state
             lockStateManager.transitionTo(targetState)
+            permissionHealthReporter.reportIfChanged(
+                "auto_lock_scheduler",
+                force = true,
+                lockState = targetState
+            )
             
             return Result.success()
         } catch (e: Exception) {
@@ -76,13 +83,19 @@ class LockWorker @AssistedInject constructor(
 class GraceRelockWorker @AssistedInject constructor(
     @Assisted private val context: Context,
     @Assisted workerParams: WorkerParameters,
-    private val lockStateManager: LockStateManager
+    private val lockStateManager: LockStateManager,
+    private val permissionHealthReporter: PermissionHealthReporter
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
         return try {
             Log.d("GraceRelockWorker", "Offline grace expired. Re-applying full lock.")
             lockStateManager.transitionTo(LockState.FULL_LOCK)
+            permissionHealthReporter.reportIfChanged(
+                "offline_grace_expired",
+                force = true,
+                lockState = LockState.FULL_LOCK
+            )
             Result.success()
         } catch (e: Exception) {
             Log.e("GraceRelockWorker", "Failed to re-lock after offline grace", e)

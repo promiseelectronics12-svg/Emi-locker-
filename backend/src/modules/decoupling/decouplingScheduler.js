@@ -2,6 +2,7 @@ const Queue = require('bull');
 const cron = require('node-cron');
 const logger = require('../../utils/logger');
 const { createClient } = require('../../config/redis');
+const db = require('../../config/database');
 
 // Bull createClient factory — all internal ioredis connections get error handlers
 const bullCreateClient = (type) => {
@@ -24,13 +25,14 @@ let cronFallbackActive = false;
 
 function getFraudWindowQueue() {
   if (!fraudWindowQueue) {
-    fraudWindowQueue = new Queue('decoupling-fraud-window', { createClient: bullCreateClient,
+    fraudWindowQueue = new Queue('decoupling-fraud-window', {
+      createClient: bullCreateClient,
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: 'exponential', delay: 60000 },
         removeOnComplete: 100,
-        removeOnFail: 50,
-      },
+        removeOnFail: 50
+      }
     });
 
     fraudWindowQueue.on('error', (err) => {
@@ -46,13 +48,14 @@ function getFraudWindowQueue() {
 
 function getAdminNotifyQueue() {
   if (!adminNotifyQueue) {
-    adminNotifyQueue = new Queue('decoupling-admin-notify', { createClient: bullCreateClient,
+    adminNotifyQueue = new Queue('decoupling-admin-notify', {
+      createClient: bullCreateClient,
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: 'exponential', delay: 60000 },
         removeOnComplete: 100,
-        removeOnFail: 50,
-      },
+        removeOnFail: 50
+      }
     });
 
     adminNotifyQueue.on('error', (err) => {
@@ -68,13 +71,14 @@ function getAdminNotifyQueue() {
 
 function getAMAPIRetryQueue() {
   if (!amapiRetryQueue) {
-    amapiRetryQueue = new Queue('decoupling-amapi-retry', { createClient: bullCreateClient,
+    amapiRetryQueue = new Queue('decoupling-amapi-retry', {
+      createClient: bullCreateClient,
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: 'exponential', delay: 60000 },
         removeOnComplete: 100,
-        removeOnFail: 50,
-      },
+        removeOnFail: 50
+      }
     });
 
     amapiRetryQueue.on('error', (err) => {
@@ -100,14 +104,14 @@ async function scheduleFraudWindowCheck(deviceId) {
     { deviceId },
     {
       delay: FRAUD_WINDOW_MS,
-      jobId: `fraud-window-${deviceId}`,
+      jobId: `fraud-window-${deviceId}`
     }
   );
 
   logger.info(`Fraud window check scheduled for device ${deviceId}`, {
     jobId: job.id,
     delay: FRAUD_WINDOW_MS,
-    expiresAt: new Date(Date.now() + FRAUD_WINDOW_MS).toISOString(),
+    expiresAt: new Date(Date.now() + FRAUD_WINDOW_MS).toISOString()
   });
 
   return job;
@@ -125,14 +129,14 @@ async function scheduleAdminNotification(deviceId) {
     { deviceId },
     {
       delay: FRAUD_WINDOW_MS,
-      jobId: `admin-notify-${deviceId}`,
+      jobId: `admin-notify-${deviceId}`
     }
   );
 
   logger.info(`Admin notification scheduled for device ${deviceId}`, {
     jobId: job.id,
     delay: FRAUD_WINDOW_MS,
-    notifyAt: new Date(Date.now() + FRAUD_WINDOW_MS).toISOString(),
+    notifyAt: new Date(Date.now() + FRAUD_WINDOW_MS).toISOString()
   });
 
   return job;
@@ -204,34 +208,39 @@ function startCronFallback(fraudWindowHandler, adminNotifyHandler) {
   if (cronFallbackActive) return;
 
   // Every 15 minutes — check for expired fraud windows
-  cron.schedule('*/15 * * * *', async () => {
-    try {
-      const db = require('../../config/database');
-      const { DECOUPLING_STATES } = require('./decouplingModel');
+  cron.schedule(
+    '*/15 * * * *',
+    async () => {
+      try {
+        const { DECOUPLING_STATES } = require('./decouplingModel');
 
-      // Find devices where fraud window expired but state didn't transition
-      const expired = await db.query(
-        `SELECT d.device_id
+        // Find devices where fraud window expired but state didn't transition
+        const expired = await db.query(
+          `SELECT d.device_id
          FROM decoupling d
          WHERE d.state = $1
            AND d.fraud_flag = false
            AND d.fraud_window_ends_at <= NOW()
          LIMIT 50`,
-        [DECOUPLING_STATES.DEALER_NOTIFIED]
-      );
+          [DECOUPLING_STATES.DEALER_NOTIFIED]
+        );
 
-      for (const row of expired.rows) {
-        try {
-          logger.info(`Cron fallback: processing expired fraud window for device ${row.device_id}`);
-          await fraudWindowHandler(row.device_id);
-        } catch (err) {
-          logger.error(`Cron fallback: failed to process device ${row.device_id}:`, err);
+        for (const row of expired.rows) {
+          try {
+            logger.info(
+              `Cron fallback: processing expired fraud window for device ${row.device_id}`
+            );
+            await fraudWindowHandler(row.device_id);
+          } catch (err) {
+            logger.error(`Cron fallback: failed to process device ${row.device_id}:`, err);
+          }
         }
+      } catch (err) {
+        logger.error('Cron fallback scan failed:', err);
       }
-    } catch (err) {
-      logger.error('Cron fallback scan failed:', err);
-    }
-  }, { scheduled: true, timezone: process.env.TZ || 'UTC' });
+    },
+    { scheduled: true, timezone: process.env.TZ || 'UTC' }
+  );
 
   cronFallbackActive = true;
   logger.info('Decoupling cron fallback started (every 15 minutes)');
@@ -251,12 +260,12 @@ async function getQueueStats() {
     fwQueue.getActiveCount(),
     anQueue.getWaitingCount(),
     anQueue.getDelayedCount(),
-    anQueue.getActiveCount(),
+    anQueue.getActiveCount()
   ]);
 
   return {
     fraudWindow: { waiting: fwWaiting, delayed: fwDelayed, active: fwActive },
-    adminNotify: { waiting: anWaiting, delayed: anDelayed, active: anActive },
+    adminNotify: { waiting: anWaiting, delayed: anDelayed, active: anActive }
   };
 }
 
@@ -293,5 +302,5 @@ module.exports = {
   getAMAPIRetryQueue,
   startCronFallback,
   getQueueStats,
-  close,
+  close
 };

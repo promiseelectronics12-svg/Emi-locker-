@@ -370,6 +370,9 @@ class LockStateManager @Inject constructor(
             }
 
             if (enable) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    dpm.setStatusBarDisabled(adminComponent, true)
+                }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     dpm.setLockTaskFeatures(adminComponent, 0)
                 }
@@ -384,6 +387,9 @@ class LockStateManager @Inject constructor(
                 dpm.setLockTaskPackages(adminComponent, packagesForLockTask)
                 Log.d(TAG, "Kiosk mode enabled for packages: ${packagesForLockTask.joinToString()}")
             } else {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    dpm.setStatusBarDisabled(adminComponent, false)
+                }
                 dpm.setLockTaskPackages(adminComponent, arrayOf())
                 Log.d(TAG, "Kiosk mode disabled")
             }

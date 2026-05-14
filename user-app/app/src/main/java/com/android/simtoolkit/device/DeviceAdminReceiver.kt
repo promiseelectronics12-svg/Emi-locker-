@@ -155,6 +155,39 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
                     DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED
                 )
             }
+            // Grant background execution permissions as Device Owner.
+            // Covers MIUI auto-start restriction without requiring user interaction.
+            try {
+                val appOpsManager = context.getSystemService(android.app.AppOpsManager::class.java)
+                val uid = context.applicationInfo.uid
+                android.app.AppOpsManager::class.java
+                    .getMethod("setMode", Int::class.java, Int::class.java, String::class.java, Int::class.java)
+                    .invoke(appOpsManager, 10606 /* OP_RUN_ANY_IN_BACKGROUND */, uid, context.packageName, android.app.AppOpsManager.MODE_ALLOWED)
+                Log.d(TAG, "AppOps background grant applied (MIUI auto-start)")
+            } catch (e: Exception) {
+                Log.d(TAG, "AppOps background grant skipped (non-MIUI or already set): ${e.message}")
+            }
+
+            // Auto-grant all runtime permissions as Device Owner — no user dialogs needed.
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                listOf(
+                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION,
+                    android.Manifest.permission.ACCESS_BACKGROUND_LOCATION,
+                    android.Manifest.permission.RECEIVE_SMS,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ).forEach { permission ->
+                    try {
+                        dpm.setPermissionGrantState(
+                            adminComponent, context.packageName, permission,
+                            DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED
+                        )
+                    } catch (e: Exception) {
+                        Log.d(TAG, "Permission grant skipped for $permission: ${e.message}")
+                    }
+                }
+            }
+
             Log.d(TAG, "Device Owner policies applied successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to apply Device Owner policies", e)

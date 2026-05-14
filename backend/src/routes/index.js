@@ -1,4 +1,5 @@
 const express = require('express');
+
 const router = express.Router();
 const adminRoutes = require('../modules/admin/adminRoutes');
 
@@ -14,6 +15,7 @@ router.use('/dealer', require('./dealer'));
 router.use('/dealer/enrollments', require('../modules/enrollment/enrollmentRoutes'));
 router.use('/reseller', require('./reseller'));
 router.use('/dealers', require('./dealers'));
+
 router.use('/admin', adminRoutes);
 router.use('/notifications', require('../modules/notifications/notification.routes'));
 router.use('/alerts', require('./alerts'));

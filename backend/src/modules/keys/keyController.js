@@ -32,7 +32,8 @@ async function requestKeys(req, res) {
     const quantity = normalizeQuantity(req.body.quantity);
     const { justification } = req.body;
     const tier = ['standard', 'premium', 'vip'].includes(req.body.tier)
-      ? req.body.tier : 'standard';
+      ? req.body.tier
+      : 'standard';
     const resellerId = req.user.id;
 
     if (!quantity || !justification) {
@@ -74,9 +75,7 @@ async function requestKeys(req, res) {
     });
 
     // Notify all connected admins via SSE
-    const resellerRow = await db.query(
-      'SELECT name FROM resellers WHERE id = $1', [resellerId]
-    );
+    const resellerRow = await db.query('SELECT name FROM resellers WHERE id = $1', [resellerId]);
     emitKeyRequested(
       resellerId,
       resellerRow.rows[0]?.name || 'Reseller',
@@ -125,10 +124,16 @@ async function approveKeyRequest(req, res) {
       return res.status(400).json({ error: 'Request already processed' });
     }
 
-    const approvedQuantity = normalizeQuantity(req.body.approvedQuantity || req.body.quantity || request.quantity);
+    const approvedQuantity = normalizeQuantity(
+      req.body.approvedQuantity || req.body.quantity || request.quantity
+    );
     if (!approvedQuantity || approvedQuantity > request.quantity) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Approved quantity must be a positive number not greater than requested quantity' });
+      return res
+        .status(400)
+        .json({
+          error: 'Approved quantity must be a positive number not greater than requested quantity'
+        });
     }
 
     const approvedThisMonthResult = await client.query(
@@ -137,7 +142,10 @@ async function approveKeyRequest(req, res) {
       [request.reseller_id]
     );
     const approvedThisMonth = parseInt(approvedThisMonthResult.rows[0].count, 10);
-    const maxAllowed = Math.max(0, Math.floor(Number(request.monthly_quota || 100) * 0.2) - approvedThisMonth);
+    const maxAllowed = Math.max(
+      0,
+      Math.floor(Number(request.monthly_quota || 100) * 0.2) - approvedThisMonth
+    );
 
     if (approvedQuantity > maxAllowed) {
       await client.query('ROLLBACK');
@@ -159,7 +167,15 @@ async function approveKeyRequest(req, res) {
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
         RETURNING id, key_string`,
-        [keyString, request.reseller_id, request.id, signature, nonce, timestamp, KEY_STATUSES.AVAILABLE]
+        [
+          keyString,
+          request.reseller_id,
+          request.id,
+          signature,
+          nonce,
+          timestamp,
+          KEY_STATUSES.AVAILABLE
+        ]
       );
 
       generatedKeys.push(keyResult.rows[0]);
@@ -189,7 +205,7 @@ async function approveKeyRequest(req, res) {
 
     return res.json({
       message: 'Keys generated and assigned to reseller inventory',
-      keys: generatedKeys.map(k => ({ id: k.id, key: k.key_string }))
+      keys: generatedKeys.map((k) => ({ id: k.id, key: k.key_string }))
     });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -273,7 +289,7 @@ async function assignKeys(req, res) {
       `SELECT COALESCE(${quotaCol}, 0) AS available FROM resellers WHERE id = $1 FOR UPDATE`,
       [resellerId]
     );
-    const available = parseInt(quotaResult.rows[0]?.available ?? '0');
+    const available = parseInt(quotaResult.rows[0]?.available ?? '0', 10);
 
     if (available < quantity) {
       await client.query('ROLLBACK');
@@ -294,7 +310,16 @@ async function assignKeys(req, res) {
            (key_string, reseller_id, dealer_id, status, tier, hmac_signature, nonce, sig_timestamp, assigned_at, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW(), NOW())
          RETURNING id`,
-        [keyString, resellerId, targetDealerId, KEY_STATUSES.ASSIGNED, tier, signature, nonce, timestamp]
+        [
+          keyString,
+          resellerId,
+          targetDealerId,
+          KEY_STATUSES.ASSIGNED,
+          tier,
+          signature,
+          nonce,
+          timestamp
+        ]
       );
       keyIds.push(insertResult.rows[0].id);
     }
@@ -389,7 +414,15 @@ async function consumeKey(req, res) {
       return res.status(400).json({ error: 'Key is not available for activation' });
     }
 
-    if (!verifyKeySignature(key.key_string, dealerId, key.sig_timestamp, key.nonce, key.hmac_signature)) {
+    if (
+      !verifyKeySignature(
+        key.key_string,
+        dealerId,
+        key.sig_timestamp,
+        key.nonce,
+        key.hmac_signature
+      )
+    ) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Key cryptographic signature validation failed' });
     }
@@ -478,7 +511,7 @@ async function consumeKey(req, res) {
 
 async function getDealerKeys(req, res) {
   try {
-    const status = req.query.status;
+    const { status } = req.query;
     const params = [req.user.id];
     let where = 'dealer_id = $1';
 
@@ -504,7 +537,7 @@ async function getDealerKeys(req, res) {
 
 async function getResellerKeys(req, res) {
   try {
-    const status = req.query.status;
+    const { status } = req.query;
     const params = [req.user.id];
     let where = 'ak.reseller_id = $1';
 
@@ -553,7 +586,11 @@ async function getDealerInventory(req, res) {
       [dealerId]
     );
 
-    const quotas = dealerResult.rows[0] || { quota_standard: 500, quota_premium: 200, quota_vip: 50 };
+    const quotas = dealerResult.rows[0] || {
+      quota_standard: 500,
+      quota_premium: 200,
+      quota_vip: 50
+    };
     const byTier = { standard: {}, premium: {}, vip: {} };
 
     for (const row of keysResult.rows) {
@@ -565,9 +602,21 @@ async function getDealerInventory(req, res) {
     }
 
     return res.json({
-      standard: { assigned: 0, activated: 0, revoked: 0, quota: quotas.quota_standard, ...byTier.standard },
-      premium:  { assigned: 0, activated: 0, revoked: 0, quota: quotas.quota_premium,  ...byTier.premium  },
-      vip:      { assigned: 0, activated: 0, revoked: 0, quota: quotas.quota_vip,      ...byTier.vip      }
+      standard: {
+        assigned: 0,
+        activated: 0,
+        revoked: 0,
+        quota: quotas.quota_standard,
+        ...byTier.standard
+      },
+      premium: {
+        assigned: 0,
+        activated: 0,
+        revoked: 0,
+        quota: quotas.quota_premium,
+        ...byTier.premium
+      },
+      vip: { assigned: 0, activated: 0, revoked: 0, quota: quotas.quota_vip, ...byTier.vip }
     });
   } catch (error) {
     console.error('Get dealer inventory error:', error);

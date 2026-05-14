@@ -1,161 +1,383 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 const _kStorageKey = 'onboarding_complete';
 
+const _steps = [
+  _WelcomeStep(
+    title: 'Welcome to EMI Locker',
+    body:
+        'The all-in-one workspace for device financing. Track agreements, monitor enrolled phones, and stay connected with every customer.',
+    label: 'Welcome',
+    asset: 'assets/mascot/nestbot_pose_welcome.png',
+    accent: Color(0xFF149B8A),
+  ),
+  _WelcomeStep(
+    title: 'Activate With Confidence',
+    body:
+        'Generate the activation code, capture EMI terms, and bind the phone cleanly before customer handover.',
+    label: 'Activation',
+    asset: 'assets/mascot/nestbot_pose_code.png',
+    accent: Color(0xFF2878CF),
+  ),
+  _WelcomeStep(
+    title: 'Protected, Not Punished',
+    body:
+        'Keep protection fair and visible. Dealers stay in control while customers understand what is happening.',
+    label: 'Protection',
+    asset: 'assets/mascot/nestbot_pose_secure.png',
+    accent: Color(0xFF2D64B3),
+  ),
+];
+
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key, required this.onComplete});
+
   final VoidCallback onComplete;
 
   static Future<bool> isComplete() async {
-    const s = FlutterSecureStorage();
-    return await s.read(key: _kStorageKey) == 'true';
+    const storage = FlutterSecureStorage();
+    return await storage.read(key: _kStorageKey) == 'true';
   }
 
   @override
   State<OnboardingScreen> createState() => _OnboardingScreenState();
 }
 
-class _OnboardingScreenState extends State<OnboardingScreen> {
-  final _controller = PageController();
+class _OnboardingScreenState extends State<OnboardingScreen>
+    with SingleTickerProviderStateMixin {
+  final _textCtrl = PageController();
+  late final AnimationController _idleCtrl;
   int _page = 0;
 
-  static const _cards = [
-    _CardData(
-      icon: Icons.handshake_outlined,
-      iconColor: Color(0xFF00A86B),
-      title: 'Welcome to EMI Locker',
-      body:
-          'The all-in-one platform for your device financing business. '
-          'Track agreements, monitor devices, and stay connected with '
-          'every customer — from one screen.',
-    ),
-    _CardData(
-      icon: Icons.shield_outlined,
-      iconColor: Color(0xFF3B82F6),
-      title: 'Smart Device Oversight',
-      body:
-          'Devices enrolled in a financing agreement include a protection '
-          'feature that keeps customers on track with their payment plan. '
-          'Customers are informed of this during the enrollment process.',
-    ),
-    _CardData(
-      icon: Icons.lock_outline,
-      iconColor: Color(0xFF8B5CF6),
-      title: 'Your Data Is Safe',
-      body:
-          'All customer and business data is encrypted in transit and at '
-          'rest. We never sell or share data with third parties. '
-          'You are in full control.',
-    ),
-  ];
-
-  Future<void> _agree() async {
-    const FlutterSecureStorage().write(key: _kStorageKey, value: 'true');
-    widget.onComplete();
-  }
-
-  void _next() {
-    _controller.nextPage(duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+  @override
+  void initState() {
+    super.initState();
+    _idleCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2600),
+    )..repeat();
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _textCtrl.dispose();
+    _idleCtrl.dispose();
     super.dispose();
   }
 
+  Future<void> _finish() async {
+    await const FlutterSecureStorage().write(key: _kStorageKey, value: 'true');
+    if (!mounted) return;
+    widget.onComplete();
+  }
+
+  void _goTo(int page) {
+    if (page < 0 || page >= _steps.length) return;
+    _textCtrl.animateToPage(
+      page,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  void _advance() {
+    if (_page == _steps.length - 1) {
+      _finish();
+      return;
+    }
+    _goTo(_page + 1);
+  }
+
+  void _back() => _goTo(_page - 1);
+
   @override
   Widget build(BuildContext context) {
+    final current = _steps[_page];
+    final isFirst = _page == 0;
+    final isLast = _page == _steps.length - 1;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF7F8FC),
       body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: PageView.builder(
-                controller: _controller,
-                itemCount: _cards.length,
-                onPageChanged: (i) => setState(() => _page = i),
-                itemBuilder: (context, i) => _OnboardingCard(data: _cards[i]),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
-              child: Column(
-                children: [
-                  _DotIndicator(count: _cards.length, current: _page),
-                  const SizedBox(height: 20),
-                  if (_page < _cards.length - 1)
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton(
-                        onPressed: _next,
-                        child: const Text('Next'),
-                      ),
-                    )
-                  else ...[
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton(
-                        onPressed: _agree,
-                        child: const Text('I Agree & Get Started'),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxHeight < 720;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(0, 6, 12, 0),
+                    child: AnimatedOpacity(
+                      opacity: isLast ? 0 : 1,
+                      duration: const Duration(milliseconds: 180),
+                      child: TextButton(
+                        onPressed: isLast ? null : _finish,
+                        style: TextButton.styleFrom(
+                          foregroundColor: const Color(0xFF8B98A5),
+                          textStyle: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        child: const Text('Skip'),
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    const Text(
-                      'By tapping this button, you confirm you have read and understood the above.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
+                  ),
+                ),
+                Center(
+                  child: _MascotStage(
+                    animation: _idleCtrl,
+                    step: current,
+                    height: compact ? 260 : 310,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Expanded(
+                  child: PageView.builder(
+                    controller: _textCtrl,
+                    itemCount: _steps.length,
+                    onPageChanged: (value) => setState(() => _page = value),
+                    itemBuilder: (context, index) =>
+                        _CopyPanel(step: _steps[index]),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _Dots(
+                        count: _steps.length,
+                        activeIndex: _page,
+                        activeColor: current.accent,
+                      ),
+                      const SizedBox(height: 20),
+                      Row(
+                        children: [
+                          AnimatedOpacity(
+                            opacity: isFirst ? 0.34 : 1,
+                            duration: const Duration(milliseconds: 180),
+                            child: SizedBox(
+                              width: 108,
+                              height: 52,
+                              child: OutlinedButton(
+                                onPressed: isFirst ? null : _back,
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: current.accent,
+                                  side: BorderSide(
+                                    color: current.accent.withValues(
+                                      alpha: isFirst ? 0.18 : 0.42,
+                                    ),
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                ),
+                                child: const Text(
+                                  'Back',
+                                  style: TextStyle(fontWeight: FontWeight.w800),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: SizedBox(
+                              height: 52,
+                              child: FilledButton(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: current.accent,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                ),
+                                onPressed: _advance,
+                                child: AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 180),
+                                  child: Text(
+                                    isLast
+                                        ? 'I Agree & Get Started'
+                                        : 'Continue',
+                                    key: ValueKey(isLast),
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      AnimatedOpacity(
+                        opacity: isLast ? 1 : 0,
+                        duration: const Duration(milliseconds: 220),
+                        child: const Text(
+                          'By tapping this button you confirm you have read and understood the above.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 11,
+                            height: 1.45,
+                            color: Color(0xFF8B98A5),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
   }
 }
 
-class _OnboardingCard extends StatelessWidget {
-  const _OnboardingCard({required this.data});
-  final _CardData data;
+class _WelcomeStep {
+  const _WelcomeStep({
+    required this.title,
+    required this.body,
+    required this.label,
+    required this.asset,
+    required this.accent,
+  });
+
+  final String title;
+  final String body;
+  final String label;
+  final String asset;
+  final Color accent;
+}
+
+class _MascotStage extends StatelessWidget {
+  const _MascotStage({
+    required this.animation,
+    required this.step,
+    required this.height,
+  });
+
+  final Animation<double> animation;
+  final _WelcomeStep step;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 292,
+      height: height,
+      child: AnimatedBuilder(
+        animation: animation,
+        builder: (context, child) {
+          final t = animation.value * math.pi * 2;
+          final breath = 0.992 + (math.sin(t) + 1) * 0.006;
+          final floatY = math.sin(t + math.pi / 5) * 3.0;
+          final shadowPulse = 0.11 + (math.sin(t) + 1) * 0.025;
+
+          return Stack(
+            alignment: Alignment.bottomCenter,
+            children: [
+              Positioned(
+                bottom: 8,
+                child: Container(
+                  width: 190 + (math.sin(t).abs() * 14),
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: step.accent.withValues(alpha: shadowPulse),
+                    borderRadius: BorderRadius.circular(999),
+                    boxShadow: [
+                      BoxShadow(
+                        color: step.accent.withValues(alpha: 0.10),
+                        blurRadius: 22,
+                        spreadRadius: 1,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 6,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.84),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: step.accent.withValues(alpha: 0.18),
+                    ),
+                  ),
+                  child: Text(
+                    step.label,
+                    style: TextStyle(
+                      color: step.accent,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ),
+              Transform.translate(
+                offset: Offset(0, floatY),
+                child: Transform.scale(
+                  scale: breath,
+                  alignment: Alignment.bottomCenter,
+                  child: child,
+                ),
+              ),
+            ],
+          );
+        },
+        child: Image.asset(
+          step.asset,
+          height: height - 28,
+          fit: BoxFit.contain,
+          filterQuality: FilterQuality.high,
+          gaplessPlayback: true,
+        ),
+      ),
+    );
+  }
+}
+
+class _CopyPanel extends StatelessWidget {
+  const _CopyPanel({required this.step});
+
+  final _WelcomeStep step;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+      padding: const EdgeInsets.symmetric(horizontal: 36),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Container(
-            width: 96,
-            height: 96,
-            decoration: BoxDecoration(
-              color: data.iconColor.withValues(alpha: 0.12),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(data.icon, size: 48, color: data.iconColor),
-          ),
-          const SizedBox(height: 32),
           Text(
-            data.title,
+            step.title,
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontSize: 24,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w800,
+              height: 1.22,
               color: Color(0xFF0D1117),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           Text(
-            data.body,
+            step.body,
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontSize: 15,
-              height: 1.6,
+              height: 1.62,
               color: Color(0xFF6B7280),
             ),
           ),
@@ -165,41 +387,35 @@ class _OnboardingCard extends StatelessWidget {
   }
 }
 
-class _DotIndicator extends StatelessWidget {
-  const _DotIndicator({required this.count, required this.current});
+class _Dots extends StatelessWidget {
+  const _Dots({
+    required this.count,
+    required this.activeIndex,
+    required this.activeColor,
+  });
+
   final int count;
-  final int current;
+  final int activeIndex;
+  final Color activeColor;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(count, (i) {
-        final active = i == current;
+      children: List.generate(count, (index) {
+        final active = index == activeIndex;
         return AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
           margin: const EdgeInsets.symmetric(horizontal: 4),
-          width: active ? 20 : 8,
+          width: active ? 22 : 8,
           height: 8,
           decoration: BoxDecoration(
-            color: active ? const Color(0xFF00A86B) : const Color(0xFFD1D5DB),
+            color: active ? activeColor : const Color(0xFFD1D5DB),
             borderRadius: BorderRadius.circular(4),
           ),
         );
       }),
     );
   }
-}
-
-class _CardData {
-  const _CardData({
-    required this.icon,
-    required this.iconColor,
-    required this.title,
-    required this.body,
-  });
-  final IconData icon;
-  final Color iconColor;
-  final String title;
-  final String body;
 }

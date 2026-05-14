@@ -83,11 +83,14 @@ class EmiLockerFcmService : FirebaseMessagingService() {
             val nonce     = data[KEY_NONCE]     ?: return
             val timestamp = data[KEY_TIMESTAMP] ?: return
             val hmac      = data[KEY_HMAC]      ?: return
-            val isValid = commandVerifier.verifyCommand(
+            val actionType = data["commandType"] ?: command
+            val lockLevel  = data["lockLevel"]
+            val isValid = commandVerifier.verifyServerCommand(
                 deviceImei    = imei,
                 timestamp     = timestamp.toLongOrNull() ?: 0L,
                 nonce         = nonce,
-                actionType    = command,
+                actionType    = actionType,
+                lockLevel     = lockLevel,
                 hmacSignature = hmac
             )
             if (!isValid) {

@@ -10,7 +10,12 @@
     "test": "jest --coverage",
     "test:watch": "jest --watch",
     "lint": "eslint src/",
+    "lint:critical": "eslint src/routes/dealer.js src/modules/deviceActivation/deviceRuntimeRoutes.js src/modules/enrollment/enrollmentRoutes.js src/modules/enrollment/enrollmentController.js src/modules/enrollment/enrollmentService.js src/modules/sse/sseService.js",
     "lint:fix": "eslint src/ --fix",
+    "format:check": "prettier --check \"src/**/*.js\"",
+    "format:critical": "prettier --check src/routes/dealer.js src/modules/deviceActivation/deviceRuntimeRoutes.js src/modules/enrollment/enrollmentRoutes.js src/modules/enrollment/enrollmentController.js src/modules/enrollment/enrollmentService.js src/modules/sse/sseService.js",
+    "format:changed": "prettier --check",
+    "format:fix": "prettier --write \"src/**/*.js\"",
     "migrate": "node scripts/migrate.js",
     "migrate:rollback": "node scripts/rollback.js",
     "seed": "node scripts/seed.js"
@@ -24,12 +29,14 @@
   "author": "EMI Locker Team",
   "license": "PROPRIETARY",
   "dependencies": {
+    "@aws-sdk/client-kms": "^3.1045.0",
     "bcryptjs": "^2.4.3",
     "bull": "^4.12.2",
     "compression": "^1.7.4",
     "cors": "^2.8.5",
     "crypto-js": "^4.2.0",
     "dotenv": "^16.3.1",
+    "exceljs": "^4.4.0",
     "express": "^4.18.2",
     "express-async-errors": "^3.1.1",
     "express-async-handler": "^1.2.0",
@@ -55,9 +62,11 @@
   "devDependencies": {
     "eslint": "^8.57.0",
     "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-import": "^2.29.1",
     "jest": "^29.7.0",
     "nodemon": "^3.1.0",
+    "prettier": "^3.8.3",
     "supertest": "^6.3.3"
   },
   "engines": {

@@ -28,3 +28,7 @@ coverage/
 *.njsproj
 *.sln
 *.swp
+
+# RSA signing keys — never commit private key
+src/keys/*.pem
+*.pem

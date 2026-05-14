@@ -1,0 +1,42 @@
+ESLint: 124 errors, 0 warnings in 40 files
+═══════════════════════════════════════
+Top rules:
+  no-unused-vars (60x)
+  no-await-in-loop (34x)
+  no-use-before-define (9x)
+  no-continue (7x)
+  no-nested-ternary (5x)
+  default-param-last (3x)
+  import/order (2x)
+  no-restricted-globals (2x)
+  max-classes-per-file (1x)
+  no-shadow (1x)
+
+Top files:
+  src/modules/fraud/fraudService.js (16 issues)
+    no-await-in-loop (9)
+    no-continue (6)
+    no-unused-vars (1)
+  src/config/environment.js (15 issues)
+    no-unused-vars (15)
+  src/middleware/rbac.js (8 issues)
+    no-use-before-define (8)
+  src/modules/lock/lockSchedulerService.js (7 issues)
+    no-await-in-loop (4)
+    no-unused-vars (3)
+  src/controllers/deviceController.js (5 issues)
+    no-unused-vars (5)
+  src/modules/devices/deviceService.js (5 issues)
+    no-unused-vars (3)
+    no-await-in-loop (2)
+  src/modules/location/locationScheduler.js (5 issues)
+    no-await-in-loop (5)
+  src/modules/decoupling/decouplingService.js (4 issues)
+    no-unused-vars (4)
+  src/modules/keys/keyController.js (4 issues)
+    no-await-in-loop (4)
+  src/modules/auth/rateLimit.js (3 issues)
+    no-unused-vars (3)
+
+... +30 more files
+[full output: ~/AppData\Local\rtk\tee\1778590679_lint.log]

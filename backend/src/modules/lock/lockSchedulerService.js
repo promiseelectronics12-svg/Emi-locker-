@@ -8,7 +8,7 @@ const LOCK_LEVELS = {
   NONE: 'NONE',
   REMINDER_MODE: 'REMINDER_MODE',
   PARTIAL_LOCK: 'PARTIAL_LOCK',
-  FULL_LOCK: 'FULL_LOCK',
+  FULL_LOCK: 'FULL_LOCK'
 };
 
 class LockSchedulerService {
@@ -25,18 +25,26 @@ class LockSchedulerService {
 
     const cronSchedule = process.env.AUTO_LOCK_CRON || '0 0 * * *';
 
-    const dailyJob = cron.schedule(cronSchedule, async () => {
-      logger.info('Auto-lock scheduler triggered');
-      await this.runDailyCheck();
-    }, { scheduled: true, timezone: process.env.TZ || 'UTC' });
+    const dailyJob = cron.schedule(
+      cronSchedule,
+      async () => {
+        logger.info('Auto-lock scheduler triggered');
+        await this.runDailyCheck();
+      },
+      { scheduled: true, timezone: process.env.TZ || 'UTC' }
+    );
 
     this.jobs.push(dailyJob);
 
     // Grace expiry check — runs every 5 minutes.
     // Finds devices whose dealer-issued grace period has expired and re-locks them.
-    const graceJob = cron.schedule('*/5 * * * *', async () => {
-      await this.runGraceExpiryCheck();
-    }, { scheduled: true, timezone: process.env.TZ || 'UTC' });
+    const graceJob = cron.schedule(
+      '*/5 * * * *',
+      async () => {
+        await this.runGraceExpiryCheck();
+      },
+      { scheduled: true, timezone: process.env.TZ || 'UTC' }
+    );
 
     this.jobs.push(graceJob);
 
@@ -45,7 +53,7 @@ class LockSchedulerService {
   }
 
   stop() {
-    this.jobs.forEach(job => job.stop());
+    this.jobs.forEach((job) => job.stop());
     this.jobs = [];
     this.started = false;
     logger.info('Lock scheduler stopped');
@@ -86,7 +94,7 @@ class LockSchedulerService {
           errors++;
           logger.error('Auto-lock device processing failed', {
             deviceId: device.id,
-            error: error.message,
+            error: error.message
           });
         }
       }
@@ -147,12 +155,17 @@ class LockSchedulerService {
   }
 
   getScheduleAction(overdueDays) {
-    if (overdueDays >= -7 && overdueDays < -3) return { action: 'REMINDER_PUSH', level: LOCK_LEVELS.NONE };
-    if (overdueDays >= -3 && overdueDays < 0) return { action: 'WARNING_OVERLAY', level: LOCK_LEVELS.NONE };
+    if (overdueDays >= -7 && overdueDays < -3)
+      return { action: 'REMINDER_PUSH', level: LOCK_LEVELS.NONE };
+    if (overdueDays >= -3 && overdueDays < 0)
+      return { action: 'WARNING_OVERLAY', level: LOCK_LEVELS.NONE };
     if (overdueDays === 0) return { action: 'OVERDUE_ALERT', level: LOCK_LEVELS.NONE };
-    if (overdueDays >= 1 && overdueDays < 3) return { action: 'APPLY_REMINDER', level: LOCK_LEVELS.REMINDER_MODE };
-    if (overdueDays >= 3 && overdueDays < 7) return { action: 'APPLY_PARTIAL', level: LOCK_LEVELS.PARTIAL_LOCK };
-    if (overdueDays >= 7 && overdueDays < 14) return { action: 'APPLY_FULL', level: LOCK_LEVELS.FULL_LOCK };
+    if (overdueDays >= 1 && overdueDays < 3)
+      return { action: 'APPLY_REMINDER', level: LOCK_LEVELS.REMINDER_MODE };
+    if (overdueDays >= 3 && overdueDays < 7)
+      return { action: 'APPLY_PARTIAL', level: LOCK_LEVELS.PARTIAL_LOCK };
+    if (overdueDays >= 7 && overdueDays < 14)
+      return { action: 'APPLY_FULL', level: LOCK_LEVELS.FULL_LOCK };
     if (overdueDays >= 14) return { action: 'APPLY_FULL_ADMIN_FLAG', level: LOCK_LEVELS.FULL_LOCK };
     return null;
   }
@@ -186,7 +199,8 @@ class LockSchedulerService {
 
   toDbLockLevel(lockLevel) {
     if (lockLevel === LOCK_LEVELS.FULL_LOCK) return 'FULL';
-    if (lockLevel === LOCK_LEVELS.PARTIAL_LOCK || lockLevel === LOCK_LEVELS.REMINDER_MODE) return 'SOFT';
+    if (lockLevel === LOCK_LEVELS.PARTIAL_LOCK || lockLevel === LOCK_LEVELS.REMINDER_MODE)
+      return 'SOFT';
     return 'NONE';
   }
 
@@ -199,12 +213,12 @@ class LockSchedulerService {
 
   async applyLock(device, lockLevel, reason) {
     const deviceId = device.id;
-    const imei = device.imei;
+    const { imei } = device;
     const command = await lockCommandService.generateSignedCommand({
       deviceImei: imei,
       actionType: 'AUTO_LOCK',
       lockLevel,
-      metadata: { reason, source: 'scheduler' },
+      metadata: { reason, source: 'scheduler' }
     });
 
     await lockDeliveryService.deliverCommand(deviceId, command, lockLevel);
@@ -222,8 +236,17 @@ class LockSchedulerService {
 
     try {
       const sseService = require('../sse/sseService');
-      sseService.emitDeviceLocked({ id: deviceId, imei, device_name: device.amapi_device_name, lock_level: lockLevel, lock_reason: reason, dealer_id: device.dealer_id });
-    } catch (_) {}
+      sseService.emitDeviceLocked({
+        id: deviceId,
+        imei,
+        device_name: device.amapi_device_name,
+        lock_level: lockLevel,
+        lock_reason: reason,
+        dealer_id: device.dealer_id
+      });
+    } catch (e) {
+      logger.warn('SSE emit failed during auto-lock', { deviceId, error: e.message });
+    }
 
     logger.info('Auto-lock applied', { deviceId, lockLevel, reason });
   }
@@ -259,10 +282,15 @@ class LockSchedulerService {
           // Send FCM re-lock command
           try {
             await lockCommandService.sendLockCommand(device.id, {
-              reason:     'GRACE_EXPIRED',
-              lock_level: 'FULL_LOCK',
+              reason: 'GRACE_EXPIRED',
+              lock_level: 'FULL_LOCK'
             });
-          } catch (_) {}
+          } catch (e) {
+            logger.warn('FCM re-lock failed during grace expiry', {
+              deviceId: device.id,
+              error: e.message
+            });
+          }
 
           // Clear grace_expires_at and update status
           await db.query(

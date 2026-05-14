@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "capsule": {
+      "command": "npx",
+      "args": ["-y", "@capsule-run/mcp-server"]
+    }
+  }
+}

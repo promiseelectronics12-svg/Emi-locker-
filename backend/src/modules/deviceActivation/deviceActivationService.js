@@ -20,9 +20,9 @@ function normalizeIdentifier(value, fallback = null) {
 }
 
 function createDeviceToken({ deviceId, dealerId, resellerId }) {
-  const secret = process.env.DEVICE_TOKEN_SECRET || process.env.JWT_SECRET;
+  const secret = process.env.DEVICE_TOKEN_SECRET;
   if (!secret) {
-    throw new Error('DEVICE_TOKEN_SECRET or JWT_SECRET must be configured');
+    throw new Error('DEVICE_TOKEN_SECRET must be set — must not share signing secret with user JWTs');
   }
 
   return jwt.sign(

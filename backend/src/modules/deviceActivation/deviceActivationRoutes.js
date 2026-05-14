@@ -1,6 +1,7 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { body } = require('express-validator');
+const logger = require('../../utils/logger');
 const { verifyActivation, preRegisterDevice, confirmBinding, reportDeviceEvent } = require('./deviceActivationController');
 
 const router = express.Router();
@@ -120,8 +121,11 @@ router.post(
       }
 
       const device = result.rows[0];
-      const secret = process.env.DEVICE_TOKEN_SECRET || process.env.JWT_SECRET;
-      if (!secret) return res.status(500).json({ error: 'Server misconfigured' });
+      const secret = process.env.DEVICE_TOKEN_SECRET;
+      if (!secret) {
+        logger.error('DEVICE_TOKEN_SECRET not configured');
+        return res.status(500).json({ error: 'Server configuration error' });
+      }
 
       const deviceToken = jwt.sign(
         { sub: device.id, type: 'device', dealerId: device.dealer_id, resellerId: device.reseller_id },

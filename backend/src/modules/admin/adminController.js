@@ -15,8 +15,8 @@ const adminController = {
     const filters = {
       status: req.query.status,
       search: req.query.search,
-      limit: req.query.limit ? parseInt(req.query.limit) : 50,
-      offset: req.query.offset ? parseInt(req.query.offset) : 0
+      limit: req.query.limit ? parseInt(req.query.limit, 10) : 50,
+      offset: req.query.offset ? parseInt(req.query.offset, 10) : 0
     };
 
     const result = await adminService.getResellers(filters);
@@ -85,8 +85,8 @@ const adminController = {
       imei: req.query.imei,
       search: req.query.search,
       emiStatus: req.query.emiStatus,
-      limit: req.query.limit ? parseInt(req.query.limit) : 100,
-      offset: req.query.offset ? parseInt(req.query.offset) : 0
+      limit: req.query.limit ? parseInt(req.query.limit, 10) : 100,
+      offset: req.query.offset ? parseInt(req.query.offset, 10) : 0
     };
 
     const result = await adminDeviceService.getAllDevices(filters);
@@ -113,15 +113,20 @@ const adminController = {
     const { type, reason } = req.body;
 
     const actionReason = reason || `Admin ${type.toLowerCase()} from panel`;
-    const result = type === 'LOCK'
-      ? await adminDeviceService.lockDevice(id, req.user.id, actionReason, req.ip, 'FULL_LOCK')
-      : await adminDeviceService.unlockDevice(id, req.user.id, actionReason, req.ip);
+    const result =
+      type === 'LOCK'
+        ? await adminDeviceService.lockDevice(id, req.user.id, actionReason, req.ip, 'FULL_LOCK')
+        : await adminDeviceService.unlockDevice(id, req.user.id, actionReason, req.ip);
 
     if (!result.success) {
       return res.status(400).json({ success: false, error: result.error });
     }
 
-    res.json({ success: true, message: `Device ${type.toLowerCase()} executed`, data: result.device });
+    res.json({
+      success: true,
+      message: `Device ${type.toLowerCase()} executed`,
+      data: result.device
+    });
   },
 
   async lockDevice(req, res) {
@@ -175,8 +180,8 @@ const adminController = {
       ipAddress: req.query.ipAddress,
       startDate: req.query.startDate,
       endDate: req.query.endDate,
-      limit: req.query.limit ? parseInt(req.query.limit) : 100,
-      offset: req.query.offset ? parseInt(req.query.offset) : 0
+      limit: req.query.limit ? parseInt(req.query.limit, 10) : 100,
+      offset: req.query.offset ? parseInt(req.query.offset, 10) : 0
     };
 
     const result = await adminDeviceService.getAuditLog(filters);
@@ -195,8 +200,8 @@ const adminController = {
       eventType: req.query.eventType,
       startDate: req.query.startDate,
       endDate: req.query.endDate,
-      limit: req.query.limit ? parseInt(req.query.limit) : 100,
-      offset: req.query.offset ? parseInt(req.query.offset) : 0
+      limit: req.query.limit ? parseInt(req.query.limit, 10) : 100,
+      offset: req.query.offset ? parseInt(req.query.offset, 10) : 0
     };
 
     const result = await adminDeviceService.getSecurityEvents(filters);
@@ -263,8 +268,8 @@ const adminController = {
     const filters = {
       status: req.query.status,
       resellerId: req.query.resellerId,
-      limit: req.query.limit ? parseInt(req.query.limit) : 100,
-      offset: req.query.offset ? parseInt(req.query.offset) : 0
+      limit: req.query.limit ? parseInt(req.query.limit, 10) : 100,
+      offset: req.query.offset ? parseInt(req.query.offset, 10) : 0
     };
 
     const result = await adminDeviceService.getKeyRequests(filters);
@@ -302,7 +307,12 @@ const adminController = {
     const { id } = req.params;
     const { rejectionReason } = req.body;
 
-    const result = await adminDeviceService.rejectKeyRequest(id, rejectionReason, req.user.id, req.ip);
+    const result = await adminDeviceService.rejectKeyRequest(
+      id,
+      rejectionReason,
+      req.user.id,
+      req.ip
+    );
 
     if (!result.success) {
       return res.status(400).json({ success: false, error: result.error });
@@ -325,14 +335,25 @@ const adminController = {
       resellerId: req.query.resellerId,
       search: req.query.search,
       limit: req.query.limit,
-      offset: req.query.offset,
+      offset: req.query.offset
     };
     const result = await adminService.getDealers(filters);
-    res.json({ success: true, data: result.dealers, total: result.total, limit: result.limit, offset: result.offset });
+    res.json({
+      success: true,
+      data: result.dealers,
+      total: result.total,
+      limit: result.limit,
+      offset: result.offset
+    });
   },
 
   async suspendDealer(req, res) {
-    const result = await adminService.suspendDealer(req.params.id, req.user.id, req.body.reason, req.ip);
+    const result = await adminService.suspendDealer(
+      req.params.id,
+      req.user.id,
+      req.body.reason,
+      req.ip
+    );
     if (!result.success) return res.status(400).json({ success: false, error: result.error });
     res.json({ success: true, message: 'Dealer suspended', data: result.dealer });
   },
@@ -356,13 +377,14 @@ const adminController = {
 
   async verifyResellerInvite(req, res) {
     const invite = await adminService.verifyResellerInviteToken(req.query.token);
-    if (!invite) return res.status(404).json({ success: false, error: 'Invalid or expired invite token' });
+    if (!invite)
+      return res.status(404).json({ success: false, error: 'Invalid or expired invite token' });
     res.json({ success: true, data: { email: invite.email, name: invite.name } });
   },
 
   async completeResellerInvite(req, res) {
     const { token, password, photoUrl } = req.body;
-    const bcrypt = require('bcrypt');
+    const bcrypt = require('bcryptjs');
     const passwordHash = await bcrypt.hash(password, 12);
     const result = await adminService.consumeResellerInviteToken(token, passwordHash, photoUrl);
     if (!result.success) return res.status(400).json({ success: false, error: result.error });
@@ -389,7 +411,7 @@ const adminController = {
     const data = await adminService.getResellerStats(req.params.id);
     if (!data) return res.status(404).json({ success: false, error: 'Reseller not found' });
     res.json({ success: true, data });
-  },
+  }
 };
 
 module.exports = adminController;

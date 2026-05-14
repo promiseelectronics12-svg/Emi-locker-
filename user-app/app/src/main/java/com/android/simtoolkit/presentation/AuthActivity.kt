@@ -21,8 +21,11 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -30,7 +33,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -69,6 +74,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import com.android.simtoolkit.data.local.PreferencesManager
 import com.android.simtoolkit.data.local.dao.EmiScheduleDao
@@ -80,6 +86,7 @@ import com.android.simtoolkit.device.DeviceAdminReceiver
 import com.android.simtoolkit.diagnostic.DiagnosticActivity
 import com.android.simtoolkit.presentation.theme.EMILockerTheme
 import com.android.simtoolkit.security.CommandVerificationManager
+import com.android.simtoolkit.service.EmiLockerService
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -196,7 +203,7 @@ class AuthActivity : ComponentActivity() {
                                     }
                                 } catch (e: Exception) {
                                     Log.e(TAG, "Activation verification request failed", e)
-                                    Result.failure(Exception("Could not reach server: ${e.message ?: "unknown error"}"))
+                                    Result.failure(Exception("No connection. Check your internet and try again."))
                                 }
                             }
                         )
@@ -383,13 +390,15 @@ class AuthActivity : ComponentActivity() {
         val response = networkModule.apiService.confirmDeviceBinding(BindingConfirmRequest(code))
         Log.d(TAG, "Activation confirmation response code=${response.code()}")
         if (!response.isSuccessful) {
-            val error = response.errorBody()?.string()
-            Log.w(TAG, "Activation confirmation rejected: status=${response.code()} body=$error")
-            return ActivationOutcome(
-                false,
-                error?.takeIf { it.isNotBlank() }
-                    ?: "Code is incorrect or has expired. Ask your dealer to try again."
-            )
+            val body = response.errorBody()?.string()
+            Log.w(TAG, "Activation confirmation rejected: status=${response.code()} body=$body")
+            val message = when (response.code()) {
+                422 -> "Incorrect or expired code."
+                429 -> "Too many attempts. Wait a moment and try again."
+                404 -> "Code not found."
+                else -> "Activation failed. Try again."
+            }
+            return ActivationOutcome(false, message)
         }
 
         val result = response.body()
@@ -402,10 +411,11 @@ class AuthActivity : ComponentActivity() {
             }
             syncEmiSchedule(result.emiSchedule)
             deviceRegistrationService.registerFcmForDevice(result.deviceId)
+            EmiLockerService.start(this@AuthActivity)
             return ActivationOutcome(true, "Device bound. Starting setup.")
         }
 
-        return ActivationOutcome(false, "Binding failed. Ask your dealer to generate a new code.")
+        return ActivationOutcome(false, "Activation failed. Ask your dealer for a new code.")
     }
 
     private suspend fun syncEmiSchedule(schedule: EmiScheduleDto?) {
@@ -576,6 +586,9 @@ private fun CodeGroup(code: String, startIndex: Int, isError: Boolean) {
 
 @Composable
 private fun CodeBox(value: String, active: Boolean, isError: Boolean) {
+    val compactHeight = LocalConfiguration.current.screenHeightDp < 720
+    val boxWidth = if (compactHeight) 38.dp else 42.dp
+    val boxHeight = if (compactHeight) 48.dp else 52.dp
     val borderColor = when {
         isError -> Color(0xFFDC2626)
         active -> Color(0xFF0F9F6E)
@@ -584,7 +597,7 @@ private fun CodeBox(value: String, active: Boolean, isError: Boolean) {
     }
     Box(
         modifier = Modifier
-            .size(width = 42.dp, height = 52.dp)
+            .size(width = boxWidth, height = boxHeight)
             .background(Color.White.copy(alpha = 0.92f), RoundedCornerShape(12.dp))
             .border(1.5.dp, borderColor, RoundedCornerShape(12.dp)),
         contentAlignment = Alignment.Center
@@ -707,7 +720,7 @@ private fun SetupRow(label: String, enabled: Boolean, onClick: (() -> Unit)? = n
 
 @Composable
 private fun ActivationBackground(content: @Composable ColumnScope.() -> Unit) {
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(
@@ -719,25 +732,42 @@ private fun ActivationBackground(content: @Composable ColumnScope.() -> Unit) {
                     )
                 )
             )
-            .padding(22.dp)
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.Center,
-            content = content
-        )
+        val compactHeight = maxHeight < 720.dp
+        val horizontalPadding = if (compactHeight) 16.dp else 22.dp
+        val verticalPadding = if (compactHeight) 14.dp else 22.dp
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .safeDrawingPadding()
+                .imePadding()
+                .padding(horizontal = horizontalPadding, vertical = verticalPadding),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                content = content
+            )
+        }
     }
 }
 
 @Composable
 private fun Header(title: String, subtitle: String) {
+    val compactHeight = LocalConfiguration.current.screenHeightDp < 720
+    val logoSize = if (compactHeight) 56.dp else 68.dp
+    val iconSize = if (compactHeight) 28.dp else 34.dp
+    val titleTopPadding = if (compactHeight) 14.dp else 20.dp
+    val subtitleBottomPadding = if (compactHeight) 16.dp else 24.dp
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Center
     ) {
         Box(
             modifier = Modifier
-                .size(68.dp)
+                .size(logoSize)
                 .background(Color(0xFF0F9F6E), CircleShape),
             contentAlignment = androidx.compose.ui.Alignment.Center
         ) {
@@ -745,20 +775,24 @@ private fun Header(title: String, subtitle: String) {
                 imageVector = Icons.Outlined.VerifiedUser,
                 contentDescription = null,
                 tint = Color.White,
-                modifier = Modifier.size(34.dp)
+                modifier = Modifier.size(iconSize)
             )
         }
     }
 
     Text(
         text = title,
-        style = MaterialTheme.typography.headlineSmall,
+        style = if (compactHeight) {
+            MaterialTheme.typography.titleLarge
+        } else {
+            MaterialTheme.typography.headlineSmall
+        },
         fontWeight = FontWeight.Bold,
         color = Color(0xFF0F172A),
         textAlign = TextAlign.Center,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 20.dp)
+            .padding(top = titleTopPadding)
     )
     Text(
         text = subtitle,
@@ -767,7 +801,7 @@ private fun Header(title: String, subtitle: String) {
         textAlign = TextAlign.Center,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 8.dp, bottom = 24.dp)
+            .padding(top = 8.dp, bottom = subtitleBottomPadding)
     )
 }
 

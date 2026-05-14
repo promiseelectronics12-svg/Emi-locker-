@@ -9,6 +9,9 @@ const { validateRequest } = require('../middleware/validateRequest');
 const { buildErrorResponse } = require('../middleware/errorHandler');
 const smsService = require('../modules/notifications/sms.service');
 const { getDealerInventory } = require('../modules/keys/keyController');
+const lockCommandService = require('../modules/lock/lockCommandService');
+const lockDeliveryService = require('../modules/lock/lockDeliveryService');
+const { LOCK_LEVELS } = require('../modules/lock/lockVerificationService');
 
 const router = express.Router();
 
@@ -812,24 +815,22 @@ router.post(
     if (method === 'online') {
       await markGraceUnlock(timeWindow * 10 + GRACE_INDEX[graceHours]);
 
-      // Send FCM unlock command
-      let fcmSent = false;
+      // Send the same signed command format that the release user app verifies.
+      let delivery = null;
       try {
-        const fcmService = require('../modules/notifications/fcm.service');
-        if (device.fcm_token) {
-          const fcmResult = await fcmService.sendToDevice(device.fcm_token, {
-            type: 'LOCK_COMMAND',
-            command: 'UNLOCK',
-            commandType: 'UNLOCK',
+        const command = await lockCommandService.generateSignedCommand({
+          deviceImei: device.imei,
+          actionType: 'UNLOCK',
+          lockLevel: LOCK_LEVELS.NONE,
+          metadata: {
             reason: 'DEALER_GRACE_UNLOCK',
-            grace_hours: graceHours,
-            expires_at: expiresAt.toISOString(),
-            timestamp: Date.now().toString()
-          });
-          fcmSent = !!fcmResult.success;
-        }
+            graceHours,
+            expiresAt: expiresAt.toISOString()
+          }
+        });
+        delivery = await lockDeliveryService.deliverCommand(device.id, command, LOCK_LEVELS.NONE);
       } catch (error) {
-        console.warn('Online unlock FCM failed:', error.message);
+        console.warn('Online unlock delivery failed:', error.message);
       }
 
       try {
@@ -850,7 +851,8 @@ router.post(
         method: 'online',
         grace_hours: graceHours,
         expires_at: expiresAt.toISOString(),
-        fcm_sent: fcmSent
+        fcm_sent: delivery?.results?.fcm?.success === true,
+        delivery: delivery?.results || null
       });
     }
 

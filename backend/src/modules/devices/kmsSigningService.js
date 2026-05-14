@@ -1,4 +1,10 @@
 const crypto = require('crypto');
+const {
+  KMSClient,
+  MessageType,
+  SignCommand,
+  SigningAlgorithmSpec
+} = require('@aws-sdk/client-kms');
 const logger = require('../../utils/logger');
 
 class KmsSigningService {
@@ -13,24 +19,30 @@ class KmsSigningService {
     const provider = process.env.KMS_PROVIDER || 'env';
 
     if (provider === 'gcp') {
-      if (!process.env.GCP_PROJECT_ID || !process.env.GCP_KMS_KEY_RING || !process.env.GCP_KMS_KEY_NAME) {
+      if (
+        !process.env.GCP_PROJECT_ID ||
+        !process.env.GCP_KMS_KEY_RING ||
+        !process.env.GCP_KMS_KEY_NAME
+      ) {
         throw new Error('GCP KMS configuration missing');
       }
       this.kmsClient = new GcpKmsClient({
         projectId: process.env.GCP_PROJECT_ID,
         location: process.env.GCP_KMS_LOCATION || 'global',
         keyRing: process.env.GCP_KMS_KEY_RING,
-        keyName: process.env.GCP_KMS_KEY_NAME,
+        keyName: process.env.GCP_KMS_KEY_NAME
       });
     } else if (provider === 'aws') {
       if (!process.env.AWS_REGION || !process.env.AWS_KMS_KEY_ID) {
-        throw new Error('AWS KMS configuration missing: AWS_REGION and AWS_KMS_KEY_ID are required');
+        throw new Error(
+          'AWS KMS configuration missing: AWS_REGION and AWS_KMS_KEY_ID are required'
+        );
       }
       this.kmsClient = new AwsKmsClient({
         region: process.env.AWS_REGION,
         keyId: process.env.AWS_KMS_KEY_ID,
         accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
       });
     } else if (provider === 'env') {
       if (!process.env.LOCK_COMMAND_SIGNING_SECRET) {
@@ -64,13 +76,16 @@ class KmsSigningService {
     }
 
     try {
-      const payloadHash = crypto.createHash('sha256').update(JSON.stringify(normalizedPayload)).digest();
+      const payloadHash = crypto
+        .createHash('sha256')
+        .update(JSON.stringify(normalizedPayload))
+        .digest();
       const signature = await this.kmsClient.sign(payloadHash);
       return {
         signature,
         provider: this.kmsClient.provider,
         keyId: this.kmsClient.keyId,
-        algorithm: 'RS256',
+        algorithm: 'RS256'
       };
     } catch (error) {
       logger.error('KMS signing failed', { error: error.message });
@@ -90,7 +105,7 @@ class KmsSigningService {
       signature: hmac.digest('hex'),
       provider: 'env',
       keyId: 'env-key',
-      algorithm: 'HS256',
+      algorithm: 'HS256'
     };
   }
 
@@ -126,7 +141,7 @@ class GcpKmsClient {
   async sign(data) {
     const { GoogleAuth } = require('google-auth-library');
     const auth = new GoogleAuth({
-      scopes: 'https://www.googleapis.com/auth/cloudkms',
+      scopes: 'https://www.googleapis.com/auth/cloudkms'
     });
 
     const client = await auth.getClient();
@@ -137,14 +152,14 @@ class GcpKmsClient {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${accessToken.token}`,
-        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken.token}`,
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         digest: {
-          sha256: data.toString('base64'),
-        },
-      }),
+          sha256: data.toString('base64')
+        }
+      })
     });
 
     if (!response.ok) {
@@ -159,39 +174,35 @@ class GcpKmsClient {
 
 class AwsKmsClient {
   constructor(options) {
+    if (!/^[a-z]{2}-[a-z]+-\d$/.test(options.region)) {
+      throw new Error('Invalid AWS region format for KMS');
+    }
     this.region = options.region;
     this.keyId = options.keyId;
     this.accessKeyId = options.accessKeyId;
     this.secretAccessKey = options.secretAccessKey;
     this.provider = 'aws';
+    this.client = new KMSClient({
+      region: this.region,
+      credentials:
+        this.accessKeyId && this.secretAccessKey
+          ? {
+              accessKeyId: this.accessKeyId,
+              secretAccessKey: this.secretAccessKey
+            }
+          : undefined
+    });
   }
 
   async sign(data) {
-    // Note: aws-sdk v2 is used here. For v3, use @aws-sdk/client-kms
-    const AWS = require('aws-sdk');
-    AWS.config.update({
-      region: this.region,
-      accessKeyId: this.accessKeyId,
-      secretAccessKey: this.secretAccessKey,
-    });
-
-    const kms = new AWS.KMS();
-
-    const params = {
+    const command = new SignCommand({
       KeyId: this.keyId,
       Message: data,
-      SigningAlgorithm: 'RSASSA_PKCS1_V1_5_SHA_256',
-    };
-
-    return new Promise((resolve, reject) => {
-      kms.sign(params, (err, result) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(result.Signature.toString('base64'));
-        }
-      });
+      MessageType: MessageType.DIGEST,
+      SigningAlgorithm: SigningAlgorithmSpec.RSASSA_PKCS1_V1_5_SHA_256
     });
+    const result = await this.client.send(command);
+    return Buffer.from(result.Signature).toString('base64');
   }
 }
 

@@ -2,14 +2,73 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:shimmer/shimmer.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:pointycastle/export.dart' hide State, Padding;
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:dealer_app/app/emi_locker_app.dart';
 import 'package:dealer_app/core/evidence_vault.dart';
 import 'package:dealer_app/core/google_vault.dart';
 import 'package:dealer_app/screens/shared/google_drive_onboarding_screen.dart';
+
+String _normalizeImeiValue(String value) => value.replaceAll(RegExp(r'\D'), '');
+
+bool _isValidImeiValue(String value) {
+  final imei = _normalizeImeiValue(value);
+  if (!RegExp(r'^\d{15}$').hasMatch(imei)) return false;
+
+  var sum = 0;
+  for (var i = 0; i < imei.length; i++) {
+    var digit = int.parse(imei[i]);
+    if (i.isOdd) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+  }
+  return sum % 10 == 0;
+}
+
+List<String> _extractValidImeis(String rawValue) {
+  final found = <String>{};
+  final runs = RegExp(r'\d[\d\s\-]{13,40}\d')
+      .allMatches(rawValue)
+      .map((match) => _normalizeImeiValue(match.group(0) ?? ''));
+
+  for (final run in runs) {
+    if (run.length == 15 && _isValidImeiValue(run)) {
+      found.add(run);
+      continue;
+    }
+    if (run.length > 15) {
+      for (var start = 0; start <= run.length - 15; start++) {
+        final candidate = run.substring(start, start + 15);
+        if (_isValidImeiValue(candidate)) found.add(candidate);
+      }
+    }
+  }
+
+  return found.take(2).toList();
+}
+
+class _ImeiVerification {
+  const _ImeiVerification({
+    required this.valid,
+    required this.title,
+    required this.message,
+    required this.tone,
+    required this.icon,
+  });
+
+  final bool valid;
+  final String title;
+  final String message;
+  final Color tone;
+  final IconData icon;
+}
 
 class BindDeviceWizard extends StatefulWidget {
   const BindDeviceWizard({
@@ -45,11 +104,13 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   final _modelController = TextEditingController();
   final _imei1Controller = TextEditingController();
   final _imei2Controller = TextEditingController();
+  bool _imeiVerifyBusy = false;
+  _ImeiVerification? _imeiVerification;
 
   // Step 3 — EMI terms
   final _totalAmountController = TextEditingController();
-  final _downPaymentController = TextEditingController(text: '0');
-  final _interestRateController = TextEditingController(text: '0');
+  final _downPaymentController = TextEditingController();
+  final _interestRateController = TextEditingController();
   final _emiAmountController = TextEditingController();
   final _durationController = TextEditingController(text: '12');
   final _graceDaysController = TextEditingController(text: '7');
@@ -88,6 +149,10 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
     ]) {
       controller.addListener(_onEmiInputChanged);
     }
+    _imei1Controller.addListener(_clearImeiVerification);
+    _imei2Controller.addListener(_clearImeiVerification);
+    _brandController.addListener(_clearImeiVerification);
+    _modelController.addListener(_clearImeiVerification);
     _loadInventory();
     if (widget.requireEvidence) {
       _loadVaultStatus();
@@ -197,12 +262,15 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   String? _validateStep2() {
     if (_brandController.text.trim().isEmpty) return 'Enter phone brand.';
     if (_modelController.text.trim().isEmpty) return 'Enter phone model.';
-    final imei1 = _imei1Controller.text.trim();
+    final imei1 = _normalizeImei(_imei1Controller.text);
     if (imei1.isEmpty) return 'Enter IMEI 1.';
-    if (imei1.length != 15) return 'IMEI 1 must be exactly 15 digits.';
-    final imei2 = _imei2Controller.text.trim();
-    if (imei2.isNotEmpty && imei2.length != 15) {
-      return 'IMEI 2 must be exactly 15 digits.';
+    if (!_isValidImei(imei1)) return 'IMEI 1 is not a valid IMEI number.';
+    final imei2 = _normalizeImei(_imei2Controller.text);
+    if (imei2.isNotEmpty && !_isValidImei(imei2)) {
+      return 'IMEI 2 is not a valid IMEI number.';
+    }
+    if (imei2.isNotEmpty && imei1 == imei2) {
+      return 'IMEI 1 and IMEI 2 cannot be the same.';
     }
     return null;
   }
@@ -214,14 +282,17 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
     final duration = int.tryParse(_durationController.text.trim());
     final grace = int.tryParse(_graceDaysController.text.trim());
 
+    final downVal = down ?? 0.0;
+    final interestVal = interestRate ?? 0.0;
+
     if (phonePrice == null || phonePrice <= 0) {
       return 'Enter the total phone price.';
     }
-    if (down == null || down < 0) return 'Enter a valid down payment.';
-    if (down >= phonePrice) {
+    if (downVal < 0) return 'Down payment cannot be negative.';
+    if (downVal >= phonePrice) {
       return 'Down payment must be less than the phone price.';
     }
-    if (interestRate == null || interestRate < 0 || interestRate > 100) {
+    if (interestVal < 0 || interestVal > 100) {
       return 'Interest rate must be 0-100%.';
     }
     if (duration == null || duration < 1 || duration > 60) {
@@ -257,14 +328,12 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
 
   _EmiCalculation? _calculateEmi() {
     final phonePrice = _parseNumber(_totalAmountController.text);
-    final down = _parseNumber(_downPaymentController.text);
-    final interestRate = _parseNumber(_interestRateController.text);
+    final down = _parseNumber(_downPaymentController.text) ?? 0.0;
+    final interestRate = _parseNumber(_interestRateController.text) ?? 0.0;
     final duration = int.tryParse(_durationController.text.trim());
     if (phonePrice == null || phonePrice <= 0) return null;
-    if (down == null || down < 0 || down >= phonePrice) return null;
-    if (interestRate == null || interestRate < 0 || interestRate > 100) {
-      return null;
-    }
+    if (down < 0 || down >= phonePrice) return null;
+    if (interestRate < 0 || interestRate > 100) return null;
     if (duration == null || duration < 1 || duration > 60) return null;
 
     final financedAmount = phonePrice - down;
@@ -295,6 +364,119 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
     if (_emiAmountController.text != nextValue) {
       _emiAmountController.text = nextValue;
     }
+  }
+
+  String _normalizeImei(String value) => _normalizeImeiValue(value);
+
+  bool _isValidImei(String value) => _isValidImeiValue(value);
+
+  void _clearImeiVerification() {
+    if (_imeiVerification == null || _imeiVerifyBusy) return;
+    setState(() => _imeiVerification = null);
+  }
+
+  Future<void> _verifyImeiDetails() async {
+    if (_imeiVerifyBusy) return;
+    FocusScope.of(context).unfocus();
+    setState(() => _imeiVerifyBusy = true);
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 450));
+      final imei1 = _normalizeImei(_imei1Controller.text);
+      final imei2 = _normalizeImei(_imei2Controller.text);
+      final brand = _brandController.text.trim();
+      final model = _modelController.text.trim();
+
+      _ImeiVerification result;
+      if (imei1.isEmpty) {
+        result = const _ImeiVerification(
+          valid: false,
+          title: 'IMEI missing',
+          message: 'Enter or scan IMEI 1 before verification.',
+          tone: AppTone.danger,
+          icon: Icons.error_outline,
+        );
+      } else if (!_isValidImei(imei1)) {
+        result = const _ImeiVerification(
+          valid: false,
+          title: 'IMEI 1 failed',
+          message: 'The number does not pass the official IMEI checksum.',
+          tone: AppTone.danger,
+          icon: Icons.report_gmailerrorred_outlined,
+        );
+      } else if (imei2.isNotEmpty && !_isValidImei(imei2)) {
+        result = const _ImeiVerification(
+          valid: false,
+          title: 'IMEI 2 failed',
+          message: 'The second IMEI does not pass the official checksum.',
+          tone: AppTone.danger,
+          icon: Icons.report_gmailerrorred_outlined,
+        );
+      } else if (imei2.isNotEmpty && imei1 == imei2) {
+        result = const _ImeiVerification(
+          valid: false,
+          title: 'Duplicate IMEI',
+          message: 'IMEI 1 and IMEI 2 must be different for dual-SIM phones.',
+          tone: AppTone.danger,
+          icon: Icons.content_copy_outlined,
+        );
+      } else if (brand.isEmpty || model.isEmpty) {
+        result = _ImeiVerification(
+          valid: true,
+          title: 'IMEI checksum passed',
+          message:
+              'TAC ${imei1.substring(0, 8)} is valid. Add brand and model, then verify against the box or *#06#.',
+          tone: AppTone.warning,
+          icon: Icons.fact_check_outlined,
+        );
+      } else {
+        final dual = imei2.isEmpty
+            ? 'Single IMEI captured.'
+            : 'Dual IMEI captured.';
+        result = _ImeiVerification(
+          valid: true,
+          title: 'Device details verified locally',
+          message:
+              '$brand $model passed IMEI checksum. TAC ${imei1.substring(0, 8)} recorded. $dual',
+          tone: AppTone.brand,
+          icon: Icons.verified_outlined,
+        );
+      }
+      if (mounted) setState(() => _imeiVerification = result);
+    } finally {
+      if (mounted) setState(() => _imeiVerifyBusy = false);
+    }
+  }
+
+  Future<void> _scanImeis() async {
+    final scanned = await Navigator.push<List<String>>(
+      context,
+      MaterialPageRoute(builder: (_) => const _ImeiScannerScreen()),
+    );
+    if (!mounted || scanned == null) return;
+    if (scanned.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No valid IMEI found. Try the box QR/barcode or enter manually.',
+          ),
+          backgroundColor: AppTone.danger,
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _imei1Controller.text = scanned.first;
+      _imei2Controller.text = scanned.length > 1 ? scanned[1] : '';
+      _imeiVerification = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          scanned.length > 1 ? 'IMEI 1 and IMEI 2 captured.' : 'IMEI captured.',
+        ),
+        backgroundColor: AppTone.brand,
+      ),
+    );
   }
 
   int get _totalSteps => widget.requireEvidence ? 8 : 7;
@@ -436,7 +618,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         'phone_number': _phoneController.text.trim(),
         'brand': _brandController.text.trim(),
         'model': _modelController.text.trim(),
-        'imei1': _imei1Controller.text.trim(),
+        'imei1': _normalizeImei(_imei1Controller.text),
         'tier': _selectedTier,
         'totalAmount': emi.totalPayable,
         'downPayment': emi.downPayment,
@@ -447,7 +629,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         'phonePrice': emi.phonePrice,
         'interestRate': emi.interestRate,
       };
-      final imei2 = _imei2Controller.text.trim();
+      final imei2 = _normalizeImei(_imei2Controller.text);
       if (imei2.isNotEmpty) body['imei2'] = imei2;
 
       final res = await widget.api.post(
@@ -468,8 +650,12 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
             nidHash: nidHash,
           );
         }
+        final token = text(d['token']).trim();
+        if (!RegExp(r'^\d{6}$').hasMatch(token)) {
+          throw Exception('Server did not return a valid activation code.');
+        }
         setState(() {
-          _enrollmentToken = text(d['token']);
+          _enrollmentToken = token;
         });
       }
     } catch (e) {
@@ -488,8 +674,8 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
     _imei1Controller.clear();
     _imei2Controller.clear();
     _totalAmountController.clear();
-    _downPaymentController.text = '0';
-    _interestRateController.text = '0';
+    _downPaymentController.clear();
+    _interestRateController.clear();
     _emiAmountController.clear();
     _durationController.text = '12';
     _graceDaysController.text = '7';
@@ -815,7 +1001,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
           total: _totalSteps,
           title: 'Device information',
           subtitle:
-              'Enter the phone details. Check the box or settings for IMEI.',
+              'Enter the phone details and scan the box or sticker for IMEI.',
         ),
         const SizedBox(height: 20),
         _Field(
@@ -830,12 +1016,20 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
           hint: 'e.g. Galaxy A15',
         ),
         const SizedBox(height: 12),
+        _ScanImeiPanel(onScan: _scanImeis),
+        const SizedBox(height: 12),
         _Field(
           controller: _imei1Controller,
           label: 'IMEI 1',
           hint: '15-digit IMEI',
           keyboard: TextInputType.number,
           maxLength: 15,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          suffixIcon: IconButton(
+            tooltip: 'Scan IMEI',
+            icon: const Icon(Icons.qr_code_scanner_rounded),
+            onPressed: _scanImeis,
+          ),
         ),
         const SizedBox(height: 12),
         _Field(
@@ -844,10 +1038,23 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
           hint: '15-digit IMEI for dual-SIM',
           keyboard: TextInputType.number,
           maxLength: 15,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          suffixIcon: IconButton(
+            tooltip: 'Scan IMEI',
+            icon: const Icon(Icons.qr_code_scanner_rounded),
+            onPressed: _scanImeis,
+          ),
+        ),
+        const SizedBox(height: 8),
+        _ImeiVerifyPanel(
+          busy: _imeiVerifyBusy,
+          result: _imeiVerification,
+          onVerify: _verifyImeiDetails,
         ),
         const SizedBox(height: 8),
         InlineNotice(
-          message: 'Dial *#06# on the device to confirm IMEI numbers.',
+          message:
+              'Scan first, then confirm against the box or *#06# before continuing.',
           tone: AppTone.info,
           icon: Icons.phone_outlined,
         ),
@@ -911,59 +1118,147 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
           keyboard: TextInputType.number,
         ),
         const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.all(14),
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
           decoration: BoxDecoration(
-            color: AppTone.page,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTone.line),
-          ),
-          child: calculation == null
-              ? const Row(
-                  children: [
-                    Icon(Icons.calculate_outlined, color: AppTone.muted),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Enter price, down payment, interest, and duration to calculate EMI.',
-                        style: TextStyle(color: AppTone.muted, fontSize: 13),
-                      ),
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: calculation != null
+                ? [
+                    BoxShadow(
+                      color: AppTone.brand.withValues(alpha: 0.12),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
                     ),
                   ],
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Row(
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: calculation == null
+                ? Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
                       children: [
-                        Icon(Icons.calculate_outlined, color: AppTone.brand),
-                        SizedBox(width: 8),
-                        Text(
-                          'Calculated payment',
-                          style: TextStyle(
-                            color: AppTone.ink,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 13,
+                        Container(
+                          width: 36,
+                          height: 36,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: AppTone.muted.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(
+                            Icons.calculate_outlined,
+                            color: AppTone.muted,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            'Enter price, down payment, interest, and duration to calculate EMI.',
+                            style: TextStyle(
+                              color: AppTone.muted,
+                              fontSize: 13,
+                            ),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    _ReviewRow(
-                      'Finance amount',
-                      _money(calculation.financedAmount),
-                    ),
-                    _ReviewRow(
-                      'Interest amount',
-                      _money(calculation.interestAmount),
-                    ),
-                    _ReviewRow('Monthly EMI', _money(calculation.monthlyEmi)),
-                    _ReviewRow(
-                      'Total payable',
-                      _money(calculation.totalPayable),
-                    ),
-                  ],
-                ),
+                  )
+                : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [AppTone.brand, AppTone.brandDark],
+                                begin: Alignment.centerLeft,
+                                end: Alignment.centerRight,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.payments_outlined,
+                                  color: Colors.white,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 8),
+                                const Text(
+                                  'Payment summary',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                const Spacer(),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.2),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    '${_money(calculation.monthlyEmi)}/mo',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              children: [
+                                _EmiSummaryRow(
+                                  'Finance amount',
+                                  _money(calculation.financedAmount),
+                                ),
+                                _EmiSummaryRow(
+                                  'Interest amount',
+                                  _money(calculation.interestAmount),
+                                ),
+                                const Divider(height: 16, thickness: 1),
+                                _EmiSummaryRow(
+                                  'Monthly EMI',
+                                  _money(calculation.monthlyEmi),
+                                  bold: true,
+                                  highlight: true,
+                                ),
+                                _EmiSummaryRow(
+                                  'Total payable',
+                                  _money(calculation.totalPayable),
+                                  bold: true,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      )
+                      .animate()
+                      .fadeIn(duration: 280.ms)
+                      .slideY(begin: 0.04, end: 0, duration: 280.ms),
+          ),
         ),
         const SizedBox(height: 12),
         OutlinedButton.icon(
@@ -1157,6 +1452,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
               calculation == null
                   ? _emiAmountController.text.trim()
                   : _money(calculation.monthlyEmi),
+              highlight: true,
             ),
             _ReviewRow('Duration', '${_durationController.text.trim()} months'),
             _ReviewRow(
@@ -1332,42 +1628,123 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         ] else if (_enrollmentToken != null) ...[
           // Code display — large, easy to read at a glance
           Container(
-            padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
+            padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
             decoration: BoxDecoration(
-              color: AppTone.brand.withValues(alpha: 0.06),
+              color: Colors.white,
               border: Border.all(
-                color: AppTone.brand.withValues(alpha: 0.4),
+                color: AppTone.brand.withValues(alpha: 0.25),
                 width: 1.5,
               ),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: AppTone.brand.withValues(alpha: 0.1),
+                  blurRadius: 20,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
             child: Column(
               children: [
-                const Text(
-                  'Activation code',
-                  style: TextStyle(
-                    color: AppTone.muted,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.key_rounded,
+                      color: AppTone.brand,
+                      size: 15,
+                    ),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'Activation code',
+                      style: TextStyle(
+                        color: AppTone.brand,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  // Format as "847 291" — easier to read in two groups
-                  '${_enrollmentToken!.substring(0, 3)}  ${_enrollmentToken!.substring(3)}',
-                  style: const TextStyle(
-                    fontSize: 44,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 6,
-                    color: AppTone.brand,
-                    fontFamily: 'monospace',
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Valid for 10 minutes',
-                  style: TextStyle(color: AppTone.muted, fontSize: 12),
+                const SizedBox(height: 20),
+                _ActivationCodeDisplay(token: _enrollmentToken!)
+                    .animate()
+                    .fadeIn(duration: 400.ms)
+                    .scale(
+                      begin: const Offset(0.85, 0.85),
+                      duration: 400.ms,
+                      curve: Curves.easeOutBack,
+                    ),
+                const SizedBox(height: 20),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 12,
+                  runSpacing: 10,
+                  children: [
+                    const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.timer_outlined,
+                          size: 13,
+                          color: AppTone.muted,
+                        ),
+                        SizedBox(width: 4),
+                        Text(
+                          'Valid for 10 minutes',
+                          style: TextStyle(color: AppTone.muted, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                    GestureDetector(
+                      onTap: () {
+                        Clipboard.setData(
+                          ClipboardData(text: _enrollmentToken!),
+                        );
+                        HapticFeedback.lightImpact();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: const Text('Code copied to clipboard'),
+                            duration: const Duration(seconds: 2),
+                            behavior: SnackBarBehavior.floating,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        );
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTone.brand.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.copy_rounded,
+                              size: 12,
+                              color: AppTone.brand,
+                            ),
+                            SizedBox(width: 4),
+                            Text(
+                              'Copy',
+                              style: TextStyle(
+                                color: AppTone.brand,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -1437,58 +1814,416 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   }
 
   Widget _buildSuccess() {
+    final customerName = _nameController.text.trim();
+    final brand = _brandController.text.trim();
+    final model = _modelController.text.trim();
+    final imei = _imei1Controller.text.trim();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 32),
+        const SizedBox(height: 40),
         Center(
-          child: Container(
-            width: 72,
-            height: 72,
+          child: Stack(
             alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: AppTone.brand.withValues(alpha: 0.12),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.check_circle_rounded,
-              color: AppTone.brand,
-              size: 40,
-            ),
+            children: [
+              // Outer pulse ring
+              Container(
+                    width: 120,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: AppTone.brand.withValues(alpha: 0.06),
+                    ),
+                  )
+                  .animate(onPlay: (c) => c.repeat(reverse: true))
+                  .scale(
+                    begin: const Offset(0.9, 0.9),
+                    end: const Offset(1.1, 1.1),
+                    duration: 1800.ms,
+                    curve: Curves.easeInOut,
+                  ),
+              // Mid ring
+              Container(
+                width: 90,
+                height: 90,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppTone.brand.withValues(alpha: 0.1),
+                ),
+              ).animate().scale(
+                begin: const Offset(0, 0),
+                end: const Offset(1, 1),
+                duration: 500.ms,
+                delay: 100.ms,
+                curve: Curves.easeOutBack,
+              ),
+              // Inner filled circle + checkmark
+              Container(
+                    width: 66,
+                    height: 66,
+                    alignment: Alignment.center,
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [AppTone.brand, AppTone.brandDark],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Color(0x4000C896),
+                          blurRadius: 20,
+                          offset: Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: const Icon(
+                      Icons.check_rounded,
+                      color: Colors.white,
+                      size: 36,
+                    ),
+                  )
+                  .animate()
+                  .scale(
+                    begin: const Offset(0, 0),
+                    end: const Offset(1, 1),
+                    duration: 450.ms,
+                    delay: 200.ms,
+                    curve: Curves.easeOutBack,
+                  )
+                  .fadeIn(duration: 300.ms, delay: 200.ms),
+            ],
           ),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 28),
         const Text(
-          'Device bound successfully',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w800,
-            color: AppTone.ink,
-          ),
-        ),
-        const SizedBox(height: 8),
+              'Device enrolled!',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.w900,
+                color: AppTone.ink,
+              ),
+            )
+            .animate()
+            .fadeIn(duration: 300.ms, delay: 400.ms)
+            .slideY(begin: 0.1, end: 0, duration: 300.ms, delay: 400.ms),
+        const SizedBox(height: 6),
         Text(
-          '${_nameController.text.trim()}\'s device is now enrolled and protected.',
+          '$customerName\'s device is now protected.',
           textAlign: TextAlign.center,
-          style: const TextStyle(color: AppTone.muted),
-        ),
-        const SizedBox(height: 32),
+          style: const TextStyle(color: AppTone.muted, fontSize: 14),
+        ).animate().fadeIn(duration: 300.ms, delay: 500.ms),
+        const SizedBox(height: 28),
+        // Device summary card
+        Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    blurRadius: 14,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  _SuccessSummaryRow(
+                    icon: Icons.person_outline_rounded,
+                    label: 'Customer',
+                    value: customerName,
+                  ),
+                  if (brand.isNotEmpty || model.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    _SuccessSummaryRow(
+                      icon: Icons.smartphone_rounded,
+                      label: 'Device',
+                      value: [
+                        brand,
+                        model,
+                      ].where((s) => s.isNotEmpty).join(' '),
+                    ),
+                  ],
+                  if (imei.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    _SuccessSummaryRow(
+                      icon: Icons.fingerprint_rounded,
+                      label: 'IMEI',
+                      value: imei,
+                      mono: true,
+                    ),
+                  ],
+                ],
+              ),
+            )
+            .animate()
+            .fadeIn(duration: 350.ms, delay: 550.ms)
+            .slideY(begin: 0.08, end: 0, duration: 350.ms, delay: 550.ms),
+        const SizedBox(height: 28),
         FilledButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Done'),
-        ),
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Done'),
+            )
+            .animate()
+            .fadeIn(duration: 300.ms, delay: 650.ms)
+            .slideY(begin: 0.06, end: 0, duration: 300.ms, delay: 650.ms),
         const SizedBox(height: 10),
         OutlinedButton(
           onPressed: _bindAnother,
           child: const Text('Bind another device'),
-        ),
+        ).animate().fadeIn(duration: 300.ms, delay: 700.ms),
       ],
     );
   }
 }
 
 // ── Supporting widgets ────────────────────────────────────────────────────
+
+class _ScanImeiPanel extends StatelessWidget {
+  const _ScanImeiPanel({required this.onScan});
+
+  final VoidCallback onScan;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: AppTone.brand.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.qr_code_scanner_rounded,
+              color: AppTone.brand,
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Scan IMEI from box',
+                  style: TextStyle(
+                    color: AppTone.ink,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'Reads QR/barcode text and keeps only valid IMEI numbers.',
+                  style: TextStyle(color: AppTone.muted, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.icon(
+            onPressed: onScan,
+            icon: const Icon(Icons.photo_camera_outlined, size: 18),
+            label: const Text('Scan'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ImeiVerifyPanel extends StatelessWidget {
+  const _ImeiVerifyPanel({
+    required this.busy,
+    required this.result,
+    required this.onVerify,
+  });
+
+  final bool busy;
+  final _ImeiVerification? result;
+  final VoidCallback onVerify;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = result;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: current == null
+            ? AppTone.page
+            : current.tone.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: current == null
+              ? AppTone.line
+              : current.tone.withValues(alpha: 0.28),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: (current?.tone ?? AppTone.info).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: busy
+                ? const Padding(
+                    padding: EdgeInsets.all(11),
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(
+                    current?.icon ?? Icons.manage_search_rounded,
+                    color: current?.tone ?? AppTone.info,
+                  ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  current?.title ?? 'IMEI verification',
+                  style: TextStyle(
+                    color: current?.tone ?? AppTone.ink,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  current?.message ??
+                      'Checks the IMEI checksum and prepares the TAC for model lookup.',
+                  style: const TextStyle(
+                    color: AppTone.muted,
+                    fontSize: 12,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          OutlinedButton.icon(
+            onPressed: busy ? null : onVerify,
+            icon: const Icon(Icons.verified_outlined, size: 18),
+            label: Text(busy ? 'Verifying' : "I'm verifying"),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ImeiScannerScreen extends StatefulWidget {
+  const _ImeiScannerScreen();
+
+  @override
+  State<_ImeiScannerScreen> createState() => _ImeiScannerScreenState();
+}
+
+class _ImeiScannerScreenState extends State<_ImeiScannerScreen> {
+  final MobileScannerController _controller = MobileScannerController(
+    formats: const [
+      BarcodeFormat.qrCode,
+      BarcodeFormat.code128,
+      BarcodeFormat.code39,
+      BarcodeFormat.ean13,
+      BarcodeFormat.dataMatrix,
+      BarcodeFormat.pdf417,
+    ],
+  );
+  bool _handled = false;
+  String _status = 'Point camera at the IMEI QR/barcode on the box or sticker.';
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleCapture(BarcodeCapture capture) async {
+    if (_handled) return;
+    final rawValues = capture.barcodes
+        .map((barcode) => barcode.rawValue ?? barcode.displayValue ?? '')
+        .where((value) => value.trim().isNotEmpty)
+        .join('\n');
+    if (rawValues.isEmpty) return;
+
+    final imeis = _extractValidImeis(rawValues);
+    if (imeis.isEmpty) {
+      if (!mounted) return;
+      setState(
+        () => _status =
+            'Barcode read, but no valid IMEI found. Try another code.',
+      );
+      return;
+    }
+
+    _handled = true;
+    await _controller.stop();
+    if (mounted) Navigator.pop(context, imeis);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        title: const Text('Scan IMEI'),
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+      ),
+      body: Stack(
+        children: [
+          MobileScanner(controller: _controller, onDetect: _handleCapture),
+          Center(
+            child: Container(
+              width: 260,
+              height: 180,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white, width: 2),
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 24,
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.72),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Text(
+                _status,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _Step extends StatelessWidget {
   const _Step(this.number, this.text);
@@ -1684,30 +2419,84 @@ class _WizardHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Step $step of $total',
-          style: const TextStyle(
-            fontSize: 12,
-            color: AppTone.muted,
-            fontWeight: FontWeight.w500,
+        Container(
+              width: 40,
+              height: 40,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [AppTone.brand, AppTone.brandDark],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTone.brand.withValues(alpha: 0.35),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Text(
+                '$step',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 16,
+                ),
+              ),
+            )
+            .animate()
+            .scale(
+              begin: const Offset(0.7, 0.7),
+              end: const Offset(1, 1),
+              duration: 280.ms,
+              curve: Curves.easeOutBack,
+            )
+            .fadeIn(duration: 200.ms),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Step $step of $total',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: AppTone.muted,
+                  fontWeight: FontWeight.w500,
+                  letterSpacing: 0.3,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                    title,
+                    key: ValueKey(title),
+                    style: const TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w800,
+                      color: AppTone.ink,
+                    ),
+                  )
+                  .animate()
+                  .fadeIn(duration: 220.ms)
+                  .slideX(
+                    begin: 0.04,
+                    end: 0,
+                    duration: 220.ms,
+                    curve: Curves.easeOut,
+                  ),
+              const SizedBox(height: 3),
+              Text(
+                subtitle,
+                style: const TextStyle(color: AppTone.muted, fontSize: 13),
+              ).animate().fadeIn(duration: 260.ms, delay: 60.ms),
+            ],
           ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          title,
-          style: const TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w800,
-            color: AppTone.ink,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          subtitle,
-          style: const TextStyle(color: AppTone.muted, fontSize: 13),
         ),
       ],
     );
@@ -1722,6 +2511,8 @@ class _Field extends StatefulWidget {
     this.keyboard = TextInputType.text,
     this.maxLength,
     this.onEditingComplete,
+    this.inputFormatters,
+    this.suffixIcon,
   });
   final TextEditingController controller;
   final String label;
@@ -1729,6 +2520,8 @@ class _Field extends StatefulWidget {
   final TextInputType keyboard;
   final int? maxLength;
   final VoidCallback? onEditingComplete;
+  final List<TextInputFormatter>? inputFormatters;
+  final Widget? suffixIcon;
 
   @override
   State<_Field> createState() => _FieldState();
@@ -1778,13 +2571,17 @@ class _FieldState extends State<_Field> {
         focusNode: _focus,
         keyboardType: widget.keyboard,
         maxLength: widget.maxLength,
+        inputFormatters: widget.inputFormatters,
         onEditingComplete: widget.onEditingComplete,
         decoration: InputDecoration(
           labelText: widget.label,
           hintText: widget.hint,
           counterText: '',
+          suffixIcon: widget.suffixIcon,
           filled: true,
-          fillColor: _focused ? const Color(0xFFF0FDF9) : const Color(0xFFF8F9FA),
+          fillColor: _focused
+              ? const Color(0xFFF0FDF9)
+              : const Color(0xFFF8F9FA),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
             borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
@@ -1797,7 +2594,10 @@ class _FieldState extends State<_Field> {
             borderRadius: BorderRadius.circular(14),
             borderSide: const BorderSide(color: AppTone.brand, width: 2),
           ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 15,
+          ),
         ),
       ),
     );
@@ -1814,62 +2614,127 @@ class _ReviewSection extends StatelessWidget {
   final VoidCallback onEdit;
   final List<Widget> children;
 
+  static IconData _iconFor(String title) {
+    switch (title.toLowerCase()) {
+      case 'customer':
+        return Icons.person_outline_rounded;
+      case 'device':
+        return Icons.smartphone_rounded;
+      case 'emi terms':
+        return Icons.payments_outlined;
+      case 'evidence vault':
+        return Icons.lock_outlined;
+      default:
+        return Icons.info_outline_rounded;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border.all(color: AppTone.muted.withValues(alpha: 0.2)),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 12,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: AppTone.ink,
-                ),
-              ),
-              const Spacer(),
-              TextButton(
-                onPressed: onEdit,
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                ),
-                child: const Text(
-                  'Edit',
-                  style: TextStyle(color: AppTone.brand),
+              Container(width: 4, color: AppTone.brand),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 28,
+                            height: 28,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: AppTone.brand.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              _iconFor(title),
+                              color: AppTone.brand,
+                              size: 16,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: AppTone.ink,
+                              fontSize: 13,
+                            ),
+                          ),
+                          const Spacer(),
+                          GestureDetector(
+                            onTap: onEdit,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTone.brand.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: const Text(
+                                'Edit',
+                                style: TextStyle(
+                                  color: AppTone.brand,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      const Divider(height: 1, thickness: 1),
+                      const SizedBox(height: 8),
+                      ...children,
+                    ],
+                  ),
                 ),
               ),
             ],
           ),
-          const Divider(height: 12),
-          ...children,
-        ],
+        ),
       ),
     );
   }
 }
 
 class _ReviewRow extends StatelessWidget {
-  const _ReviewRow(this.label, this.value);
+  const _ReviewRow(this.label, this.value, {this.highlight = false});
   final String label;
   final String value;
+  final bool highlight;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
           SizedBox(
-            width: 80,
+            width: 100,
             child: Text(
               label,
               style: const TextStyle(fontSize: 12, color: AppTone.muted),
@@ -1878,14 +2743,228 @@ class _ReviewRow extends StatelessWidget {
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
-                color: AppTone.ink,
+              style: TextStyle(
+                fontWeight: highlight ? FontWeight.w800 : FontWeight.w600,
+                color: highlight ? AppTone.brand : AppTone.ink,
+                fontSize: highlight ? 14 : 13,
               ),
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+// Responsive 3+3 activation code display.
+class _ActivationCodeDisplay extends StatelessWidget {
+  const _ActivationCodeDisplay({required this.token});
+
+  final String token;
+
+  @override
+  Widget build(BuildContext context) {
+    final digitsOnly = token.replaceAll(RegExp(r'\D'), '');
+    final displayCode =
+        (digitsOnly.length >= 6 ? digitsOnly.substring(0, 6) : digitsOnly)
+            .padRight(6);
+    final firstHalf = displayCode.substring(0, 3).split('');
+    final secondHalf = displayCode.substring(3, 6).split('');
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availableWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : 340.0;
+        final compact = availableWidth < 300;
+        final digitGap = compact ? 4.0 : 6.0;
+        final separatorGap = compact ? 8.0 : 12.0;
+        final dotSize = compact ? 5.0 : 6.0;
+        final rawPillWidth =
+            (availableWidth - (digitGap * 4) - (separatorGap * 2) - dotSize) /
+            6;
+        final pillWidth = rawPillWidth.clamp(26.0, 42.0);
+        final pillHeight = (pillWidth * 1.24).clamp(38.0, 52.0);
+        final fontSize = (pillWidth * 0.64).clamp(18.0, 28.0);
+
+        Widget digitGroup(List<String> digits) {
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var index = 0; index < digits.length; index++) ...[
+                if (index > 0) SizedBox(width: digitGap),
+                _CodeDigitPill(
+                  digit: digits[index],
+                  width: pillWidth,
+                  height: pillHeight,
+                  fontSize: fontSize,
+                ),
+              ],
+            ],
+          );
+        }
+
+        final codeRow = Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            digitGroup(firstHalf),
+            SizedBox(width: separatorGap),
+            Container(
+              width: dotSize,
+              height: dotSize,
+              decoration: BoxDecoration(
+                color: AppTone.brand.withValues(alpha: 0.45),
+                shape: BoxShape.circle,
+              ),
+            ),
+            SizedBox(width: separatorGap),
+            digitGroup(secondHalf),
+          ],
+        );
+
+        return Shimmer.fromColors(
+          baseColor: AppTone.brand,
+          highlightColor: AppTone.brandDark,
+          period: const Duration(seconds: 3),
+          child: FittedBox(fit: BoxFit.scaleDown, child: codeRow),
+        );
+      },
+    );
+  }
+}
+
+// Single digit pill for activation code display
+class _CodeDigitPill extends StatelessWidget {
+  const _CodeDigitPill({
+    required this.digit,
+    required this.width,
+    required this.height,
+    required this.fontSize,
+  });
+
+  final String digit;
+  final double width;
+  final double height;
+  final double fontSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      height: height,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: AppTone.brand.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: AppTone.brand.withValues(alpha: 0.2),
+          width: 1.5,
+        ),
+      ),
+      child: Text(
+        digit,
+        style: TextStyle(
+          fontSize: fontSize,
+          fontWeight: FontWeight.w900,
+          color: AppTone.brand,
+          fontFamily: 'monospace',
+        ),
+      ),
+    );
+  }
+}
+
+// EMI summary row — used inside financial summary card
+class _EmiSummaryRow extends StatelessWidget {
+  const _EmiSummaryRow(
+    this.label,
+    this.value, {
+    this.bold = false,
+    this.highlight = false,
+  });
+  final String label;
+  final String value;
+  final bool bold;
+  final bool highlight;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                color: bold ? AppTone.ink : AppTone.muted,
+                fontWeight: bold ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: bold ? 15 : 13,
+              fontWeight: bold ? FontWeight.w800 : FontWeight.w500,
+              color: highlight ? AppTone.brand : AppTone.ink,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Success screen device summary row
+class _SuccessSummaryRow extends StatelessWidget {
+  const _SuccessSummaryRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.mono = false,
+  });
+  final IconData icon;
+  final String label;
+  final String value;
+  final bool mono;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 32,
+          height: 32,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: AppTone.brand.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, color: AppTone.brand, size: 16),
+        ),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 72,
+          child: Text(
+            label,
+            style: const TextStyle(fontSize: 12, color: AppTone.muted),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: AppTone.ink,
+              fontSize: 13,
+              fontFamily: mono ? 'monospace' : null,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

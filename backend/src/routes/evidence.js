@@ -1,4 +1,5 @@
 const express = require('express');
+
 const router = express.Router();
 const asyncHandler = require('express-async-handler');
 const { body, param } = require('express-validator');
@@ -16,16 +17,35 @@ router.use(authenticateToken);
 router.post(
   '/register',
   requireRole('dealer'),
-  body('nid_hash').isString().isLength({ min: 64, max: 64 }).withMessage('SHA-256 nid_hash required'),
+  body('nid_hash')
+    .isString()
+    .isLength({ min: 64, max: 64 })
+    .withMessage('SHA-256 nid_hash required'),
   body('device_id').isUUID().withMessage('Valid device_id required'),
-  body('evidence_type').isIn(['NID_FRONT', 'NID_BACK', 'FACE_PHOTO']).withMessage('Invalid evidence_type'),
-  body('key_a_encrypted').isString().isLength({ min: 1, max: 2048 }).withMessage('Encrypted Key A required'),
-  body('photo_hash').isString().isLength({ min: 64, max: 64 }).withMessage('SHA-256 photo_hash required'),
+  body('evidence_type')
+    .isIn(['NID_FRONT', 'NID_BACK', 'FACE_PHOTO'])
+    .withMessage('Invalid evidence_type'),
+  body('key_a_encrypted')
+    .isString()
+    .isLength({ min: 1, max: 2048 })
+    .withMessage('Encrypted Key A required'),
+  body('photo_hash')
+    .isString()
+    .isLength({ min: 64, max: 64 })
+    .withMessage('SHA-256 photo_hash required'),
   body('dealer_seed_id').isString().isLength({ min: 1, max: 255 }),
   body('reseller_seed_id').isString().isLength({ min: 1, max: 255 }),
   validateRequest,
   asyncHandler(async (req, res) => {
-    const { nid_hash, device_id, evidence_type, key_a_encrypted, photo_hash, dealer_seed_id, reseller_seed_id } = req.body;
+    const {
+      nid_hash,
+      device_id,
+      evidence_type,
+      key_a_encrypted,
+      photo_hash,
+      dealer_seed_id,
+      reseller_seed_id
+    } = req.body;
 
     // Verify this device belongs to the requesting dealer
     const deviceCheck = await db.query(
@@ -56,7 +76,15 @@ router.post(
          (nid_hash, device_id, evidence_type, key_a_ref, photo_hash, dealer_seed_id, reseller_seed_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id`,
-      [nid_hash, device_id, evidence_type, key_a_encrypted, photo_hash, dealer_seed_id, reseller_seed_id]
+      [
+        nid_hash,
+        device_id,
+        evidence_type,
+        key_a_encrypted,
+        photo_hash,
+        dealer_seed_id,
+        reseller_seed_id
+      ]
     );
 
     res.status(201).json({ success: true, evidence_id: result.rows[0].id });
@@ -70,7 +98,10 @@ router.post(
   '/access-request',
   requireRole('admin'),
   body('evidence_id').isUUID().withMessage('Valid evidence_id required'),
-  body('reason').isString().isLength({ min: 10, max: 1000 }).withMessage('Reason required (min 10 chars)'),
+  body('reason')
+    .isString()
+    .isLength({ min: 10, max: 1000 })
+    .withMessage('Reason required (min 10 chars)'),
   body('case_reference').optional().isString().isLength({ max: 255 }),
   validateRequest,
   asyncHandler(async (req, res) => {
@@ -92,7 +123,9 @@ router.post(
       [evidence_id, req.user.id]
     );
     if (existing.rows.length > 0) {
-      return res.status(409).json({ success: false, error: 'A pending request already exists for this evidence' });
+      return res
+        .status(409)
+        .json({ success: false, error: 'A pending request already exists for this evidence' });
     }
 
     const request = await db.query(
@@ -114,7 +147,9 @@ router.post(
   '/access-request/:requestId/approve',
   requireRole('admin', 'dealer', 'reseller'),
   param('requestId').isUUID(),
-  body('approval_type').isIn(['admin_approval', 'key_holder_authorization']).withMessage('Invalid approval_type'),
+  body('approval_type')
+    .isIn(['admin_approval', 'key_holder_authorization'])
+    .withMessage('Invalid approval_type'),
   validateRequest,
   asyncHandler(async (req, res) => {
     const { requestId } = req.params;
@@ -132,22 +167,36 @@ router.post(
 
     if (approval_type === 'admin_approval') {
       if (req.user.role !== 'admin') {
-        return res.status(403).json({ success: false, error: 'Admin role required for this approval type' });
+        return res
+          .status(403)
+          .json({ success: false, error: 'Admin role required for this approval type' });
       }
       if (r.requested_by === req.user.id) {
-        return res.status(403).json({ success: false, error: 'Requester cannot approve their own request' });
+        return res
+          .status(403)
+          .json({ success: false, error: 'Requester cannot approve their own request' });
       }
 
       if (!r.approved_by_1) {
-        await db.query(`UPDATE evidence_access_log SET approved_by_1 = $1 WHERE id = $2`, [req.user.id, requestId]);
+        await db.query(`UPDATE evidence_access_log SET approved_by_1 = $1 WHERE id = $2`, [
+          req.user.id,
+          requestId
+        ]);
       } else if (!r.approved_by_2 && r.approved_by_1 !== req.user.id) {
-        await db.query(`UPDATE evidence_access_log SET approved_by_2 = $1 WHERE id = $2`, [req.user.id, requestId]);
+        await db.query(`UPDATE evidence_access_log SET approved_by_2 = $1 WHERE id = $2`, [
+          req.user.id,
+          requestId
+        ]);
       } else {
-        return res.status(409).json({ success: false, error: 'Admin approval slots already filled' });
+        return res
+          .status(409)
+          .json({ success: false, error: 'Admin approval slots already filled' });
       }
     } else {
       // key_holder_authorization — dealer or reseller who holds the evidence copy
-      await db.query(`UPDATE evidence_access_log SET key_holder_authorized = TRUE WHERE id = $1`, [requestId]);
+      await db.query(`UPDATE evidence_access_log SET key_holder_authorized = TRUE WHERE id = $1`, [
+        requestId
+      ]);
     }
 
     // Re-fetch to check if all three conditions are now met
@@ -174,8 +223,8 @@ router.post(
       pending: {
         admin_approval_1: !!u.approved_by_1,
         admin_approval_2: !!u.approved_by_2,
-        key_holder_authorized: u.key_holder_authorized,
-      },
+        key_holder_authorized: u.key_holder_authorized
+      }
     });
   })
 );
@@ -215,7 +264,7 @@ router.get(
       success: true,
       key_a_ref: r.key_a_ref,
       photo_hash: r.photo_hash,
-      session_expires: r.session_expires,
+      session_expires: r.session_expires
     });
   })
 );
@@ -252,15 +301,20 @@ router.post(
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'No active evidence found for this NID hash' });
+      return res
+        .status(404)
+        .json({ success: false, error: 'No active evidence found for this NID hash' });
     }
 
-    logger.info(`Evidence deletion requested for nid_hash=${nid_hash} — ${result.rows.length} record(s) marked`);
+    logger.info(
+      `Evidence deletion requested for nid_hash=${nid_hash} — ${result.rows.length} record(s) marked`
+    );
 
     res.json({
       success: true,
       records_marked: result.rows.length,
-      message: 'Evidence deletion scheduled. Dealer and reseller apps will receive deletion commands on next sync.',
+      message:
+        'Evidence deletion scheduled. Dealer and reseller apps will receive deletion commands on next sync.'
     });
   })
 );

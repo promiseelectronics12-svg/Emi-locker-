@@ -12,8 +12,6 @@ const adminMiddleware = {
       return next();
     }
 
-    const db = require('../../config/database');
-
     try {
       const result = await db.query(
         'SELECT two_factor_verified, two_factor_verified_at, totp_enabled FROM users WHERE id = $1',
@@ -73,7 +71,9 @@ const adminMiddleware = {
 
     // Secondary DB-verified role check — prevents token role spoofing
     try {
-      const result = await db.query(`SELECT role FROM users WHERE id = $1 AND deleted_at IS NULL`, [req.user.id]);
+      const result = await db.query(`SELECT role FROM users WHERE id = $1 AND deleted_at IS NULL`, [
+        req.user.id
+      ]);
       if (!result.rows.length || result.rows[0].role !== 'admin') {
         return res.status(403).json({ error: 'Admin role not confirmed' });
       }
@@ -92,15 +92,24 @@ const adminMiddleware = {
       const duration = Date.now() - startTime;
       // Use module-level db import — no inline require
       const action = req.route ? req.route.path : req.path;
-      const method = req.method;
-      const statusCode = res.statusCode;
+      const { method } = req;
+      const { statusCode } = res;
 
       if (req.user && req.user.id) {
         db.query(
           `INSERT INTO admin_action_log (admin_id, action, method, path, status_code, duration_ms, ip_address, user_agent, created_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
-          [req.user.id, action, method, req.originalUrl, statusCode, duration, req.ip, req.get('User-Agent')]
-        ).catch(err => {
+          [
+            req.user.id,
+            action,
+            method,
+            req.originalUrl,
+            statusCode,
+            duration,
+            req.ip,
+            req.get('User-Agent')
+          ]
+        ).catch((err) => {
           logger.error('Failed to log admin action:', err);
         });
       }

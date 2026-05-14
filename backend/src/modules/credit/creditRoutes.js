@@ -1,4 +1,5 @@
 const express = require('express');
+
 const router = express.Router();
 const asyncHandler = require('express-async-handler');
 const { body, query } = require('express-validator');
@@ -14,14 +15,25 @@ router.post(
   '/admin/adjust',
   authenticateToken,
   requireRole('admin'),
-  body('nid_hash').isString().isLength({ min: 64, max: 64 }).withMessage('Valid SHA-256 nid_hash required'),
-  body('delta').isInt({ min: -1000, max: 1000 }).withMessage('Delta must be between -1000 and 1000'),
+  body('nid_hash')
+    .isString()
+    .isLength({ min: 64, max: 64 })
+    .withMessage('Valid SHA-256 nid_hash required'),
+  body('delta')
+    .isInt({ min: -1000, max: 1000 })
+    .withMessage('Delta must be between -1000 and 1000'),
   body('reason').isString().isLength({ min: 1, max: 500 }),
   validateRequest,
   asyncHandler(async (req, res) => {
     const { nid_hash, delta, reason } = req.body;
-    const result = await creditScoreService.recordPaymentEvent(nid_hash, 'MANUAL_ADJUSTMENT', delta);
-    logger.info(`Manual credit adjustment by admin ${req.user.id}: nid_hash=${nid_hash} delta=${delta}`);
+    const result = await creditScoreService.recordPaymentEvent(
+      nid_hash,
+      'MANUAL_ADJUSTMENT',
+      delta
+    );
+    logger.info(
+      `Manual credit adjustment by admin ${req.user.id}: nid_hash=${nid_hash} delta=${delta}`
+    );
     res.json({ success: true, ...result, reason });
   })
 );
@@ -74,7 +86,7 @@ router.get(
 
     res.json({
       profile: profile || { new_member: true },
-      events: events.rows,
+      events: events.rows
     });
   })
 );

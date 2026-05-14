@@ -1,13 +1,17 @@
+const Queue = require('bull');
+const crypto = require('crypto');
 const db = require('../../config/database');
 const logger = require('../../utils/logger');
 const fcmService = require('../notifications/fcm.service');
 const deviceService = require('../devices/deviceService');
 const kmsSigningService = require('../devices/kmsSigningService');
 const { emitLocationReported } = require('../sse/sseService');
-const Queue = require('bull');
-const crypto = require('crypto');
 
-const REDIS_URL = process.env.BULL_REDIS_URL || process.env.UPSTASH_REDIS_URL || process.env.REDIS_URL || 'redis://localhost:6379';
+const REDIS_URL =
+  process.env.BULL_REDIS_URL ||
+  process.env.UPSTASH_REDIS_URL ||
+  process.env.REDIS_URL ||
+  'redis://localhost:6379';
 const AUTO_LOCATION_LOCK_LEVELS = new Set(['FULL', 'FULL_LOCK', 'WIPE']);
 
 class LocationService {
@@ -155,7 +159,9 @@ class LocationService {
         logger.warn(`FCM delivery failed for location pull on device ${deviceId}: ${err.message}`);
       }
     } else {
-      logger.warn(`Device ${deviceId} has no FCM token — location pull queued without push delivery`);
+      logger.warn(
+        `Device ${deviceId} has no FCM token — location pull queued without push delivery`
+      );
     }
 
     await db.query(
@@ -220,19 +226,19 @@ class LocationService {
 
       const pendingPull = pull_id
         ? await client.query(
-          `SELECT id, pull_id FROM location_pull_requests
+            `SELECT id, pull_id FROM location_pull_requests
            WHERE device_id = $1 AND pull_id = $2 AND status = 'pending'
            LIMIT 1
            FOR UPDATE`,
-          [deviceId, pull_id]
-        )
+            [deviceId, pull_id]
+          )
         : await client.query(
-          `SELECT id, pull_id FROM location_pull_requests
+            `SELECT id, pull_id FROM location_pull_requests
            WHERE device_id = $1 AND status = 'pending' AND expires_at > NOW()
            ORDER BY requested_at DESC LIMIT 1
            FOR UPDATE`,
-          [deviceId]
-        );
+            [deviceId]
+          );
 
       if (pendingPull.rows.length > 0) {
         completedPullId = pendingPull.rows[0].pull_id;
@@ -246,7 +252,15 @@ class LocationService {
         `INSERT INTO location_reports (device_id, latitude, longitude, accuracy, timestamp, battery_level, pull_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id`,
-        [deviceId, lat, lon, accuracy, timestamp, battery_level || null, completedPullId || pull_id || null]
+        [
+          deviceId,
+          lat,
+          lon,
+          accuracy,
+          timestamp,
+          battery_level || null,
+          completedPullId || pull_id || null
+        ]
       );
       locationId = result.rows[0].id;
 
@@ -288,13 +302,13 @@ class LocationService {
       `SELECT COUNT(*) FROM location_reports WHERE device_id = $1`,
       [deviceId]
     );
-    if (parseInt(historyCount.rows[0].count) > 10) {
+    if (parseInt(historyCount.rows[0].count, 10) > 10) {
       await db.query(
         `DELETE FROM location_reports WHERE id IN (
            SELECT id FROM location_reports WHERE device_id = $1
            ORDER BY timestamp ASC LIMIT $2
          )`,
-        [deviceId, parseInt(historyCount.rows[0].count) - 10]
+        [deviceId, parseInt(historyCount.rows[0].count, 10) - 10]
       );
     }
 
@@ -339,7 +353,7 @@ class LocationService {
       [deviceId, limit]
     );
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       id: row.id,
       latitude: row.latitude,
       longitude: row.longitude,
@@ -359,8 +373,14 @@ class LocationService {
     }
 
     if (geofenceData.type === 'circle') {
-      if (geofenceData.center_latitude === undefined || geofenceData.center_longitude === undefined || !geofenceData.radius_meters) {
-        throw new Error('Circle geofence requires center_latitude, center_longitude, and radius_meters');
+      if (
+        geofenceData.center_latitude === undefined ||
+        geofenceData.center_longitude === undefined ||
+        !geofenceData.radius_meters
+      ) {
+        throw new Error(
+          'Circle geofence requires center_latitude, center_longitude, and radius_meters'
+        );
       }
     } else if (geofenceData.type === 'polygon') {
       if (!geofenceData.coordinates || geofenceData.coordinates.length < 3) {
@@ -368,14 +388,10 @@ class LocationService {
       }
     }
 
-    await db.query(
-      `DELETE FROM geofences WHERE device_id = $1`,
-      [deviceId]
-    );
+    await db.query(`DELETE FROM geofences WHERE device_id = $1`, [deviceId]);
 
-    const coordinatesJson = geofenceData.type === 'polygon'
-      ? JSON.stringify(geofenceData.coordinates)
-      : null;
+    const coordinatesJson =
+      geofenceData.type === 'polygon' ? JSON.stringify(geofenceData.coordinates) : null;
 
     const result = await db.query(
       `INSERT INTO geofences (device_id, name, type, center_latitude, center_longitude, radius_meters, coordinates, enabled, created_by, created_at)
@@ -394,7 +410,10 @@ class LocationService {
       ]
     );
 
-    logger.info(`Geofence set for device ${deviceId}`, { name: geofenceData.name, type: geofenceData.type });
+    logger.info(`Geofence set for device ${deviceId}`, {
+      name: geofenceData.name,
+      type: geofenceData.type
+    });
 
     await this.logAuditEvent({
       actor: userId,
@@ -448,11 +467,14 @@ class LocationService {
   async checkGeofenceViolation(latitude, longitude, geofence) {
     if (geofence.type === 'circle') {
       const distance = this.haversineDistance(
-        latitude, longitude,
-        geofence.center_latitude, geofence.center_longitude
+        latitude,
+        longitude,
+        geofence.center_latitude,
+        geofence.center_longitude
       );
       return distance > geofence.radius_meters;
-    } else if (geofence.type === 'polygon') {
+    }
+    if (geofence.type === 'polygon') {
       return !this.pointInPolygon(latitude, longitude, geofence.coordinates);
     }
     return false;
@@ -462,9 +484,12 @@ class LocationService {
     const R = 6371000;
     const dLat = this.toRad(lat2 - lat1);
     const dLon = this.toRad(lon2 - lon1);
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos(this.toRad(lat1)) * Math.cos(this.toRad(lat2)) *
-              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(this.toRad(lat1)) *
+        Math.cos(this.toRad(lat2)) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   }
@@ -483,8 +508,7 @@ class LocationService {
       const xj = coordinates[j].longitude;
       const yj = coordinates[j].latitude;
 
-      const intersect = ((yi > lat) !== (yj > lat)) &&
-        (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+      const intersect = yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
       if (intersect) inside = !inside;
     }
 
@@ -542,7 +566,10 @@ class LocationService {
       ]
     );
 
-    logger.warn(`Geofence alert created for device ${deviceId}`, { alertId, geofence: geofence.name });
+    logger.warn(`Geofence alert created for device ${deviceId}`, {
+      alertId,
+      geofence: geofence.name
+    });
 
     await this.logAuditEvent({
       actor: 'system',
@@ -565,7 +592,7 @@ class LocationService {
     const queue = this.getAutoLocationQueue();
 
     const existingJob = await queue.getRepeatableJobs();
-    const existingForDevice = existingJob.find(j => j.name === `auto-location-${deviceId}`);
+    const existingForDevice = existingJob.find((j) => j.name === `auto-location-${deviceId}`);
     if (existingForDevice) {
       await queue.removeRepeatableByKey(existingForDevice.key);
     }
@@ -586,7 +613,7 @@ class LocationService {
   async cancelAutoLocation(deviceId) {
     const queue = this.getAutoLocationQueue();
     const existingJob = await queue.getRepeatableJobs();
-    const existingForDevice = existingJob.find(j => j.name === `auto-location-${deviceId}`);
+    const existingForDevice = existingJob.find((j) => j.name === `auto-location-${deviceId}`);
 
     if (existingForDevice) {
       await queue.removeRepeatableByKey(existingForDevice.key);

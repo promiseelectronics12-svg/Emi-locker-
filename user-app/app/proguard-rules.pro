@@ -5,11 +5,29 @@
 
 # Retrofit
 -keepattributes Signature
+-keepattributes Exceptions
 -keepattributes *Annotation*
 -keep class retrofit2.** { *; }
 -keepclasseswithmembers class * {
     @retrofit2.http.* <methods>;
 }
+
+# Retrofit + Kotlin Coroutines (R8 fix)
+# R8 strips Continuation<? super Response<T>> generic signatures from suspend functions.
+# HttpServiceMethod.parseAnnotations() throws ClassCastException without these rules.
+-keep,allowobfuscation,allowshrinking class retrofit2.Response
+-if interface * { @retrofit2.http.* public *** *(...); }
+-keep,allowobfuscation,allowshrinking interface <1>
+-if interface * { @retrofit2.http.* public *** *(...); }
+-keep,allowobfuscation,allowshrinking class <1>
+-keepclassmembers,allowobfuscation,allowshrinking interface * {
+    @retrofit2.http.* <methods>;
+}
+
+# Kotlin Coroutines — preserve Continuation generic type parameter
+-keep class kotlin.coroutines.Continuation
+-keepclassmembers class kotlin.coroutines.intrinsics.IntrinsicsKt { *; }
+-dontwarn kotlin.coroutines.**
 
 # OkHttp
 -dontwarn okhttp3.**
