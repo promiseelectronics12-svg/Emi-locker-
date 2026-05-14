@@ -85,7 +85,11 @@ class LockStateManager @Inject constructor(
                     Log.d(TAG, "Applying NORMAL state")
                 }
                 LockState.REMINDER -> {
-                    Log.d(TAG, "Applying REMINDER state")
+                    Log.d(TAG, "Applying REMINDER state — showing watermark overlay")
+                    scope.launch {
+                        overlayManager.showReminderWatermark()
+                    }
+                    overlayShown = true
                 }
                 LockState.WARNING -> {
                     scope.launch {
@@ -121,6 +125,7 @@ class LockStateManager @Inject constructor(
                     LockState.PARTIAL_LOCK,
                     LockState.OVERDUE_ALERT -> hideAllLockOverlays()
                     LockState.WARNING -> overlayManager.hideWarningBanner()
+                    LockState.REMINDER -> overlayManager.hideReminderWatermark()
                     else -> {}
                 }
             }
@@ -138,6 +143,13 @@ class LockStateManager @Inject constructor(
     private suspend fun reapplyState(state: LockState) {
         Log.d(TAG, "Reapplying state: $state")
         when (state) {
+            LockState.REMINDER -> {
+                try {
+                    overlayManager.showReminderWatermark()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to reapply REMINDER state", e)
+                }
+            }
             LockState.WARNING -> {
                 try {
                     overlayManager.showWarningBanner()
@@ -161,6 +173,13 @@ class LockStateManager @Inject constructor(
     private suspend fun cleanupState(state: LockState) {
         Log.d(TAG, "Cleaning up state: $state")
         when (state) {
+            LockState.REMINDER -> {
+                try {
+                    overlayManager.hideReminderWatermark()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to hide reminder watermark", e)
+                }
+            }
             LockState.WARNING -> {
                 try {
                     overlayManager.hideWarningBanner()

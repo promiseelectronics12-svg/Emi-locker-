@@ -23,6 +23,13 @@
     <!-- Overlay setup is tested through the normal Android settings screen. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!-- Used by reminder watermark to detect foreground payment apps so the
+         overlay auto-hides when customer opens bKash/Nagad/Rocket to pay.
+         Granted automatically via AppOps when Device Owner is active. -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
     <!-- Foreground Service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />

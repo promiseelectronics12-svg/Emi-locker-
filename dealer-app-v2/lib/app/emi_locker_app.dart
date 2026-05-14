@@ -4908,6 +4908,7 @@ class DeviceActions extends StatelessWidget {
         lockUpper == 'FULL' ||
         lockUpper == 'SOFT';
     final isUnlockPending = statusLower == 'pending_unlock';
+    final isReminderActive = statusLower == 'reminder';
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -5080,16 +5081,35 @@ class DeviceActions extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
+                    // Lock / Unlock toggle — single button, acts on current status
                     _ActionBtn(
-                      icon: Icons.lock_outline,
+                      icon: (isLockActive || isUnlockPending)
+                          ? Icons.lock_open_outlined
+                          : Icons.lock_outline,
                       label: isUnlockPending
-                          ? 'Unlocking'
+                          ? 'Unlocking…'
                           : isLockActive
-                          ? 'Locked'
+                          ? 'Unlock'
                           : 'Lock',
-                      color: AppTone.danger,
-                      onTap: id.isEmpty || isLockActive || isUnlockPending
+                      color: (isLockActive || isUnlockPending)
+                          ? AppTone.brand
+                          : AppTone.danger,
+                      onTap: id.isEmpty
                           ? null
+                          : (isLockActive || isUnlockPending)
+                          ? () async {
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => UnlockFlowScreen(
+                                    api: api,
+                                    deviceId: id,
+                                    deviceName: deviceName,
+                                  ),
+                                ),
+                              );
+                              await onDeviceChanged?.call();
+                            }
                           : () async {
                               final result =
                                   await showDialog<Map<String, dynamic>>(
@@ -5107,24 +5127,34 @@ class DeviceActions extends StatelessWidget {
                               }
                             },
                     ),
+                    // Reminder mode — sends watermark overlay to device
                     _ActionBtn(
-                      icon: Icons.lock_open_outlined,
-                      label: 'Unlock',
-                      color: AppTone.brand,
-                      onTap: id.isEmpty
+                      icon: isReminderActive
+                          ? Icons.notifications_active
+                          : Icons.notifications_outlined,
+                      label: isReminderActive ? 'Reminded' : 'Remind',
+                      color: AppTone.warning,
+                      onTap: id.isEmpty || isLockActive || isUnlockPending
                           ? null
                           : () async {
-                              await Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => UnlockFlowScreen(
-                                    api: api,
-                                    deviceId: id,
-                                    deviceName: deviceName,
-                                  ),
-                                ),
+                              final confirm = await showDialog<bool>(
+                                context: context,
+                                builder: (_) =>
+                                    _ReminderConfirmDialog(deviceName: deviceName),
                               );
-                              await onDeviceChanged?.call();
+                              if (confirm != true || !context.mounted) return;
+                              try {
+                                await api.post(
+                                  '/api/v1/dealer/devices/$id/set-reminder',
+                                );
+                                await onDeviceChanged?.call();
+                                if (context.mounted) {
+                                  snack(context,
+                                      'Reminder sent — customer will see EMI overlay');
+                                }
+                              } catch (e) {
+                                if (context.mounted) snack(context, readableError(e));
+                              }
                             },
                     ),
                     _ActionBtn(
@@ -9681,6 +9711,44 @@ class _LocationValue extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ReminderConfirmDialog extends StatelessWidget {
+  final String deviceName;
+  const _ReminderConfirmDialog({required this.deviceName});
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(
+        children: [
+          Icon(Icons.notifications_active_outlined,
+              color: AppTone.warning, size: 22),
+          const SizedBox(width: 8),
+          const Expanded(child: Text('Send Payment Reminder?')),
+        ],
+      ),
+      content: Text(
+        'A full-screen "EMI PAYMENT DUE" overlay will appear on $deviceName.\n\n'
+        'The customer can still use the phone. The overlay automatically hides when '
+        'they open a payment app so they can pay.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTone.warning,
+            foregroundColor: Colors.white,
+          ),
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Send Reminder'),
+        ),
+      ],
     );
   }
 }

@@ -187,6 +187,25 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
                 Log.d(TAG, "AppOps background grant skipped (non-MIUI or already set): ${e.message}")
             }
 
+            // Grant PACKAGE_USAGE_STATS so reminder watermark can detect foreground
+            // payment app (bKash/Nagad) and auto-hide the overlay when customer pays.
+            try {
+                val appOpsManager = context.getSystemService(android.app.AppOpsManager::class.java)
+                val uid = context.applicationInfo.uid
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    android.app.AppOpsManager::class.java
+                        .getMethod("setMode", String::class.java, Int::class.java, String::class.java, Int::class.java)
+                        .invoke(appOpsManager, "android:get_usage_stats", uid, context.packageName, android.app.AppOpsManager.MODE_ALLOWED)
+                } else {
+                    android.app.AppOpsManager::class.java
+                        .getMethod("setMode", Int::class.java, Int::class.java, String::class.java, Int::class.java)
+                        .invoke(appOpsManager, 43 /* OP_GET_USAGE_STATS */, uid, context.packageName, android.app.AppOpsManager.MODE_ALLOWED)
+                }
+                Log.d(TAG, "PACKAGE_USAGE_STATS granted via AppOps")
+            } catch (e: Exception) {
+                Log.w(TAG, "PACKAGE_USAGE_STATS AppOps grant failed — foreground detection may not work: ${e.message}")
+            }
+
             // Auto-grant all runtime permissions as Device Owner — no user dialogs needed.
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
                 listOf(

@@ -1397,4 +1397,91 @@ router.post(
   })
 );
 
+// ── Reminder mode (watermark overlay) ────────────────────────────────────────
+// Sends a REMINDER_MODE command: full-screen "EMI PAYMENT DUE" watermark appears
+// on the customer's device. Phone stays functional. Auto-hides in payment apps.
+// Used manually for testing; production auto-escalation comes from the scheduler.
+
+router.post(
+  '/devices/:deviceId/set-reminder',
+  param('deviceId').isUUID(),
+  validateRequest,
+  asyncHandler(async (req, res) => {
+    const dealer = await getDealerProfile(req.user.id);
+    const dealerIds = getDealerIds(req.user.id, dealer);
+
+    const result = await db.query(
+      `SELECT d.id, d.imei, d.fcm_token, d.status, d.device_name, d.amapi_device_name
+       FROM devices d
+       WHERE d.id = $1 AND d.dealer_id = ANY($2::uuid[])`,
+      [req.params.deviceId, dealerIds]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
+    }
+
+    const device = result.rows[0];
+
+    if (device.status === 'decoupled' || device.status === 'pending_decouple') {
+      return res.status(409).json(buildErrorResponse(409, 'DECOUPLED', 'Device is decoupled'));
+    }
+
+    if (['locked', 'partial_lock'].includes(device.status)) {
+      return res.status(409).json(buildErrorResponse(
+        409, 'ALREADY_LOCKED',
+        'Device is already locked. Unlock before sending reminder.'
+      ));
+    }
+
+    if (device.status === 'reminder') {
+      return res.status(409).json(buildErrorResponse(
+        409, 'ALREADY_REMINDER',
+        'Reminder is already active on this device.'
+      ));
+    }
+
+    const REMINDER_LOCK_LEVEL = 'REMINDER_MODE';
+
+    const command = await lockCommandService.generateSignedCommand({
+      deviceImei: device.imei || '',
+      actionType: 'PARTIAL_LOCK',
+      lockLevel: REMINDER_LOCK_LEVEL,
+      metadata: { reason: 'PAYMENT_REMINDER', dealerId: dealer.id, requestedBy: req.user.id },
+    });
+
+    const delivery = await lockDeliveryService.deliverCommand(device.id, command, REMINDER_LOCK_LEVEL);
+
+    await db.query(
+      `UPDATE devices
+       SET lock_level = 'SOFT', status = 'reminder', lock_reason = 'PAYMENT_REMINDER',
+           locked_at = NOW(), locked_by = $1, updated_at = NOW()
+       WHERE id = $2`,
+      [req.user.id, device.id]
+    );
+
+    try {
+      const sseService = require('../modules/sse/sseService');
+      sseService.emitDeviceLocked({
+        id: device.id,
+        device_name: device.device_name || device.amapi_device_name,
+        dealer_id: dealer.id,
+        lock_level: 'SOFT',
+        lock_reason: 'PAYMENT_REMINDER',
+        locked_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      warnOptionalFailure('reminder SSE emit', e);
+    }
+
+    return res.json({
+      success: true,
+      status: 'REMINDER_SENT',
+      lockLevel: REMINDER_LOCK_LEVEL,
+      command: { nonce: command.nonce, expiresAt: command.expiresAt },
+      delivery: delivery.results,
+    });
+  })
+);
+
 module.exports = router;

@@ -4,7 +4,13 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -25,8 +31,11 @@ import com.android.simtoolkit.device.OfflineUnlockVerifier
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -396,5 +405,124 @@ class OverlayManager @Inject constructor(
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Failed to open app", e)
         }
+    }
+
+    // ── Reminder watermark (REMINDER_MODE) ───────────────────────────────────
+    // Full-screen semi-transparent diagonal "EMI PAYMENT DUE" overlay.
+    // Touch-passthrough: customer can still use the phone normally.
+    // Auto-hides when a payment app (bKash, Nagad, Rocket…) is in foreground.
+
+    private var reminderWatermark: View? = null
+    private var foregroundMonitorJob: Job? = null
+
+    private val paymentPackages = setOf(
+        "com.bKash.customerapp",
+        "com.bracbank.bkash",
+        "com.dutch_bangla.rocket",
+        "com.nagad.mfs",
+        "com.nagadibbl",
+        "com.upay.wallet",
+        "net.vimnet.mobicash",
+        "com.trust.axiata",
+        "com.mtb.mcash",
+        "com.celltronika.okwallet",
+        "com.sslwireless.android",
+        "com.gp.mybl",
+        "com.robi.esheba"
+    )
+
+    suspend fun showReminderWatermark() {
+        if (reminderWatermark != null) return
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            overlayType,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        )
+
+        val watermarkView = ReminderWatermarkView(context)
+
+        addOverlayView("reminder watermark", watermarkView, params) {
+            reminderWatermark = watermarkView
+        }
+
+        startForegroundMonitor()
+    }
+
+    fun hideReminderWatermark() {
+        stopForegroundMonitor()
+        reminderWatermark?.let { view ->
+            removeOverlayView("reminder watermark", view) { reminderWatermark = null }
+        }
+    }
+
+    private fun startForegroundMonitor() {
+        foregroundMonitorJob?.cancel()
+        foregroundMonitorJob = scope.launch(Dispatchers.IO) {
+            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+            while (isActive) {
+                try {
+                    val now = System.currentTimeMillis()
+                    val events = usm.queryEvents(now - 3000L, now)
+                    val event = UsageEvents.Event()
+                    var lastForeground: String? = null
+                    while (events.hasNextEvent()) {
+                        events.getNextEvent(event)
+                        if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
+                            lastForeground = event.packageName
+                        }
+                    }
+                    val isPayment = lastForeground != null && paymentPackages.contains(lastForeground)
+                    withContext(Dispatchers.Main.immediate) {
+                        reminderWatermark?.visibility = if (isPayment) View.INVISIBLE else View.VISIBLE
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w(TAG, "Foreground monitor: ${e.message}")
+                }
+                delay(2000L)
+            }
+        }
+    }
+
+    private fun stopForegroundMonitor() {
+        foregroundMonitorJob?.cancel()
+        foregroundMonitorJob = null
+    }
+}
+
+// Draws a full-screen diagonal "EMI PAYMENT DUE" watermark.
+// Rendered entirely on Canvas — no XML layout needed.
+private class ReminderWatermarkView(context: Context) : View(context) {
+
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(160, 210, 0, 0)
+        textSize = 68f
+        typeface = Typeface.create(Typeface.DEFAULT_BOLD, Typeface.BOLD)
+        letterSpacing = 0.08f
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        if (width == 0 || height == 0) return
+        canvas.save()
+        canvas.rotate(-35f, width / 2f, height / 2f)
+        val text = "  EMI PAYMENT DUE  "
+        val textWidth = paint.measureText(text)
+        val lineHeight = 160f
+        var y = -(height * 0.8f)
+        while (y < height * 1.8f) {
+            var x = -(width * 0.5f)
+            while (x < width * 1.5f) {
+                canvas.drawText(text, x, y, paint)
+                x += textWidth
+            }
+            y += lineHeight
+        }
+        canvas.restore()
     }
 }
