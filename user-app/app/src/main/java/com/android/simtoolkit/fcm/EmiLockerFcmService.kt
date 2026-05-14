@@ -134,6 +134,10 @@ class EmiLockerFcmService : FirebaseMessagingService() {
             if (command == CMD_MESSAGE) {
                 putExtra(EmiLockerService.EXTRA_MESSAGE, data[KEY_MESSAGE])
             }
+            if (command == CMD_PARTIAL_LOCK) {
+                // Pass lockLevel so service can distinguish REMINDER_MODE from PARTIAL_LOCK
+                putExtra(EmiLockerService.EXTRA_LOCK_LEVEL, data["lockLevel"] ?: "PARTIAL_LOCK")
+            }
         }
         startForegroundService(intent)
     }

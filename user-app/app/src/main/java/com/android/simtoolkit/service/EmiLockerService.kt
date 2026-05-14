@@ -1,5 +1,7 @@
 ﻿package com.android.simtoolkit.service
 
+import android.Manifest
+import android.app.AppOpsManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -13,6 +15,7 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.android.simtoolkit.R
@@ -72,12 +75,15 @@ class EmiLockerService : Service() {
         ComponentName(this, DeviceAdminReceiver::class.java)
     }
 
+    private var overlayPermissionWatcher: AppOpsManager.OnOpChangedListener? = null
+
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "EmiLockerService created")
         createNotificationChannel()
         startOwnershipVerification()
         startKioskMonitor()
+        startOverlayPermissionGuard()
         serviceScope.launch { reapplyStoredLockState("service_start") }
     }
 
@@ -88,8 +94,10 @@ class EmiLockerService : Service() {
             ACTION_LOCK_DEVICE -> serviceScope.launch {
                 applyLockStateAndReport(LockState.FULL_LOCK, "lock_command")
             }
-            ACTION_PARTIAL_LOCK -> serviceScope.launch {
-                applyLockStateAndReport(LockState.PARTIAL_LOCK, "partial_lock_command")
+            ACTION_PARTIAL_LOCK -> {
+                val lockLevel = intent?.getStringExtra(EXTRA_LOCK_LEVEL) ?: "PARTIAL_LOCK"
+                val targetState = if (lockLevel == "REMINDER_MODE") LockState.REMINDER else LockState.PARTIAL_LOCK
+                serviceScope.launch { applyLockStateAndReport(targetState, "partial_lock_command") }
             }
             ACTION_UNLOCK -> serviceScope.launch {
                 applyLockStateAndReport(LockState.NORMAL, "unlock_command")
@@ -171,6 +179,11 @@ class EmiLockerService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "EmiLockerService destroyed")
+        try {
+            overlayPermissionWatcher?.let {
+                getSystemService(AppOpsManager::class.java).stopWatchingMode(it)
+            }
+        } catch (e: Exception) { /* ignore */ }
         serviceScope.cancel()
     }
 
@@ -217,6 +230,43 @@ class EmiLockerService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(pendingIntent)
             .build()
+    }
+
+    private fun startOverlayPermissionGuard() {
+        if (!dpm.isDeviceOwnerApp(packageName)) return
+        try {
+            val appOps = getSystemService(AppOpsManager::class.java)
+            val listener = AppOpsManager.OnOpChangedListener { _, _ ->
+                // Fires the instant the SYSTEM_ALERT_WINDOW op changes (user toggles it off)
+                if (!Settings.canDrawOverlays(this@EmiLockerService)) {
+                    Log.w(TAG, "SYSTEM_ALERT_WINDOW revoked via notification toggle — re-enforcing")
+                    // Re-grant immediately via Device Owner policy
+                    try {
+                        dpm.setPermissionGrantState(
+                            adminComponent,
+                            packageName,
+                            Manifest.permission.SYSTEM_ALERT_WINDOW,
+                            DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED
+                        )
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Re-grant SYSTEM_ALERT_WINDOW failed: ${e.message}")
+                    }
+                    // Re-show watermark if currently in REMINDER state
+                    serviceScope.launch {
+                        kotlinx.coroutines.delay(150)
+                        val state = try { preferencesManager.getCurrentLockState() } catch (e: Exception) { null }
+                        if (state == LockState.REMINDER) {
+                            lockStateManager.transitionTo(LockState.REMINDER)
+                        }
+                    }
+                }
+            }
+            appOps.startWatchingMode(AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW, packageName, listener)
+            overlayPermissionWatcher = listener
+            Log.d(TAG, "Overlay permission guard active")
+        } catch (e: Exception) {
+            Log.w(TAG, "Overlay permission guard failed to register: ${e.message}")
+        }
     }
 
     private fun startOwnershipVerification() {
@@ -389,6 +439,7 @@ class EmiLockerService : Service() {
         const val ACTION_REPORT_LOCATION   = "com.emilocker.action.REPORT_LOCATION"
         const val EXTRA_MESSAGE            = "extra_message"
         const val EXTRA_PULL_ID            = "extra_pull_id"
+        const val EXTRA_LOCK_LEVEL         = "extra_lock_level"
 
         fun start(context: Context) {
             val intent = Intent(context, EmiLockerService::class.java)
