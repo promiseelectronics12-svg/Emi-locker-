@@ -4846,14 +4846,30 @@ class _StatusFilterChips extends StatelessWidget {
   Widget build(BuildContext context) {
     return Wrap(
       spacing: 8,
-      runSpacing: 8,
+      runSpacing: 6,
       children: options.entries.map((entry) {
         final active = selected == entry.key;
         return ChoiceChip(
           selected: active,
           showCheckmark: false,
-          label: Text(entry.value),
-          avatar: active ? const Icon(Icons.check, size: 16) : null,
+          label: Text(
+            entry.value,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+              color: active ? Colors.white : AppTone.ink,
+            ),
+          ),
+          avatar: active
+              ? const Icon(Icons.check, size: 13, color: Colors.white)
+              : null,
+          backgroundColor: AppTone.surface,
+          selectedColor: AppTone.brand,
+          side: BorderSide(
+            color: active ? AppTone.brand : AppTone.subtle,
+            width: 1.2,
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 2),
           onSelected: (_) => onChanged(entry.key),
         );
       }).toList(),
@@ -5082,6 +5098,7 @@ class DeviceActions extends StatelessWidget {
                                       api: api,
                                       deviceId: id,
                                       connectionStatus: connectionStatus,
+                                      deviceName: deviceName,
                                     ),
                                   );
                               if (result != null) await onDeviceChanged?.call();
@@ -8725,10 +8742,12 @@ class LockDialog extends StatefulWidget {
     required this.api,
     required this.deviceId,
     this.connectionStatus = 'unknown',
+    this.deviceName = '',
   });
   final ApiClient api;
   final String deviceId;
   final String connectionStatus;
+  final String deviceName;
 
   @override
   State<LockDialog> createState() => _LockDialogState();
@@ -8941,6 +8960,42 @@ class _LockDialogState extends State<LockDialog> {
     );
   }
 
+  String _lockLevelFor(String r) {
+    switch (r) {
+      case 'TERMS_VIOLATION':
+        return 'Partial Lock';
+      case 'SUSPECTED_FRAUD':
+      case 'SUSPECTED_SALE':
+        return 'Reminder Mode';
+      default:
+        return 'Full Lock';
+    }
+  }
+
+  Color _lockLevelColor(String r) {
+    switch (r) {
+      case 'TERMS_VIOLATION':
+        return AppTone.warning;
+      case 'SUSPECTED_FRAUD':
+      case 'SUSPECTED_SALE':
+        return AppTone.info;
+      default:
+        return AppTone.danger;
+    }
+  }
+
+  IconData _lockLevelIcon(String r) {
+    switch (r) {
+      case 'TERMS_VIOLATION':
+        return Icons.lock_clock_rounded;
+      case 'SUSPECTED_FRAUD':
+      case 'SUSPECTED_SALE':
+        return Icons.notifications_outlined;
+      default:
+        return Icons.lock_rounded;
+    }
+  }
+
   @override
   void dispose() {
     note.dispose();
@@ -8949,89 +9004,199 @@ class _LockDialogState extends State<LockDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final levelColor = _lockLevelColor(reason);
     return AlertDialog(
-      title: const Text('Lock request'),
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (_deviceOffline) ...[
-              _InlineNotice(
-                message: widget.connectionStatus == 'app_removed_suspected'
-                    ? 'App may be uninstalled. Lock will be recorded but cannot be enforced until app is restored.'
-                    : 'Device is offline. Lock command will be queued and delivered when the device reconnects.',
-                tone: AppTone.warning,
-                icon: Icons.signal_wifi_connected_no_internet_4_outlined,
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+      contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+      actionsPadding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+      title: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: AppTone.danger.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.lock_outline,
+              size: 19,
+              color: AppTone.danger,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Lock Device',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: AppTone.ink,
+                  ),
+                ),
+                if (widget.deviceName.isNotEmpty)
+                  Text(
+                    widget.deviceName,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w400,
+                      color: AppTone.muted,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_deviceOffline) ...[
+                _InlineNotice(
+                  message: widget.connectionStatus == 'app_removed_suspected'
+                      ? 'App may be uninstalled. Lock will be recorded but cannot be enforced until app is restored.'
+                      : 'Device is offline. Lock command will be queued and delivered when the device reconnects.',
+                  tone: AppTone.warning,
+                  icon: Icons.signal_wifi_connected_no_internet_4_outlined,
+                ),
+                const SizedBox(height: 12),
+              ],
+              DropdownButtonFormField<String>(
+                initialValue: reason,
+                decoration: const InputDecoration(
+                  labelText: 'Reason',
+                  isDense: true,
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'EMI_OVERDUE',
+                    child: Text('EMI overdue'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'DEVICE_STOLEN',
+                    child: Text('Device stolen'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'TERMS_VIOLATION',
+                    child: Text('Terms violation'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'SUSPECTED_FRAUD',
+                    child: Text('Suspected fraud'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'SUSPECTED_SALE',
+                    child: Text('Suspected sale'),
+                  ),
+                ],
+                onChanged: _busy
+                    ? null
+                    : (v) => setState(() => reason = v ?? reason),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(
+                    Icons.info_outline,
+                    size: 13,
+                    color: AppTone.muted,
+                  ),
+                  const SizedBox(width: 4),
+                  const Text(
+                    'Will apply: ',
+                    style: TextStyle(fontSize: 12, color: AppTone.muted),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: levelColor.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: levelColor.withValues(alpha: 0.30),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _lockLevelIcon(reason),
+                          size: 11,
+                          color: levelColor,
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          _lockLevelFor(reason),
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: levelColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 12),
-            ],
-            DropdownButtonFormField<String>(
-              initialValue: reason,
-              decoration: const InputDecoration(labelText: 'Reason'),
-              items: const [
-                DropdownMenuItem(
-                  value: 'EMI_OVERDUE',
-                  child: Text('EMI overdue'),
+              TextField(
+                controller: note,
+                enabled: !_busy,
+                maxLength: 200,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Note (optional)',
+                  isDense: true,
+                  counterStyle: TextStyle(fontSize: 11),
                 ),
-                DropdownMenuItem(
-                  value: 'SUSPECTED_FRAUD',
-                  child: Text('Suspected fraud'),
-                ),
-                DropdownMenuItem(
-                  value: 'SUSPECTED_SALE',
-                  child: Text('Suspected sale'),
-                ),
-                DropdownMenuItem(
-                  value: 'DEVICE_STOLEN',
-                  child: Text('Device stolen'),
-                ),
-                DropdownMenuItem(
-                  value: 'TERMS_VIOLATION',
-                  child: Text('Partial lock test'),
+              ),
+              if (_busy || _status.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                if (_busy && !_success)
+                  const LinearProgressIndicator(
+                    minHeight: 2,
+                    borderRadius: BorderRadius.all(Radius.circular(2)),
+                  ),
+                const SizedBox(height: 6),
+                InlineNotice(
+                  message: _status,
+                  tone: _confirmed
+                      ? AppTone.brand
+                      : _success
+                      ? AppTone.brand
+                      : AppTone.info,
+                  icon: _confirmed
+                      ? Icons.check_circle_outline
+                      : _success
+                      ? Icons.sync_rounded
+                      : Icons.info_outline,
                 ),
               ],
-              onChanged: _busy
-                  ? null
-                  : (v) => setState(() => reason = v ?? reason),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: note,
-              enabled: !_busy,
-              maxLength: 200,
-              maxLines: 3,
-              decoration: const InputDecoration(labelText: 'Note (optional)'),
-            ),
-            if (_busy || _status.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              if (_busy && !_success)
-                const LinearProgressIndicator(minHeight: 3),
-              const SizedBox(height: 6),
-              InlineNotice(
-                message: _status,
-                tone: _confirmed
-                    ? AppTone.brand
-                    : _success
-                    ? AppTone.warning
-                    : AppTone.info,
-                icon: _confirmed
-                    ? Icons.check_circle_outline
-                    : Icons.sync_rounded,
-              ),
             ],
-          ],
+          ),
         ),
       ),
       actions: [
-        // Cancel is ALWAYS enabled — user can abort at any time
         TextButton(
           onPressed: _cancel,
           child: Text(_success ? 'Close' : 'Cancel'),
         ),
         if (!_success)
           FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: AppTone.danger),
             onPressed: _busy ? null : submit,
             icon: _busy
                 ? const SizedBox(
@@ -9042,8 +9207,8 @@ class _LockDialogState extends State<LockDialog> {
                       color: Colors.white,
                     ),
                   )
-                : const Icon(Icons.lock_outline),
-            label: Text(_busy ? 'Submitting…' : 'Submit'),
+                : const Icon(Icons.lock_outline, size: 16),
+            label: Text(_busy ? 'Locking…' : 'Lock Device'),
           ),
       ],
     );
@@ -12787,7 +12952,7 @@ class _PageState extends State<Page> with SingleTickerProviderStateMixin {
           right: 0,
           child: AnimatedBuilder(
             animation: _radarAnim,
-            builder: (_, __) => _RadarPullIndicator(
+            builder: (_, __) => _DeviceSyncPullIndicator(
               pullProgress: (_pullOffset / 80.0).clamp(0.0, 1.0),
               refreshing: _refreshing,
               animation: _radarAnim,
@@ -12799,104 +12964,130 @@ class _PageState extends State<Page> with SingleTickerProviderStateMixin {
   }
 }
 
-// ─── Radar pull-to-refresh ─────────────────────────────────────────────────
+// ─── Device-lock pull-to-refresh ──────────────────────────────────────────
+// Replaces the military radar with a brand-appropriate phone+lock indicator.
+// Pull: shackle opens proportional to drag distance.
+// Refresh: spinning arc sweeps around the phone while data loads.
 
-class _RadarPainter extends CustomPainter {
-  const _RadarPainter({
-    required this.sweepAngle,
+class _DeviceSyncPainter extends CustomPainter {
+  const _DeviceSyncPainter({
     required this.pullProgress,
+    required this.angle,
     required this.refreshing,
   });
-  final double sweepAngle;
   final double pullProgress;
+  final double angle;
   final bool refreshing;
 
-  static const _brand = Color(0xFF00A86B);
+  static const _bg = Color(0xFF059669);
+  static const _face = Color(0xFF00A86B);
+  static const _white = Colors.white;
 
   @override
   void paint(Canvas canvas, Size size) {
     final c = Offset(size.width / 2, size.height / 2);
-    final r = size.width / 2;
+    final r = size.width / 2 - 1;
 
-    // Dark fill
-    canvas.drawCircle(
-      c,
-      r,
-      Paint()
-        ..color = const Color(0xFF0A1628)
-        ..style = PaintingStyle.fill,
-    );
+    // Outer ring
+    canvas.drawCircle(c, r, Paint()..color = _bg);
+    // Inner face
+    canvas.drawCircle(c, r * 0.84, Paint()..color = _face);
 
-    // Concentric grid rings
-    final ringP = Paint()
-      ..color = _brand.withValues(alpha: 0.12)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.7;
-    for (int i = 1; i <= 4; i++) {
-      canvas.drawCircle(c, r * i / 4, ringP);
-    }
-
-    // Cross lines
-    final lineP = Paint()
-      ..color = _brand.withValues(alpha: 0.08)
-      ..strokeWidth = 0.7;
-    canvas.drawLine(Offset(c.dx - r, c.dy), Offset(c.dx + r, c.dy), lineP);
-    canvas.drawLine(Offset(c.dx, c.dy - r), Offset(c.dx, c.dy + r), lineP);
-
+    // Spinning progress arc during refresh or pull fill arc
     if (pullProgress > 0.05 || refreshing) {
-      // Trailing sweep arc
-      const arcSpan = pi * 1.15;
-      final sweepRect = Rect.fromCircle(center: c, radius: r);
-      final arcP = Paint()
-        ..shader = SweepGradient(
-          center: Alignment.center,
-          startAngle: sweepAngle - arcSpan,
-          endAngle: sweepAngle,
-          colors: [
-            Colors.transparent,
-            _brand.withValues(alpha: 0.0),
-            _brand.withValues(alpha: 0.18),
-            _brand.withValues(alpha: 0.45),
-          ],
-          stops: const [0.0, 0.35, 0.7, 1.0],
-        ).createShader(sweepRect)
-        ..style = PaintingStyle.fill;
-      canvas.drawArc(sweepRect, sweepAngle - arcSpan, arcSpan, true, arcP);
-
-      // Sweep arm
-      canvas.drawLine(
-        c,
-        Offset(c.dx + cos(sweepAngle) * r, c.dy + sin(sweepAngle) * r),
+      final arcSweep = refreshing ? pi * 0.6 : pi * 2 * pullProgress;
+      final startAngle = refreshing ? angle : -pi / 2;
+      final arcOpacity = refreshing ? 0.55 : (pullProgress * 0.55).clamp(0.0, 0.55);
+      canvas.drawArc(
+        Rect.fromCircle(center: c, radius: r * 0.84),
+        startAngle,
+        arcSweep,
+        false,
         Paint()
-          ..color = _brand.withValues(alpha: 0.9)
-          ..strokeWidth = 1.5
+          ..color = _white.withValues(alpha: arcOpacity)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = r * 0.17
           ..strokeCap = StrokeCap.round,
       );
     }
 
-    // Center dot
-    canvas.drawCircle(c, 2.5, Paint()..color = _brand);
+    // Phone body
+    final ph = r * 0.44;
+    final pw = ph * 0.60;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: c, width: pw * 2, height: ph * 2),
+        Radius.circular(pw * 0.26),
+      ),
+      Paint()..color = _white,
+    );
 
-    // Outer ring border
-    canvas.drawCircle(
-      c,
-      r - 0.5,
+    // Phone screen
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: Offset(c.dx, c.dy - ph * 0.05),
+          width: pw * 1.18,
+          height: ph * 1.1,
+        ),
+        Radius.circular(pw * 0.16),
+      ),
+      Paint()..color = _face,
+    );
+
+    // Lock shackle — opens as user pulls down (closes when refreshing)
+    final lockW = pw * 0.40;
+    final shackleR = lockW * 0.56;
+    final lockCy = c.dy - ph * 0.13;
+    final shackleOpen =
+        refreshing ? 0.0 : (1.0 - pullProgress.clamp(0.0, 1.0)) * 0.28;
+    canvas.drawArc(
+      Rect.fromCenter(
+        center: Offset(c.dx, lockCy),
+        width: shackleR * 2,
+        height: shackleR * 2,
+      ),
+      pi + shackleOpen,
+      pi - shackleOpen * 2,
+      false,
       Paint()
-        ..color = _brand.withValues(alpha: 0.25)
+        ..color = _white
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.2,
+        ..strokeWidth = lockW * 0.30
+        ..strokeCap = StrokeCap.round,
+    );
+
+    // Lock body
+    final bodyH = lockW * 0.72;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: Offset(c.dx, lockCy + bodyH * 0.54),
+          width: lockW * 2,
+          height: bodyH * 1.8,
+        ),
+        const Radius.circular(3),
+      ),
+      Paint()..color = _white,
+    );
+
+    // Keyhole
+    canvas.drawCircle(
+      Offset(c.dx, lockCy + bodyH * 0.46),
+      lockW * 0.21,
+      Paint()..color = _face,
     );
   }
 
   @override
-  bool shouldRepaint(_RadarPainter old) =>
-      old.sweepAngle != sweepAngle ||
+  bool shouldRepaint(_DeviceSyncPainter old) =>
       old.pullProgress != pullProgress ||
+      old.angle != angle ||
       old.refreshing != refreshing;
 }
 
-class _RadarPullIndicator extends StatelessWidget {
-  const _RadarPullIndicator({
+class _DeviceSyncPullIndicator extends StatelessWidget {
+  const _DeviceSyncPullIndicator({
     required this.pullProgress,
     required this.refreshing,
     required this.animation,
@@ -12912,7 +13103,7 @@ class _RadarPullIndicator extends StatelessWidget {
         ? 1.0
         : Curves.easeOutBack.transform(pullProgress.clamp(0.0, 1.0));
     final opacity = (refreshing ? 1.0 : pullProgress).clamp(0.0, 1.0);
-    final sweepAngle = animation.value * 2 * pi - pi / 2;
+    final angle = animation.value * 2 * pi;
 
     return Align(
       alignment: Alignment.topCenter,
@@ -12925,9 +13116,9 @@ class _RadarPullIndicator extends StatelessWidget {
             height: 76,
             margin: const EdgeInsets.only(top: 10),
             child: CustomPaint(
-              painter: _RadarPainter(
-                sweepAngle: sweepAngle,
+              painter: _DeviceSyncPainter(
                 pullProgress: pullProgress,
+                angle: angle,
                 refreshing: refreshing,
               ),
             ),
