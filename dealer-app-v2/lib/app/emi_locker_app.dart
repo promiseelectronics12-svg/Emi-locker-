@@ -8799,7 +8799,8 @@ class _LockDialogState extends State<LockDialog> {
         final mayBeProcessing =
             e.type == DioExceptionType.receiveTimeout ||
             e.type == DioExceptionType.connectionTimeout ||
-            e.type == DioExceptionType.sendTimeout;
+            e.type == DioExceptionType.sendTimeout ||
+            e.type == DioExceptionType.connectionError;
         setState(() {
           _success = mayBeProcessing;
           _status = mayBeProcessing

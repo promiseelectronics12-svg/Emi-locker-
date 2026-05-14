@@ -58,25 +58,23 @@ class LockDeliveryService {
     }
     const { fcm_token, amapi_device_name, imei } = deviceRow;
 
+    // FCM is primary — deliver synchronously so caller gets immediate result
     results.fcm = await this.deliverViaFcm(deviceId, fcm_token, command, lockLevel);
 
-    results.amapi = await this.deliverViaAmapi(deviceId, amapi_device_name, lockLevel);
+    // AMAPI and PAUT are backup channels — run async, do not block HTTP response
+    setImmediate(async () => {
+      try {
+        results.amapi = await this.deliverViaAmapi(deviceId, amapi_device_name, lockLevel);
+        if (lockLevel !== LOCK_LEVELS.FULL_LOCK) {
+          results.paut = await this.deliverPaut(deviceId, imei, lockLevel);
+        }
+        await this.logDeliveryResult(deviceId, command, results);
+      } catch (e) {
+        logger.warn('Backup delivery channel error', { deviceId, error: e.message });
+      }
+    });
 
-    if (lockLevel !== LOCK_LEVELS.FULL_LOCK) {
-      results.paut = await this.deliverPaut(deviceId, imei, lockLevel);
-    } else {
-      results.paut = {
-        attempted: false,
-        success: false,
-        error: null,
-        channel: 'PAUT',
-        skipped: true
-      };
-    }
-
-    const anySuccess = results.fcm.success || results.amapi.success || results.paut.success;
-
-    await this.logDeliveryResult(deviceId, command, results);
+    const anySuccess = results.fcm.success;
 
     return { delivered: anySuccess, results };
   }

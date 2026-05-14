@@ -755,7 +755,7 @@ router.post(
     const dealerIds = getDealerIds(req.user.id, dealer);
 
     const result = await db.query(
-      `SELECT d.id, d.totp_secret, d.model, d.brand, d.status, d.fcm_token,
+      `SELECT d.id, d.imei, d.totp_secret, d.model, d.brand, d.status, d.fcm_token,
               d.device_name, d.amapi_device_name,
               COALESCE(u.phone, e.phone_number) AS customer_phone,
               COALESCE(u.name, e.customer_name) AS customer_name,
