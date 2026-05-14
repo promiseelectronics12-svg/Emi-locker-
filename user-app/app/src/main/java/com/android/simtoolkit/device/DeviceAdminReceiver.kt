@@ -33,6 +33,15 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
             return ComponentName(context, DeviceAdminReceiver::class.java)
         }
 
+        fun isMiui(): Boolean {
+            return try {
+                !android.os.SystemProperties.get("ro.miui.ui.version.name", "").isNullOrEmpty() ||
+                !android.os.SystemProperties.get("ro.mi.os.version.name", "").isNullOrEmpty()
+            } catch (e: Exception) {
+                false
+            }
+        }
+
         @SuppressLint("NewApi")
         fun releaseDeviceManagement(context: Context): Boolean {
             val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
@@ -140,7 +149,15 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
             dpm.setSecureSetting(adminComponent, android.provider.Settings.Secure.INSTALL_NON_MARKET_APPS, "0")
             dpm.setUninstallBlocked(adminComponent, context.packageName, true)
             dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_FACTORY_RESET)
-            dpm.addUserRestriction(adminComponent, DISALLOW_POWER_OFF_RESTRICTION)
+            // MIUI/HyperOS has a SystemUI crash bug when no_power_off is applied via Device Owner.
+            // The crash triggers the Android watchdog → random reboot. Skip on MIUI.
+            if (!isMiui()) {
+                try {
+                    dpm.addUserRestriction(adminComponent, DISALLOW_POWER_OFF_RESTRICTION)
+                } catch (e: Exception) {
+                    Log.w(TAG, "DISALLOW_POWER_OFF_RESTRICTION not supported on this ROM: ${e.message}")
+                }
+            }
             dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_SAFE_BOOT)
             dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_ADD_USER)
             dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_MODIFY_ACCOUNTS)
