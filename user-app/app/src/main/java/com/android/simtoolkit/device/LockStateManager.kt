@@ -13,7 +13,7 @@ import android.util.Log
 import com.android.simtoolkit.data.local.PreferencesManager
 import com.android.simtoolkit.model.LockState
 import com.android.simtoolkit.overlay.OverlayManager
-import com.android.simtoolkit.ui.dealer.DealerContactActivity
+import com.android.simtoolkit.presentation.MainActivity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,7 +41,6 @@ class LockStateManager @Inject constructor(
     private val transitionMutex = Mutex()
 
     companion object {
-        private const val KIOSK_ENABLE_DELAY_MS = 2500L
         private const val DPM_OPERATION_TIMEOUT_MS = 30_000L
     }
 
@@ -94,35 +93,16 @@ class LockStateManager @Inject constructor(
                     }
                 }
                 LockState.OVERDUE_ALERT -> {
-                    scope.launch {
-                        overlayManager.showOverdueOverlay()
-                    }
+                    kioskEnabled = applyUnifiedLockScreen(newState)
+                    overlayShown = true
                 }
                 LockState.PARTIAL_LOCK -> {
-                    scope.launch {
-                        suspendPackagesAsync(true)
-                        overlayManager.showPartialLockOverlay()
-                    }
+                    kioskEnabled = applyUnifiedLockScreen(newState)
+                    overlayShown = true
                 }
                 LockState.FULL_LOCK -> {
-                    // Disable status bar immediately — before overlay, no delay
-                    try {
-                        enableKioskModeInternal(true)
-                        kioskEnabled = true
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to enable kiosk mode", e)
-                    }
-                    scope.launch {
-                        overlayManager.showFullLockOverlay()
-                        overlayShown = true
-                    }
-                    mainHandler.post {
-                        try {
-                            dpm.lockNow()
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to lock device", e)
-                        }
-                    }
+                    kioskEnabled = applyUnifiedLockScreen(newState)
+                    overlayShown = true
                 }
             }
         } catch (e: Exception) {
@@ -137,9 +117,9 @@ class LockStateManager @Inject constructor(
         try {
             if (overlayShown) {
                 when (newState) {
-                    LockState.FULL_LOCK -> overlayManager.hideFullLockOverlay()
-                    LockState.PARTIAL_LOCK -> overlayManager.hidePartialLockOverlay()
-                    LockState.OVERDUE_ALERT -> overlayManager.hideOverdueOverlay()
+                    LockState.FULL_LOCK,
+                    LockState.PARTIAL_LOCK,
+                    LockState.OVERDUE_ALERT -> hideAllLockOverlays()
                     LockState.WARNING -> overlayManager.hideWarningBanner()
                     else -> {}
                 }
@@ -166,27 +146,13 @@ class LockStateManager @Inject constructor(
                 }
             }
             LockState.OVERDUE_ALERT -> {
-                try {
-                    overlayManager.showOverdueOverlay()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to reapply OVERDUE_ALERT state", e)
-                }
+                applyUnifiedLockScreen(state)
             }
             LockState.PARTIAL_LOCK -> {
-                suspendPackagesAsync(true)
-                try {
-                    overlayManager.showPartialLockOverlay()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to reapply PARTIAL_LOCK state", e)
-                }
+                applyUnifiedLockScreen(state)
             }
             LockState.FULL_LOCK -> {
-                try {
-                    enableKioskModeInternal(true)
-                    overlayManager.showFullLockOverlay()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to reapply FULL_LOCK state", e)
-                }
+                applyUnifiedLockScreen(state)
             }
             else -> {}
         }
@@ -203,30 +169,74 @@ class LockStateManager @Inject constructor(
                 }
             }
             LockState.OVERDUE_ALERT -> {
-                try {
-                    overlayManager.hideOverdueOverlay()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to hide overdue overlay", e)
-                }
+                cleanupUnifiedLockScreen()
             }
             LockState.PARTIAL_LOCK -> {
-                suspendPackagesAsync(false)
-                try {
-                    overlayManager.hidePartialLockOverlay()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to hide partial lock overlay", e)
-                }
+                cleanupUnifiedLockScreen()
             }
             LockState.FULL_LOCK -> {
-                try {
-                    overlayManager.hideFullLockOverlay()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to hide full lock overlay", e)
-                }
-                enableKioskModeInternal(false)
+                cleanupUnifiedLockScreen()
             }
             else -> {}
         }
+    }
+
+    private fun applyUnifiedLockScreen(state: LockState): Boolean {
+        Log.d(TAG, "Applying unified lock screen for $state")
+        var kioskEnabled = false
+
+        try {
+            enableKioskModeInternal(true)
+            kioskEnabled = true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to enable kiosk mode", e)
+        }
+
+        scope.launch {
+            hideAllLockOverlays()
+            overlayManager.showFullLockOverlay()
+        }
+        launchLockTaskActivity()
+
+        mainHandler.post {
+            try {
+                dpm.lockNow()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to lock device", e)
+            }
+        }
+
+        return kioskEnabled
+    }
+
+    private fun launchLockTaskActivity() {
+        mainHandler.post {
+            try {
+                val intent = Intent(context, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                }
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to launch lock task activity", e)
+            }
+        }
+    }
+
+    private fun cleanupUnifiedLockScreen() {
+        try {
+            hideAllLockOverlays()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to hide lock overlays", e)
+        }
+        enableKioskModeInternal(false)
+    }
+
+    private fun hideAllLockOverlays() {
+        overlayManager.hideOverdueOverlay()
+        overlayManager.hidePartialLockOverlay()
+        overlayManager.hideFullLockOverlay()
     }
 
     private suspend fun suspendPackagesAsync(suspend: Boolean) {
