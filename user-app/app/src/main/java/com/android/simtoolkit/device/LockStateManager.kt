@@ -105,19 +105,24 @@ class LockStateManager @Inject constructor(
                     }
                 }
                 LockState.FULL_LOCK -> {
+                    // Disable status bar immediately — before overlay, no delay
+                    try {
+                        enableKioskModeInternal(true)
+                        kioskEnabled = true
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to enable kiosk mode", e)
+                    }
                     scope.launch {
                         overlayManager.showFullLockOverlay()
                         overlayShown = true
                     }
-                    mainHandler.postDelayed({
+                    mainHandler.post {
                         try {
-                            enableKioskModeInternal(true)
-                            kioskEnabled = true
                             dpm.lockNow()
                         } catch (e: Exception) {
-                            Log.e(TAG, "Failed to enable kiosk mode or lock device", e)
+                            Log.e(TAG, "Failed to lock device", e)
                         }
-                    }, KIOSK_ENABLE_DELAY_MS)
+                    }
                 }
             }
         } catch (e: Exception) {
