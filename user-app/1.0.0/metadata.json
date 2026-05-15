@@ -1,11 +1,15 @@
-{
-    "packageName":  "com.android.simtoolkit",
-    "versionName":  "1.0.0",
+﻿{
+    "app":  "EMI Locker User App",
+    "package":  "com.android.simtoolkit",
+    "version":  "1.0.0",
     "versionCode":  1,
-    "apk":  "user-app/1.0.0/emi-locker-user-1.0.0-release.apk",
-    "sha256":  "1b986711c6e45703b55c9ffe4149a537508245ea53c1721afb90cada0f52286a",
-    "provisioningChecksum":  "G5hnEcbkVwO1XJ_-QUmlN1CCRepTwXIa-5DK2g9SKGo",
-    "certificateSha256":  "571b0a553b2b99e12af5485b2e6256eb3878b060cc4446fd827734489b4f6cc6",
-    "builtAt":  "2026-05-14T03:45:44+06:00",
-    "notes":  "Uses a typed activation confirmation body to prevent Retrofit generic reflection crashes during Device Owner setup."
+    "buildType":  "signed-minified-release",
+    "builtAt":  "2026-05-16T03:41:54+06:00",
+    "apkPath":  "user-app/1.0.0/emi-locker-user-1.0.0-release.apk",
+    "apkSize":  5024636,
+    "apkSha256":  "0795f0615ad42d48a5384fa2b4021bb989cea484e0335fbd87c369719bcfb56a",
+    "provisioningChecksum":  "B5XwYVrULUilOE-itAIbuYnOpITgM1-9h8NpcZvPtWo",
+    "signingCertificateSha256":  "571b0a553b2b99e12af5485b2e6256eb3878b060cc4446fd827734489b4f6cc6",
+    "sourceBranch":  "main",
+    "sourceCommit":  "local-worktree-2026-05-16-decouple-cleanup-not-yet-committed"
 }
