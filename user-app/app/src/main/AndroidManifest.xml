@@ -48,9 +48,7 @@
     <!-- Vibration for notifications -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- Required for programmatic accessibility service enrollment.
-         Not grantable at runtime — must be granted via:
-         adb shell pm grant com.android.simtoolkit android.permission.WRITE_SECURE_SETTINGS -->
+    <!-- Required for accessibility service fallback enrollment on non-Device Owner installs. -->
     <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:ignore="ProtectedPermissions" />

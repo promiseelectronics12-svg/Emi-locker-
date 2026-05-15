@@ -363,6 +363,7 @@ class OverlayManager @Inject constructor(
     )
 
     suspend fun showReminderWatermark() {
+        if (com.android.simtoolkit.service.EmiLockerAccessibilityService.isEnabled(context)) return
         if (reminderWatermark != null) return
 
         val params = WindowManager.LayoutParams(
@@ -386,6 +387,7 @@ class OverlayManager @Inject constructor(
     }
 
     fun hideReminderWatermark() {
+        if (com.android.simtoolkit.service.EmiLockerAccessibilityService.isEnabled(context)) return
         stopForegroundMonitor()
         reminderWatermark?.let { view ->
             removeOverlayView("reminder watermark", view) { reminderWatermark = null }
@@ -428,7 +430,7 @@ class OverlayManager @Inject constructor(
 
 // Draws a full-screen diagonal "EMI PAYMENT DUE" watermark.
 // Rendered entirely on Canvas — no XML layout needed.
-private class ReminderWatermarkView(context: Context) : View(context) {
+internal class ReminderWatermarkView(context: Context) : View(context) {
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(160, 210, 0, 0)

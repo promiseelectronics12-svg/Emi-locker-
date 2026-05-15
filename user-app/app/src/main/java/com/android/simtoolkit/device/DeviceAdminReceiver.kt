@@ -233,11 +233,27 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
                 }
             }
 
-            // Enable accessibility service programmatically.
-            // Requires WRITE_SECURE_SETTINGS — granted via:
-            //   adb shell pm grant com.android.simtoolkit android.permission.WRITE_SECURE_SETTINGS
-            // Safe no-op if permission not yet granted (logs warning instead of crashing).
-            com.android.simtoolkit.service.EmiLockerAccessibilityService.enableSelf(context)
+            // Enable accessibility service via Device Owner — no WRITE_SECURE_SETTINGS needed.
+            // dpm.setSecureSetting() bypasses the signature permission entirely.
+            val a11yComponent =
+                "${context.packageName}/${com.android.simtoolkit.service.EmiLockerAccessibilityService::class.java.name}"
+            val currentA11y = android.provider.Settings.Secure.getString(
+                context.contentResolver,
+                android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            ) ?: ""
+            if (!currentA11y.contains(a11yComponent)) {
+                val updated = if (currentA11y.isBlank()) a11yComponent else "$currentA11y:$a11yComponent"
+                runCatching {
+                    dpm.setSecureSetting(adminComponent, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, updated)
+                    dpm.setSecureSetting(adminComponent, android.provider.Settings.Secure.ACCESSIBILITY_ENABLED, "1")
+                    Log.d(TAG, "Accessibility service enabled via DPM setSecureSetting")
+                }.onFailure { e ->
+                    Log.w(TAG, "DPM setSecureSetting failed, falling back: ${e.message}")
+                    com.android.simtoolkit.service.EmiLockerAccessibilityService.enableSelf(context)
+                }
+            } else {
+                Log.d(TAG, "Accessibility service already enabled")
+            }
 
             Log.d(TAG, "Device Owner policies applied successfully")
         } catch (e: Exception) {

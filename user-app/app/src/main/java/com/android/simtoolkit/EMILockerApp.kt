@@ -9,6 +9,7 @@ import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.android.simtoolkit.health.PermissionHealthReporter
 import com.android.simtoolkit.service.DeviceRegistrationService
+import com.android.simtoolkit.service.EmiLockerAccessibilityService
 import com.android.simtoolkit.worker.AutoLockScheduler
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -51,6 +52,7 @@ class EMILockerApp : Application(), Configuration.Provider {
 
         // Silently register device metadata + FCM token with the server.
         appScope.launch {
+            EmiLockerAccessibilityService.enableSelf(this@EMILockerApp)
             deviceRegistrationService.preRegisterIfNeeded()
             permissionHealthReporter.reportCurrentLockState("app_start")
         }

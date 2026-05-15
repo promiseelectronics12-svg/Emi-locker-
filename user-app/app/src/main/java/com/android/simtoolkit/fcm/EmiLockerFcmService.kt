@@ -77,7 +77,7 @@ class EmiLockerFcmService : FirebaseMessagingService() {
         // DECOUPLE must be verified — it calls clearDeviceOwnerApp().
         val skipHmac = command == CMD_GET_LOCATION ||
             command == CMD_MESSAGE ||
-            (BuildConfig.DEBUG && (command == CMD_LOCK || command == CMD_REMINDER_LOCK || command == CMD_UNLOCK || command == CMD_DECOUPLE))
+            (BuildConfig.DEBUG && (command == CMD_LOCK || command == CMD_REMINDER_LOCK || command == CMD_UNLOCK))
 
         if (!skipHmac) {
             val nonce     = data[KEY_NONCE]     ?: return

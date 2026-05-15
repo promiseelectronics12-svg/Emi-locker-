@@ -9,7 +9,6 @@ import com.android.simtoolkit.data.local.dao.EmiScheduleDao
 import com.android.simtoolkit.device.LockStateManager
 import com.android.simtoolkit.health.PermissionHealthReporter
 import com.android.simtoolkit.model.LockState
-import com.android.simtoolkit.util.NotificationHelper
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -23,7 +22,6 @@ class LockWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val emiScheduleDao: EmiScheduleDao,
     private val lockStateManager: LockStateManager,
-    private val notificationHelper: NotificationHelper,
     private val preferencesManager: PreferencesManager,
     private val permissionHealthReporter: PermissionHealthReporter
 ) : CoroutineWorker(context, workerParams) {
@@ -55,13 +53,6 @@ class LockWorker @AssistedInject constructor(
                 amount = String.format("%.2f", nextSchedule.amount),
                 days = if (daysOverdue > 0) daysOverdue else daysUntilDue
             )
-
-            // Trigger notifications if needed
-            if (targetState == LockState.REMINDER) {
-                notificationHelper.showReminderNotification(daysUntilDue)
-            } else if (targetState == LockState.WARNING) {
-                notificationHelper.showWarningNotification(daysUntilDue)
-            }
 
             // Transition state
             lockStateManager.transitionTo(targetState)

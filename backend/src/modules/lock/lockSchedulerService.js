@@ -3,6 +3,7 @@ const db = require('../../config/database');
 const logger = require('../../utils/logger');
 const lockDeliveryService = require('./lockDeliveryService');
 const lockCommandService = require('./lockCommandService');
+const sseService = require('../sse/sseService');
 
 const LOCK_LEVELS = {
   NONE: 'NONE',
@@ -228,7 +229,6 @@ class LockSchedulerService {
     );
 
     try {
-      const sseService = require('../sse/sseService');
       sseService.emitDeviceLocked({
         id: deviceId,
         imei,
@@ -259,7 +259,8 @@ class LockSchedulerService {
   async runGraceExpiryCheck() {
     try {
       const expired = await db.query(
-        `SELECT id, fcm_token, model, brand
+        `SELECT id, imei, device_name, fcm_token, model, brand, dealer_id,
+                status, lock_level, lock_reason, locked_at
          FROM devices
          WHERE grace_expires_at IS NOT NULL
            AND grace_expires_at < NOW()
@@ -272,35 +273,79 @@ class LockSchedulerService {
 
       for (const device of expired.rows) {
         try {
-          // Send FCM re-lock command
-          try {
-            await lockCommandService.sendLockCommand(device.id, {
-              reason: 'GRACE_EXPIRED',
-              lock_level: 'FULL_LOCK'
+          const currentStatus = String(device.status || '').toLowerCase();
+          const currentLockLevel = String(device.lock_level || '').toUpperCase();
+          const alreadyFullLocked =
+            currentStatus === 'locked' &&
+            (currentLockLevel === 'FULL' || currentLockLevel === LOCK_LEVELS.FULL_LOCK);
+
+          let delivery = null;
+          if (!alreadyFullLocked) {
+            const command = await lockCommandService.generateSignedCommand({
+              deviceImei: device.imei || '',
+              actionType: 'AUTO_LOCK',
+              lockLevel: LOCK_LEVELS.FULL_LOCK,
+              metadata: {
+                reason: 'GRACE_EXPIRED',
+                source: 'grace_expiry_scheduler',
+                deviceId: device.id
+              }
             });
-          } catch (e) {
-            logger.warn('FCM re-lock failed during grace expiry', {
-              deviceId: device.id,
-              error: e.message
-            });
+
+            delivery = await lockDeliveryService.deliverCommand(
+              device.id,
+              command,
+              LOCK_LEVELS.FULL_LOCK
+            );
           }
 
-          // Clear grace_expires_at and update status
-          await db.query(
-            `UPDATE devices
-             SET grace_expires_at = NULL,
-                 status           = 'locked',
-                 updated_at       = NOW()
-             WHERE id = $1`,
-            [device.id]
-          );
+          const client = await db.getClient();
+          let updatedDevice;
+          try {
+            await client.query('BEGIN');
 
-          // Audit log
-          await db.query(
-            `INSERT INTO audit_log (actor, action, device_id, metadata, result, created_at)
-             VALUES ('system', 'GRACE_EXPIRED_AUTO_RELOCK', $1, $2, 'success', NOW())`,
-            [device.id, JSON.stringify({ model: device.model, brand: device.brand })]
-          );
+            const updated = await client.query(
+              `UPDATE devices
+               SET grace_expires_at = NULL,
+                   status = 'locked',
+                   lock_level = 'FULL',
+                   lock_reason = 'GRACE_EXPIRED',
+                   locked_by = 'system',
+                   locked_at = NOW(),
+                   updated_at = NOW()
+               WHERE id = $1
+               RETURNING id, imei, device_name, dealer_id, status, lock_level,
+                         lock_reason, locked_at`,
+              [device.id]
+            );
+            updatedDevice = updated.rows[0];
+
+            await client.query(
+              `INSERT INTO audit_log (actor, action, device_id, metadata, result, created_at)
+               VALUES ('system', 'GRACE_EXPIRED_AUTO_RELOCK', $1, $2, 'success', NOW())`,
+              [
+                device.id,
+                JSON.stringify({
+                  model: device.model,
+                  brand: device.brand,
+                  alreadyFullLocked,
+                  delivery: delivery?.results || null
+                })
+              ]
+            );
+
+            await client.query('COMMIT');
+          } catch (txError) {
+            await client.query('ROLLBACK');
+            throw txError;
+          } finally {
+            client.release();
+          }
+
+          if (updatedDevice) {
+            sseService.emitGraceExpired(updatedDevice);
+            sseService.emitDeviceLocked(updatedDevice);
+          }
 
           logger.info('Grace expired — device re-locked', { deviceId: device.id });
         } catch (err) {

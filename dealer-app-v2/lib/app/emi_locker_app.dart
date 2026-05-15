@@ -4903,7 +4903,9 @@ class DeviceActions extends StatelessWidget {
     final lockUpper = lock.toUpperCase();
     final isLockActive =
         statusLower == 'locked' ||
-        lockUpper == 'FULL';
+        statusLower == 'reminder' ||
+        lockUpper == 'FULL' ||
+        lockUpper == 'SOFT';
     final isUnlockPending = statusLower == 'pending_unlock';
     final isReminderActive = statusLower == 'reminder';
 
