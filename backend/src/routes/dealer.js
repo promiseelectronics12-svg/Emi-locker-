@@ -1427,7 +1427,7 @@ router.post(
       return res.status(409).json(buildErrorResponse(409, 'DECOUPLED', 'Device is decoupled'));
     }
 
-    if (['locked', 'partial_lock'].includes(device.status)) {
+    if (['locked'].includes(device.status)) {
       return res.status(409).json(buildErrorResponse(
         409, 'ALREADY_LOCKED',
         'Device is already locked. Unlock before sending reminder.'

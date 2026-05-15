@@ -141,7 +141,7 @@ class LockVerificationService {
     const reasonToLevel = {
       EMI_OVERDUE: LOCK_LEVELS.FULL_LOCK,
       DEVICE_STOLEN: LOCK_LEVELS.FULL_LOCK,
-      TERMS_VIOLATION: LOCK_LEVELS.PARTIAL_LOCK,
+      TERMS_VIOLATION: LOCK_LEVELS.FULL_LOCK,
       SUSPECTED_FRAUD: LOCK_LEVELS.REMINDER_MODE,
       SUSPECTED_SALE: LOCK_LEVELS.REMINDER_MODE,
     };
@@ -271,7 +271,7 @@ class LockVerificationService {
     if (overdueDays <= -3) return { level: LOCK_LEVELS.NONE, action: 'WARNING_OVERLAY' };
     if (overdueDays <= 0) return { level: LOCK_LEVELS.NONE, action: 'OVERDUE_ALERT' };
     if (overdueDays <= 1) return { level: LOCK_LEVELS.REMINDER_MODE, action: 'APPLY_LOCK' };
-    if (overdueDays <= 3) return { level: LOCK_LEVELS.PARTIAL_LOCK, action: 'APPLY_LOCK' };
+    if (overdueDays <= 3) return { level: LOCK_LEVELS.REMINDER_MODE, action: 'APPLY_LOCK' };
     if (overdueDays <= 7) return { level: LOCK_LEVELS.FULL_LOCK, action: 'APPLY_LOCK' };
     return { level: LOCK_LEVELS.FULL_LOCK, action: 'APPLY_LOCK_ADMIN_FLAG' };
   }

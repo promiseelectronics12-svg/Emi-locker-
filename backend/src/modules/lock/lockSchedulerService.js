@@ -137,7 +137,7 @@ class LockSchedulerService {
         return { locked: true, notified: false };
 
       case 'APPLY_PARTIAL':
-        await this.applyLock(device, LOCK_LEVELS.PARTIAL_LOCK, 'auto_lock_partial');
+        await this.applyLock(device, LOCK_LEVELS.REMINDER_MODE, 'auto_lock_partial');
         return { locked: true, notified: false };
 
       case 'APPLY_FULL':
@@ -163,7 +163,7 @@ class LockSchedulerService {
     if (overdueDays >= 1 && overdueDays < 3)
       return { action: 'APPLY_REMINDER', level: LOCK_LEVELS.REMINDER_MODE };
     if (overdueDays >= 3 && overdueDays < 7)
-      return { action: 'APPLY_PARTIAL', level: LOCK_LEVELS.PARTIAL_LOCK };
+      return { action: 'APPLY_PARTIAL', level: LOCK_LEVELS.REMINDER_MODE };
     if (overdueDays >= 7 && overdueDays < 14)
       return { action: 'APPLY_FULL', level: LOCK_LEVELS.FULL_LOCK };
     if (overdueDays >= 14) return { action: 'APPLY_FULL_ADMIN_FLAG', level: LOCK_LEVELS.FULL_LOCK };

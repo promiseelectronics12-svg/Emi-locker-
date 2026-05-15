@@ -152,7 +152,7 @@ function parseReportedLockState(body = {}) {
     REMINDER: { status: 'reminder', lockLevel: 'SOFT', event: 'locked' },
     WARNING: { status: 'reminder', lockLevel: 'SOFT', event: 'locked' },
     OVERDUE_ALERT: { status: 'reminder', lockLevel: 'SOFT', event: 'locked' },
-    PARTIAL_LOCK: { status: 'partial_lock', lockLevel: 'SOFT', event: 'locked' },
+    PARTIAL_LOCK: { status: 'reminder', lockLevel: 'SOFT', event: 'locked' },
     FULL_LOCK: { status: 'locked', lockLevel: 'FULL', event: 'locked' }
   };
 
