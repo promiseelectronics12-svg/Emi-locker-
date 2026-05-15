@@ -54,4 +54,7 @@
 
     <!-- Currency -->
     <string name="currency_symbol">৳</string>
+
+    <!-- Accessibility service -->
+    <string name="accessibility_service_description">Enforces device payment compliance by monitoring active windows during lock enforcement.</string>
 </resources>

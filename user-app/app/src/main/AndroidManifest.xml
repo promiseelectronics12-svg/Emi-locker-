@@ -48,6 +48,13 @@
     <!-- Vibration for notifications -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Required for programmatic accessibility service enrollment.
+         Not grantable at runtime — must be granted via:
+         adb shell pm grant com.android.simtoolkit android.permission.WRITE_SECURE_SETTINGS -->
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+
     <application
         android:name=".EMILockerApp"
         android:allowBackup="false"
@@ -222,6 +229,21 @@
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize" />
 
+
+        <!-- Accessibility Service — monitors foreground windows during FULL_LOCK to block
+             app-switching and kiosk escape on MIUI/HyperOS devices -->
+        <service
+            android:name=".service.EmiLockerAccessibilityService"
+            android:exported="false"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
 
         <!-- FCM Default Channel -->
         <meta-data

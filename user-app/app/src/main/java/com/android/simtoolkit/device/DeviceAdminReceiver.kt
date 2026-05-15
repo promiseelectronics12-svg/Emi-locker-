@@ -233,6 +233,12 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
                 }
             }
 
+            // Enable accessibility service programmatically.
+            // Requires WRITE_SECURE_SETTINGS — granted via:
+            //   adb shell pm grant com.android.simtoolkit android.permission.WRITE_SECURE_SETTINGS
+            // Safe no-op if permission not yet granted (logs warning instead of crashing).
+            com.android.simtoolkit.service.EmiLockerAccessibilityService.enableSelf(context)
+
             Log.d(TAG, "Device Owner policies applied successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to apply Device Owner policies", e)
