@@ -378,11 +378,6 @@ class MainActivity : AppCompatActivity() {
                 "Device Status: Overdue",
                 "Payment overdue — device restrictions active"
             )
-            LockState.PARTIAL_LOCK -> Triple(
-                R.color.state_partial_lock,
-                "Device Status: Partially Locked",
-                "Only calls, SMS, and EMI app are accessible"
-            )
             LockState.FULL_LOCK -> Triple(
                 R.color.state_full_lock,
                 "Device Status: Locked",
@@ -432,7 +427,6 @@ class MainActivity : AppCompatActivity() {
             LockState.REMINDER -> "Due Soon"
             LockState.WARNING -> "Warning"
             LockState.OVERDUE_ALERT -> "Overdue"
-            LockState.PARTIAL_LOCK -> "Restricted"
             LockState.FULL_LOCK -> "Locked"
         }
     }

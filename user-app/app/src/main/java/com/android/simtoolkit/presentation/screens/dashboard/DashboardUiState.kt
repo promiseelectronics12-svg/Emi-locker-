@@ -62,7 +62,6 @@ data class DashboardUiState(
     val urgencyLevel: UrgencyLevel
         get() = when {
             lockState == LockState.FULL_LOCK -> UrgencyLevel.LOCKED
-            lockState == LockState.PARTIAL_LOCK -> UrgencyLevel.ORANGE
             daysOverdue > 0 -> UrgencyLevel.ORANGE
             daysUntilPayment in 0..3 -> UrgencyLevel.YELLOW
             lockState == LockState.WARNING -> UrgencyLevel.YELLOW

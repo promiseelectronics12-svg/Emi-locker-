@@ -31,7 +31,7 @@ function createSignedLockCommand(deviceId, lockLevel, imei, serial, soc_model) {
   const commandData = {
     deviceId,
     lockLevel,
-    command: lockLevel >= 7 ? 'FULL_LOCK' : lockLevel >= 3 ? 'PARTIAL_LOCK' : 'LOCK',
+    command: lockLevel >= 7 ? 'FULL_LOCK' : lockLevel >= 3 ? 'REMINDER_MODE' : 'LOCK',
     timestamp,
     nonce,
     serverId: process.env.SERVER_ID || 'server-001',

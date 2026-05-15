@@ -227,18 +227,6 @@ class DashboardViewModel @Inject constructor(
                     )
                 )
             }
-            LockState.PARTIAL_LOCK -> {
-                notifications.add(
-                    NotificationHistoryItem(
-                        id = "partial_lock_${now}",
-                        title = "Device Partially Locked",
-                        message = "Your device is partially locked due to overdue payment. Contact your dealer.",
-                        timestamp = now - (3 * 60 * 60 * 1000),
-                        type = NotificationType.OVERDUE_ALERT,
-                        isRead = false
-                    )
-                )
-            }
             LockState.FULL_LOCK -> {
                 notifications.add(
                     NotificationHistoryItem(

@@ -15,7 +15,6 @@
     <color name="state_reminder">#FFC107</color>
     <color name="state_warning">#FF9800</color>
     <color name="state_overdue">#F44336</color>
-    <color name="state_partial_lock">#D32F2F</color>
     <color name="state_full_lock">#B71C1C</color>
 
     <!-- Overlay -->

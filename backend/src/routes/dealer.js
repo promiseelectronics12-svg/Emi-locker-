@@ -1445,7 +1445,7 @@ router.post(
 
     const command = await lockCommandService.generateSignedCommand({
       deviceImei: device.imei || '',
-      actionType: 'PARTIAL_LOCK',
+      actionType: 'REMINDER',
       lockLevel: REMINDER_LOCK_LEVEL,
       metadata: { reason: 'PAYMENT_REMINDER', dealerId: dealer.id, requestedBy: req.user.id },
     });

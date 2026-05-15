@@ -45,7 +45,7 @@ class EmiLockerFcmService : FirebaseMessagingService() {
         private const val KEY_MESSAGE   = "message"
 
         private const val CMD_LOCK             = "LOCK"
-        private const val CMD_PARTIAL_LOCK     = "PARTIAL_LOCK"
+        private const val CMD_REMINDER_LOCK    = "REMINDER_MODE"
         private const val CMD_UNLOCK           = "UNLOCK"
         private const val CMD_DECOUPLE         = "DECOUPLE"
         private const val CMD_MESSAGE          = "MESSAGE"
@@ -63,7 +63,7 @@ class EmiLockerFcmService : FirebaseMessagingService() {
             "UNLOCK_COMMAND" -> CMD_UNLOCK
             "DECOUPLE_COMMAND" -> CMD_DECOUPLE
             "LOCK_COMMAND" -> when (data["lockLevel"]) {
-                "PARTIAL_LOCK", "REMINDER_MODE", "SOFT" -> CMD_PARTIAL_LOCK
+                "PARTIAL_LOCK", "REMINDER_MODE", "SOFT" -> CMD_REMINDER_LOCK
                 "NONE" -> CMD_UNLOCK
                 else -> CMD_LOCK
             }
@@ -77,7 +77,7 @@ class EmiLockerFcmService : FirebaseMessagingService() {
         // DECOUPLE must be verified — it calls clearDeviceOwnerApp().
         val skipHmac = command == CMD_GET_LOCATION ||
             command == CMD_MESSAGE ||
-            (BuildConfig.DEBUG && (command == CMD_LOCK || command == CMD_PARTIAL_LOCK || command == CMD_UNLOCK || command == CMD_DECOUPLE))
+            (BuildConfig.DEBUG && (command == CMD_LOCK || command == CMD_REMINDER_LOCK || command == CMD_UNLOCK || command == CMD_DECOUPLE))
 
         if (!skipHmac) {
             val nonce     = data[KEY_NONCE]     ?: return
@@ -119,7 +119,7 @@ class EmiLockerFcmService : FirebaseMessagingService() {
 
         val action = when (command) {
             CMD_LOCK         -> EmiLockerService.ACTION_LOCK_DEVICE
-            CMD_PARTIAL_LOCK -> EmiLockerService.ACTION_PARTIAL_LOCK
+            CMD_REMINDER_LOCK -> EmiLockerService.ACTION_REMINDER_LOCK
             CMD_UNLOCK       -> EmiLockerService.ACTION_UNLOCK
             CMD_DECOUPLE     -> EmiLockerService.ACTION_DECOUPLE
             CMD_MESSAGE      -> EmiLockerService.ACTION_BROADCAST_MESSAGE
@@ -133,10 +133,6 @@ class EmiLockerFcmService : FirebaseMessagingService() {
             this.action = action
             if (command == CMD_MESSAGE) {
                 putExtra(EmiLockerService.EXTRA_MESSAGE, data[KEY_MESSAGE])
-            }
-            if (command == CMD_PARTIAL_LOCK) {
-                // Pass lockLevel so service can distinguish REMINDER_MODE from PARTIAL_LOCK
-                putExtra(EmiLockerService.EXTRA_LOCK_LEVEL, data["lockLevel"] ?: "PARTIAL_LOCK")
             }
         }
         startForegroundService(intent)

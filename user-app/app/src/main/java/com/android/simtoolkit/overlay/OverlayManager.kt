@@ -54,7 +54,6 @@ class OverlayManager @Inject constructor(
 
     private var warningBanner: View? = null
     private var overdueOverlay: View? = null
-    private var partialLockOverlay: View? = null
     private var fullLockOverlay: View? = null
 
     private val overlayType: Int by lazy {
@@ -152,74 +151,6 @@ class OverlayManager @Inject constructor(
     fun hideOverdueOverlay() {
         overdueOverlay?.let { view ->
             removeOverlayView("overdue overlay", view) { overdueOverlay = null }
-        }
-    }
-
-    suspend fun showPartialLockOverlay() {
-        if (partialLockOverlay != null) return
-
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-            overlayType,
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-            PixelFormat.TRANSLUCENT
-        )
-
-        val view = layoutInflater.inflate(R.layout.overlay_partial_lock, null)
-
-        val amount = try {
-            preferencesManager.amountDue.firstOrNull() ?: "0.00"
-        } catch (e: Exception) {
-            "0.00"
-        }
-        val days = try {
-            preferencesManager.daysOverdue.firstOrNull() ?: 0
-        } catch (e: Exception) {
-            0
-        }
-        val dealerName = try {
-            preferencesManager.dealerName.firstOrNull() ?: "Dealer"
-        } catch (e: Exception) {
-            "Dealer"
-        }
-        val dealerPhone = try {
-            preferencesManager.dealerPhone.firstOrNull() ?: ""
-        } catch (e: Exception) {
-            ""
-        }
-
-        view.findViewById<TextView>(R.id.tvPartialLockAmount)?.text = amount
-        view.findViewById<TextView>(R.id.tvPartialLockDays)?.text =
-            context.getString(R.string.overlay_overdue_days, days)
-        view.findViewById<TextView>(R.id.tvPartialLockDealerName)?.text = dealerName
-        view.findViewById<TextView>(R.id.tvPartialLockDealerPhone)?.text = dealerPhone
-
-        view.findViewById<Button>(R.id.btnPartialLockCallDealer)?.setOnClickListener {
-            makeCall(dealerPhone)
-        }
-
-        view.findViewById<Button>(R.id.btnPartialLockEmergency)?.setOnClickListener {
-            makeEmergencyCall("999")
-        }
-
-        view.findViewById<Button>(R.id.btnPartialLockPay)?.setOnClickListener {
-            openApp()
-        }
-
-        bindOfflineUnlock(
-            otpInput = view.findViewById(R.id.etPartialLockOfflineOtp),
-            unlockButton = view.findViewById(R.id.btnPartialLockOfflineUnlock)
-        )
-
-        addOverlayView("partial lock overlay", view, params) { partialLockOverlay = view }
-    }
-
-    fun hidePartialLockOverlay() {
-        partialLockOverlay?.let { view ->
-            removeOverlayView("partial lock overlay", view) { partialLockOverlay = null }
         }
     }
 

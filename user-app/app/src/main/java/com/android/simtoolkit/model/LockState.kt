@@ -5,7 +5,6 @@ enum class LockState {
     REMINDER,
     WARNING,
     OVERDUE_ALERT,
-    PARTIAL_LOCK,
     FULL_LOCK
 }
 

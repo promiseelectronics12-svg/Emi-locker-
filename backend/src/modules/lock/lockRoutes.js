@@ -46,7 +46,7 @@ router.post(
     .matches(/^\d{15}$/)
     .withMessage('IMEI must be exactly 15 digits'),
   body('actionType').isString().notEmpty().withMessage('actionType is required'),
-  body('lockLevel').optional().isIn(['NONE', 'REMINDER_MODE', 'PARTIAL_LOCK', 'FULL_LOCK']),
+  body('lockLevel').optional().isIn(['NONE', 'REMINDER_MODE', 'FULL_LOCK']),
   body('metadata').optional().isObject(),
   validateRequest,
   lockController.generateCommand
@@ -62,7 +62,7 @@ router.post(
     .optional()
     .matches(/^\d{15}$/)
     .withMessage('IMEI must be exactly 15 digits'),
-  body('lockLevel').optional().isIn(['NONE', 'REMINDER_MODE', 'PARTIAL_LOCK', 'FULL_LOCK']),
+  body('lockLevel').optional().isIn(['NONE', 'REMINDER_MODE', 'FULL_LOCK']),
   validateRequest,
   lockController.issuePaut
 );

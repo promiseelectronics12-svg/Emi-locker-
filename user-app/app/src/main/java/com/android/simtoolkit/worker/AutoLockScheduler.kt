@@ -41,7 +41,7 @@ class LockWorker @AssistedInject constructor(
 
             val targetState = when {
                 daysOverdue >= nextSchedule.fullLockDays -> LockState.FULL_LOCK
-                daysOverdue >= nextSchedule.partialLockDays -> LockState.PARTIAL_LOCK
+                daysOverdue >= nextSchedule.partialLockDays -> LockState.REMINDER
                 daysOverdue >= nextSchedule.overdueAlertDays -> LockState.OVERDUE_ALERT
                 daysUntilDue <= nextSchedule.warningDays -> LockState.WARNING
                 daysUntilDue <= nextSchedule.reminderDays -> LockState.REMINDER

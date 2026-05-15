@@ -35,8 +35,15 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
 
         fun isMiui(): Boolean {
             return try {
-                !android.os.SystemProperties.get("ro.miui.ui.version.name", "").isNullOrEmpty() ||
-                !android.os.SystemProperties.get("ro.mi.os.version.name", "").isNullOrEmpty()
+                val systemProperties = Class.forName("android.os.SystemProperties")
+                val get = systemProperties.getMethod(
+                    "get",
+                    String::class.java,
+                    String::class.java
+                )
+                val miuiVersion = get.invoke(null, "ro.miui.ui.version.name", "") as String
+                val hyperOsVersion = get.invoke(null, "ro.mi.os.version.name", "") as String
+                miuiVersion.isNotEmpty() || hyperOsVersion.isNotEmpty()
             } catch (e: Exception) {
                 false
             }
@@ -164,7 +171,7 @@ class DeviceAdminReceiver : DeviceAdminReceiver() {
             // Blocks USB debugging and prevents developer options from being re-enabled
             // (tapping Build Number 7 times no longer works after Device Owner is set)
             dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_DEBUGGING_FEATURES)
-            // Auto-grant overlay permission — required for partial lock warning screens
+            // Auto-grant overlay permission — required for reminder and full-lock screens
             // No user dialog needed when Device Owner is set (Android 10+)
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                 dpm.setPermissionGrantState(

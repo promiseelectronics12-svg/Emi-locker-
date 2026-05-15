@@ -100,10 +100,6 @@ class LockStateManager @Inject constructor(
                     kioskEnabled = applyUnifiedLockScreen(newState)
                     overlayShown = true
                 }
-                LockState.PARTIAL_LOCK -> {
-                    kioskEnabled = applyUnifiedLockScreen(newState)
-                    overlayShown = true
-                }
                 LockState.FULL_LOCK -> {
                     kioskEnabled = applyUnifiedLockScreen(newState)
                     overlayShown = true
@@ -122,7 +118,6 @@ class LockStateManager @Inject constructor(
             if (overlayShown) {
                 when (newState) {
                     LockState.FULL_LOCK,
-                    LockState.PARTIAL_LOCK,
                     LockState.OVERDUE_ALERT -> hideAllLockOverlays()
                     LockState.WARNING -> overlayManager.hideWarningBanner()
                     LockState.REMINDER -> overlayManager.hideReminderWatermark()
@@ -160,9 +155,6 @@ class LockStateManager @Inject constructor(
             LockState.OVERDUE_ALERT -> {
                 applyUnifiedLockScreen(state)
             }
-            LockState.PARTIAL_LOCK -> {
-                applyUnifiedLockScreen(state)
-            }
             LockState.FULL_LOCK -> {
                 applyUnifiedLockScreen(state)
             }
@@ -188,9 +180,6 @@ class LockStateManager @Inject constructor(
                 }
             }
             LockState.OVERDUE_ALERT -> {
-                cleanupUnifiedLockScreen()
-            }
-            LockState.PARTIAL_LOCK -> {
                 cleanupUnifiedLockScreen()
             }
             LockState.FULL_LOCK -> {
@@ -254,7 +243,6 @@ class LockStateManager @Inject constructor(
 
     private fun hideAllLockOverlays() {
         overlayManager.hideOverdueOverlay()
-        overlayManager.hidePartialLockOverlay()
         overlayManager.hideFullLockOverlay()
     }
 

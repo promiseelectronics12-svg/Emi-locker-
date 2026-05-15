@@ -25,7 +25,7 @@ import com.android.simtoolkit.service.EmiLockerService
  *   adb shell am broadcast -a com.android.simtoolkit.DIAG --es cmd CHECK_SETTINGS
  *   adb shell am broadcast -a com.android.simtoolkit.DIAG --es cmd DISABLE_ADB
  *   adb shell am broadcast -a com.android.simtoolkit.DIAG --es cmd DISABLE_DEV_OPTIONS
- *   adb shell am broadcast -a com.android.simtoolkit.DIAG --es cmd TEST_PARTIAL_LOCK
+ *   adb shell am broadcast -a com.android.simtoolkit.DIAG --es cmd TEST_REMINDER
  *   adb shell am broadcast -a com.android.simtoolkit.DIAG --es cmd TEST_UNLOCK
  *   adb shell am broadcast -a com.android.simtoolkit.DIAG --es cmd TEST_LOCATION --es pullId adb_test
  *   adb shell am broadcast -a com.android.simtoolkit.DIAG --es cmd PING
@@ -55,7 +55,7 @@ class DiagnosticReceiver : BroadcastReceiver() {
             "DISABLE_ADB"       -> handleDisableAdb(context)
             "DISABLE_DEV_OPTIONS" -> handleDisableDevOptions(context)
             "OPEN_DIAGNOSTIC"   -> openDiagnosticScreen(context)
-            "TEST_PARTIAL_LOCK"  -> handleTestLockCommand(context, EmiLockerService.ACTION_PARTIAL_LOCK)
+            "TEST_REMINDER"      -> handleTestLockCommand(context, EmiLockerService.ACTION_REMINDER_LOCK)
             "TEST_FULL_LOCK"     -> handleTestLockCommand(context, EmiLockerService.ACTION_LOCK_DEVICE)
             "TEST_UNLOCK"        -> handleTestLockCommand(context, EmiLockerService.ACTION_UNLOCK)
             "TEST_LOCATION"     -> handleTestLocation(context, intent)

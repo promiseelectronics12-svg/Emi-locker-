@@ -4582,8 +4582,8 @@ IconData _deviceStatusIcon(Map<String, dynamic> device) {
   if (status == 'locked' || lockLevel == 'FULL') {
     return Icons.lock_rounded;
   }
-  if (status == 'partial_lock' || lockLevel == 'SOFT') {
-    return Icons.lock_clock_rounded;
+  if (status == 'reminder' || lockLevel == 'SOFT') {
+    return Icons.notifications_active_rounded;
   }
   if (status == 'unlocked' || lockLevel == 'NONE') {
     return Icons.lock_open_rounded;
@@ -4614,8 +4614,8 @@ class DeviceBrandIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final profile = _brandProfile(brand);
     final locked = status.toLowerCase() == 'locked' || lockLevel == 'FULL';
-    final partial =
-        status.toLowerCase() == 'partial_lock' || lockLevel == 'SOFT';
+    final reminder =
+        status.toLowerCase() == 'reminder' || lockLevel == 'SOFT';
     final offline = !{
       'online',
       'unknown',
@@ -4623,7 +4623,7 @@ class DeviceBrandIcon extends StatelessWidget {
     }.contains(connectionStatus.toLowerCase());
     final stateColor = locked
         ? AppTone.danger
-        : partial
+        : reminder
         ? AppTone.warning
         : offline
         ? AppTone.muted
@@ -4688,7 +4688,7 @@ class DeviceBrandIcon extends StatelessWidget {
             child: Icon(
               locked
                   ? Icons.lock_rounded
-                  : partial
+                  : reminder
                   ? Icons.lock_clock_rounded
                   : Icons.lock_open_rounded,
               size: 13,
@@ -4903,10 +4903,7 @@ class DeviceActions extends StatelessWidget {
     final lockUpper = lock.toUpperCase();
     final isLockActive =
         statusLower == 'locked' ||
-        statusLower == 'partial_lock' ||
-        statusLower == 'reminder' ||
-        lockUpper == 'FULL' ||
-        lockUpper == 'SOFT';
+        lockUpper == 'FULL';
     final isUnlockPending = statusLower == 'pending_unlock';
     final isReminderActive = statusLower == 'reminder';
 
@@ -5108,7 +5105,10 @@ class DeviceActions extends StatelessWidget {
                                   ),
                                 ),
                               );
-                              await onDeviceChanged?.call();
+                              if (context.mounted) {
+                                Navigator.pop(context);
+                                onDeviceChanged?.call();
+                              }
                             }
                           : () async {
                               final result =
@@ -5121,9 +5121,9 @@ class DeviceActions extends StatelessWidget {
                                       deviceName: deviceName,
                                     ),
                                   );
-                              if (result != null) await onDeviceChanged?.call();
                               if (result != null && context.mounted) {
                                 Navigator.pop(context);
+                                onDeviceChanged?.call();
                               }
                             },
                     ),
@@ -8928,16 +8928,7 @@ class _LockDialogState extends State<LockDialog> {
   }
 
   String _expectedDeviceState(String reason) {
-    switch (reason) {
-      case 'TERMS_VIOLATION':
-      case 'SUSPECTED_FRAUD':
-      case 'SUSPECTED_SALE':
-        return 'PARTIAL_LOCK';
-      case 'EMI_OVERDUE':
-      case 'DEVICE_STOLEN':
-      default:
-        return 'FULL_LOCK';
-    }
+    return 'FULL_LOCK';
   }
 
   Future<bool> _waitForDeviceConfirmation(
@@ -8991,27 +8982,11 @@ class _LockDialogState extends State<LockDialog> {
   }
 
   String _lockLevelFor(String r) {
-    switch (r) {
-      case 'TERMS_VIOLATION':
-        return 'Partial Lock';
-      case 'SUSPECTED_FRAUD':
-      case 'SUSPECTED_SALE':
-        return 'Reminder Mode';
-      default:
-        return 'Full Lock';
-    }
+    return 'Full Lock';
   }
 
   Color _lockLevelColor(String r) {
-    switch (r) {
-      case 'TERMS_VIOLATION':
-        return AppTone.warning;
-      case 'SUSPECTED_FRAUD':
-      case 'SUSPECTED_SALE':
-        return AppTone.info;
-      default:
-        return AppTone.danger;
-    }
+    return AppTone.danger;
   }
 
   IconData _lockLevelIcon(String r) {

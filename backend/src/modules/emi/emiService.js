@@ -5,7 +5,7 @@ const logger = require('../../utils/logger');
 
 const LOCK_REASON_CODES = {
   OVERDUE_1: { lockLevel: 'reminder', minDaysOverdue: 1, maxDaysOverdue: 3 },
-  OVERDUE_3: { lockLevel: 'partial', minDaysOverdue: 3, maxDaysOverdue: 7 },
+  OVERDUE_3: { lockLevel: 'reminder', minDaysOverdue: 3, maxDaysOverdue: 7 },
   OVERDUE_7: { lockLevel: 'full', minDaysOverdue: 7, maxDaysOverdue: 14 },
   OVERDUE_14: { lockLevel: 'full_plus', minDaysOverdue: 14 },
   SUSPECTED_SALE: { lockLevel: 'escalate', minDaysOverdue: 0 },
@@ -272,10 +272,10 @@ class EmiService {
 
     if (daysOverdue >= 3) {
       return {
-        action: 'partial_lock',
+        action: 'reminder',
         reason: 'OVERDUE_3',
-        message: 'Partial lock - Calls, SMS, EMI app only',
-        lockLevel: 'partial'
+        message: 'Reminder mode - Payment reminder overlay stays active',
+        lockLevel: 'reminder'
       };
     }
 

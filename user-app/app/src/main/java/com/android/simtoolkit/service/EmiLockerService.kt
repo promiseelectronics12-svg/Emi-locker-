@@ -94,10 +94,8 @@ class EmiLockerService : Service() {
             ACTION_LOCK_DEVICE -> serviceScope.launch {
                 applyLockStateAndReport(LockState.FULL_LOCK, "lock_command")
             }
-            ACTION_PARTIAL_LOCK -> {
-                val lockLevel = intent?.getStringExtra(EXTRA_LOCK_LEVEL) ?: "PARTIAL_LOCK"
-                val targetState = if (lockLevel == "REMINDER_MODE") LockState.REMINDER else LockState.PARTIAL_LOCK
-                serviceScope.launch { applyLockStateAndReport(targetState, "partial_lock_command") }
+            ACTION_REMINDER_LOCK -> {
+                serviceScope.launch { applyLockStateAndReport(LockState.REMINDER, "reminder_command") }
             }
             ACTION_UNLOCK -> serviceScope.launch {
                 applyLockStateAndReport(LockState.NORMAL, "unlock_command")
@@ -430,7 +428,7 @@ class EmiLockerService : Service() {
 
     companion object {
         const val ACTION_LOCK_DEVICE       = "com.emilocker.action.LOCK_DEVICE"
-        const val ACTION_PARTIAL_LOCK      = "com.emilocker.action.PARTIAL_LOCK"
+        const val ACTION_REMINDER_LOCK     = "com.emilocker.action.REMINDER"
         const val ACTION_UNLOCK            = "com.emilocker.action.UNLOCK"
         const val ACTION_DECOUPLE          = "com.emilocker.action.DECOUPLE"
         const val ACTION_BROADCAST_MESSAGE = "com.emilocker.action.BROADCAST_MESSAGE"
@@ -439,7 +437,6 @@ class EmiLockerService : Service() {
         const val ACTION_REPORT_LOCATION   = "com.emilocker.action.REPORT_LOCATION"
         const val EXTRA_MESSAGE            = "extra_message"
         const val EXTRA_PULL_ID            = "extra_pull_id"
-        const val EXTRA_LOCK_LEVEL         = "extra_lock_level"
 
         fun start(context: Context) {
             val intent = Intent(context, EmiLockerService::class.java)

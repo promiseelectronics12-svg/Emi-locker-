@@ -130,7 +130,7 @@ function buildLockCommandPayload(
 ) {
   return {
     type: 'LOCK_COMMAND',
-    command: lockLevel >= 7 ? 'FULL_LOCK' : lockLevel >= 3 ? 'PARTIAL_LOCK' : 'LOCK',
+    command: lockLevel >= 7 ? 'FULL_LOCK' : lockLevel >= 3 ? 'REMINDER_MODE' : 'LOCK',
     lockLevel,
     timestamp: new Date().toISOString(),
     signature,

@@ -191,11 +191,6 @@ private fun LockStatusCard(uiState: DashboardUiState) {
             "Overdue - Payment Late",
             Icons.Default.Warning
         )
-        LockState.PARTIAL_LOCK -> Triple(
-            Color(0xFFE64A19),
-            "Partial Lock - Limited Access",
-            Icons.Default.Warning
-        )
         LockState.FULL_LOCK -> Triple(
             Color(0xFFB71C1C),
             "Full Lock - Contact Dealer",

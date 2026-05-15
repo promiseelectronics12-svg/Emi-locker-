@@ -11,7 +11,6 @@ const sseService = require('../sse/sseService');
 const LOCK_LEVELS = {
   NONE: 'NONE',
   REMINDER_MODE: 'REMINDER_MODE',
-  PARTIAL_LOCK: 'PARTIAL_LOCK',
   FULL_LOCK: 'FULL_LOCK',
 };
 
@@ -297,13 +296,12 @@ class LockService {
 
   toDbLockLevel(lockLevel) {
     if (lockLevel === LOCK_LEVELS.FULL_LOCK) return 'FULL';
-    if (lockLevel === LOCK_LEVELS.PARTIAL_LOCK || lockLevel === LOCK_LEVELS.REMINDER_MODE) return 'SOFT';
+    if (lockLevel === LOCK_LEVELS.REMINDER_MODE) return 'SOFT';
     return 'NONE';
   }
 
   toDbStatus(lockLevel) {
     if (lockLevel === LOCK_LEVELS.FULL_LOCK) return 'locked';
-    if (lockLevel === LOCK_LEVELS.PARTIAL_LOCK) return 'partial_lock';
     if (lockLevel === LOCK_LEVELS.REMINDER_MODE) return 'reminder';
     return 'enrolled';
   }

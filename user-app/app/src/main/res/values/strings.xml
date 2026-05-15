@@ -19,7 +19,6 @@
     <string name="lock_state_reminder">Payment Reminder</string>
     <string name="lock_state_warning">Payment Warning</string>
     <string name="lock_state_overdue_alert">Payment Overdue</string>
-    <string name="lock_state_partial_lock">Device Partially Locked</string>
     <string name="lock_state_full_lock">Device Locked</string>
 
     <!-- Overlay Messages -->
@@ -30,8 +29,6 @@
     <string name="overlay_overdue_title">EMI Payment Overdue</string>
     <string name="overlay_overdue_message">Your EMI payment is overdue. Your device will be restricted if payment is not made.</string>
     <string name="overlay_overdue_days">%d days overdue</string>
-    <string name="overlay_partial_lock_title">Device Partially Locked</string>
-    <string name="overlay_partial_lock_message">Your device is partially locked due to overdue EMI payment. Only calls, SMS, and emergency services are available. Contact your dealer to resolve.</string>
     <string name="overlay_full_lock_title">Device Locked</string>
     <string name="overlay_full_lock_message">Your device is locked due to overdue EMI payment. Contact your dealer or call emergency services.</string>
     <string name="overlay_full_lock_days">%d days overdue</string>

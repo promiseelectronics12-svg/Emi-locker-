@@ -186,7 +186,13 @@ class PreferencesManager @Inject constructor(
         return try {
             val stateName = context.dataStore.data.map { it[CURRENT_LOCK_STATE] }.firstOrNull()
             if (stateName != null) {
-                com.android.simtoolkit.model.LockState.valueOf(stateName)
+                try {
+                    com.android.simtoolkit.model.LockState.valueOf(stateName)
+                } catch (e: IllegalArgumentException) {
+                    // PARTIAL_LOCK was removed — migrate to REMINDER
+                    if (stateName == "PARTIAL_LOCK") com.android.simtoolkit.model.LockState.REMINDER
+                    else com.android.simtoolkit.model.LockState.NORMAL
+                }
             } else {
                 com.android.simtoolkit.model.LockState.NORMAL
             }

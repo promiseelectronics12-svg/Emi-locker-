@@ -66,7 +66,7 @@ async function sendLockCommand(deviceId, lockLevel) {
       const smsResult = await sendLockConfirmationSMS(
         device.phone,
         deviceId,
-        lockLevel >= 7 ? 'FULL_LOCK' : lockLevel >= 3 ? 'PARTIAL_LOCK' : 'LOCK'
+        lockLevel >= 7 ? 'FULL_LOCK' : lockLevel >= 3 ? 'REMINDER_MODE' : 'LOCK'
       );
 
       if (smsResult.success) {

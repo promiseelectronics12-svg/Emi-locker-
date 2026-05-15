@@ -29,7 +29,6 @@ function getLockLevels() {
 const LOCK_LEVELS = {
   NONE: 'NONE',
   REMINDER_MODE: 'REMINDER_MODE',
-  PARTIAL_LOCK: 'PARTIAL_LOCK',
   FULL_LOCK: 'FULL_LOCK'
 };
 
@@ -535,7 +534,7 @@ class FraudService {
         JOIN devices d ON dl1.device_id = d.id
         WHERE dl2.timestamp > dl1.timestamp
           AND dl2.timestamp <= dl1.timestamp + INTERVAL '2 hours'
-          AND d.lock_level IN ('PARTIAL_LOCK', 'FULL_LOCK', 'REMINDER_MODE')
+          AND d.lock_level IN ('FULL_LOCK', 'REMINDER_MODE')
       )
       SELECT * FROM location_jumps
       WHERE distance_km > 200 AND hours_elapsed < 2

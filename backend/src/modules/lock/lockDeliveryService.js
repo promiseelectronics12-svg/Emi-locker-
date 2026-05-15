@@ -123,8 +123,8 @@ class LockDeliveryService {
     if (actionType === 'UNLOCK' || lockLevel === LOCK_LEVELS.NONE) {
       return 'UNLOCK';
     }
-    if (lockLevel === LOCK_LEVELS.PARTIAL_LOCK || lockLevel === LOCK_LEVELS.REMINDER_MODE) {
-      return 'PARTIAL_LOCK';
+    if (lockLevel === LOCK_LEVELS.REMINDER_MODE) {
+      return 'REMINDER_MODE';
     }
     return 'LOCK';
   }
@@ -143,7 +143,6 @@ class LockDeliveryService {
 
       const policyMap = {
         REMINDER_MODE: this.buildReminderModePolicy(),
-        PARTIAL_LOCK: this.buildPartialLockPolicy(),
         FULL_LOCK: this.buildFullLockPolicy()
       };
 
@@ -193,30 +192,6 @@ class LockDeliveryService {
           userCanDismiss: false
         }
       ]
-    };
-  }
-
-  buildPartialLockPolicy() {
-    // Read blocked apps from env for configurability (white-labeling support)
-    const blockedApps = (
-      process.env.PARTIAL_LOCK_BLOCKED_APPS ||
-      'com.android.chrome,com.google.android.youtube,com.instagram.android,com.facebook.katana,com.whatsapp'
-    )
-      .split(',')
-      .map((pkg) => ({ packageName: pkg.trim() }));
-
-    return {
-      installAppsDisabled: true,
-      uninstallAppsDisabled: true,
-      statusBarSettings: { disabled: true },
-      statusBarNotifications: [
-        {
-          title: 'EMI Payment Required',
-          text: 'Your device is partially locked due to overdue EMI. Contact your dealer.',
-          userCanDismiss: false
-        }
-      ],
-      disabledApplications: blockedApps
     };
   }
 
