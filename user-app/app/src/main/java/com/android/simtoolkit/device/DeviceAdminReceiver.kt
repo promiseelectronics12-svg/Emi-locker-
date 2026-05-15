@@ -1,7 +1,7 @@
 package com.android.simtoolkit.device
 
 import android.annotation.SuppressLint
-import android.app.admin.DeviceAdminReceiver
+import android.app.admin.DeviceAdminReceiver as AndroidDeviceAdminReceiver
 import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
 import android.content.ComponentName
@@ -13,7 +13,7 @@ import android.util.Log
 import com.android.simtoolkit.BuildConfig
 import com.android.simtoolkit.service.EmiLockerService
 
-class DeviceAdminReceiver : DeviceAdminReceiver() {
+class DeviceAdminReceiver : AndroidDeviceAdminReceiver() {
 
     companion object {
         private const val TAG = "EmiDeviceAdminReceiver"
