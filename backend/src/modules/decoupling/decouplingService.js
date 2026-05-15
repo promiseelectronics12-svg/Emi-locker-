@@ -6,7 +6,7 @@ const { DECOUPLING_STATES, VALID_TRANSITIONS } = require('./decouplingModel');
 const scheduler = require('./decouplingScheduler');
 const firebaseService = require('../devices/firebaseService');
 const amapiService = require('../devices/amapiService');
-const commandSigningService = require('../devices/commandSigningService');
+const lockCommandService = require('../lock/lockCommandService');
 const fcmService = require('../notifications/fcm.service');
 const padtService = require('../lock/padtService');
 
@@ -442,9 +442,12 @@ async executeDecoupling(deviceId, adminId, totpCode) {
       const encryptedRTOC = this.encryptRTOC(rtocCode, deviceId);
       const rtocKeySalt = crypto.createHash('sha256').update(deviceId).digest('hex').substring(0, 16);
 
-      const signedCommand = await commandSigningService.createSignedCommand(
-        deviceId, 'DECOUPLE', { rtocCode, action: 'DECOUPLE' }, decoupling.imei
-      );
+      const signedCommand = await lockCommandService.generateSignedCommand({
+        deviceImei: decoupling.imei || '',
+        actionType: 'DECOUPLE',
+        lockLevel: 'NONE',
+        metadata: { rtocCode, action: 'DECOUPLE', deviceId }
+      });
 
       let fcmSuccess = false;
       let fcmFailureReason = null;
@@ -453,13 +456,15 @@ async executeDecoupling(deviceId, adminId, totpCode) {
         const fcmResult = await fcmService.sendToDevice(decoupling.fcm_token, {
           type: 'DECOUPLE_COMMAND',
           command: 'DECOUPLE',
+          commandType: 'DECOUPLE',
           deviceId,
           deviceImei: decoupling.imei || '',
+          lockLevel: 'NONE',
           encryptedRTOC,
           rtocKeySalt,
-          signature: signedCommand.signature,
-          hmacSignature: signedCommand.signature,
-          timestamp: signedCommand.timestamp,
+          signature: signedCommand.hmacSignature,
+          hmacSignature: signedCommand.hmacSignature,
+          timestamp: String(signedCommand.timestamp),
           nonce: signedCommand.nonce,
           serverId: process.env.SERVER_ID || 'server-001',
         });

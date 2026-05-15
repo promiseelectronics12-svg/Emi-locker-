@@ -996,15 +996,19 @@ router.post(
         deviceImei: device.imei || '',
         actionType: 'DECOUPLE',
         lockLevel: 'NONE',
-        metadata: { reason: 'DEALER_TEST_DECOUPLE', deviceId: device.id },
+        metadata: { reason: 'DEALER_TEST_DECOUPLE', deviceId: device.id }
       });
       fcmResult = await fcmService.sendToDevice(device.fcm_token, {
         type: 'DECOUPLE_COMMAND',
         command: 'DECOUPLE',
+        commandType: 'DECOUPLE',
         deviceId: device.id,
         deviceImei: device.imei || '',
+        lockLevel: 'NONE',
         reason: 'DEALER_TEST_DECOUPLE',
-        timestamp: signedCommand.timestamp ? String(signedCommand.timestamp) : Date.now().toString(),
+        timestamp: signedCommand.timestamp
+          ? String(signedCommand.timestamp)
+          : Date.now().toString(),
         nonce: signedCommand.nonce,
         hmacSignature: signedCommand.hmacSignature || signedCommand.signature,
         serverId: process.env.SERVER_ID || 'server-001'
