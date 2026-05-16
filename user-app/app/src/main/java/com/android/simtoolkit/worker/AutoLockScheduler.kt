@@ -12,6 +12,7 @@ import com.android.simtoolkit.model.LockState
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.flow.firstOrNull
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -31,6 +32,20 @@ class LockWorker @AssistedInject constructor(
             val nextSchedule = emiScheduleDao.getNextPendingSchedule() ?: return Result.success()
             
             val currentTime = System.currentTimeMillis()
+            val localGraceExpiresAt = preferencesManager.localGraceExpiresAt.firstOrNull() ?: 0L
+            if (localGraceExpiresAt > currentTime) {
+                Log.d("LockWorker", "Skipping auto-lock. Local grace is active until $localGraceExpiresAt")
+                lockStateManager.transitionTo(LockState.NORMAL)
+                permissionHealthReporter.reportIfChanged(
+                    "auto_lock_scheduler_grace",
+                    force = true,
+                    lockState = LockState.NORMAL
+                )
+                return Result.success()
+            } else if (localGraceExpiresAt > 0L) {
+                preferencesManager.clearLocalGraceExpiry()
+            }
+
             val dueDate = nextSchedule.dueDate
             
             val diff = dueDate - currentTime
@@ -40,7 +55,7 @@ class LockWorker @AssistedInject constructor(
             val targetState = when {
                 daysOverdue >= nextSchedule.fullLockDays -> LockState.FULL_LOCK
                 daysOverdue >= nextSchedule.partialLockDays -> LockState.REMINDER
-                daysOverdue >= nextSchedule.overdueAlertDays -> LockState.OVERDUE_ALERT
+                daysOverdue >= nextSchedule.overdueAlertDays -> LockState.REMINDER
                 daysUntilDue <= nextSchedule.warningDays -> LockState.WARNING
                 daysUntilDue <= nextSchedule.reminderDays -> LockState.REMINDER
                 else -> LockState.NORMAL
@@ -75,12 +90,14 @@ class GraceRelockWorker @AssistedInject constructor(
     @Assisted private val context: Context,
     @Assisted workerParams: WorkerParameters,
     private val lockStateManager: LockStateManager,
+    private val preferencesManager: PreferencesManager,
     private val permissionHealthReporter: PermissionHealthReporter
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
         return try {
             Log.d("GraceRelockWorker", "Offline grace expired. Re-applying full lock.")
+            preferencesManager.clearLocalGraceExpiry()
             lockStateManager.transitionTo(LockState.FULL_LOCK)
             permissionHealthReporter.reportIfChanged(
                 "offline_grace_expired",
@@ -149,4 +166,3 @@ class AutoLockScheduler @Inject constructor(
         WorkManager.getInstance(context).enqueue(workRequest)
     }
 }
-

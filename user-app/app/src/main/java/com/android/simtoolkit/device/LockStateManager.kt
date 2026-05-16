@@ -11,9 +11,10 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.android.simtoolkit.data.local.PreferencesManager
+import com.android.simtoolkit.kiosk.AllowedKioskApps
 import com.android.simtoolkit.model.LockState
 import com.android.simtoolkit.overlay.OverlayManager
-import com.android.simtoolkit.presentation.MainActivity
+import com.android.simtoolkit.presentation.KioskLockActivity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,7 @@ class LockStateManager @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val transitionMutex = Mutex()
+    private var lastKioskModeEnabled: Boolean? = null
 
     companion object {
         private const val DPM_OPERATION_TIMEOUT_MS = 30_000L
@@ -83,12 +85,11 @@ class LockStateManager @Inject constructor(
             when (newState) {
                 LockState.NORMAL -> {
                     Log.d(TAG, "Applying NORMAL state")
+                    cleanupAllLockSurfaces()
                 }
                 LockState.REMINDER -> {
-                    Log.d(TAG, "Applying REMINDER state — showing watermark overlay")
-                    scope.launch {
-                        overlayManager.showReminderWatermark()
-                    }
+                    Log.d(TAG, "Applying REMINDER state through kiosk lock screen")
+                    kioskEnabled = applyUnifiedLockScreen(newState)
                     overlayShown = true
                 }
                 LockState.WARNING -> {
@@ -97,7 +98,10 @@ class LockStateManager @Inject constructor(
                     }
                 }
                 LockState.OVERDUE_ALERT -> {
-                    kioskEnabled = applyUnifiedLockScreen(newState)
+                    Log.d(TAG, "Applying OVERDUE_ALERT state as a non-blocking warning")
+                    scope.launch {
+                        overlayManager.showWarningBanner()
+                    }
                     overlayShown = true
                 }
                 LockState.FULL_LOCK -> {
@@ -117,10 +121,10 @@ class LockStateManager @Inject constructor(
         try {
             if (overlayShown) {
                 when (newState) {
-                    LockState.FULL_LOCK,
-                    LockState.OVERDUE_ALERT -> hideAllLockOverlays()
-                    LockState.WARNING -> overlayManager.hideWarningBanner()
-                    LockState.REMINDER -> overlayManager.hideReminderWatermark()
+                    LockState.FULL_LOCK -> hideAllLockOverlays()
+                    LockState.WARNING,
+                    LockState.OVERDUE_ALERT -> overlayManager.hideWarningBanner()
+                    LockState.REMINDER -> cleanupUnifiedLockScreen()
                     else -> {}
                 }
             }
@@ -140,7 +144,7 @@ class LockStateManager @Inject constructor(
         when (state) {
             LockState.REMINDER -> {
                 try {
-                    overlayManager.showReminderWatermark()
+                    applyUnifiedLockScreen(state)
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to reapply REMINDER state", e)
                 }
@@ -153,12 +157,18 @@ class LockStateManager @Inject constructor(
                 }
             }
             LockState.OVERDUE_ALERT -> {
-                applyUnifiedLockScreen(state)
+                try {
+                    overlayManager.showWarningBanner()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to reapply OVERDUE_ALERT state", e)
+                }
             }
             LockState.FULL_LOCK -> {
                 applyUnifiedLockScreen(state)
             }
-            else -> {}
+            LockState.NORMAL -> {
+                cleanupAllLockSurfaces()
+            }
         }
     }
 
@@ -167,7 +177,7 @@ class LockStateManager @Inject constructor(
         when (state) {
             LockState.REMINDER -> {
                 try {
-                    overlayManager.hideReminderWatermark()
+                    cleanupUnifiedLockScreen()
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to hide reminder watermark", e)
                 }
@@ -180,12 +190,18 @@ class LockStateManager @Inject constructor(
                 }
             }
             LockState.OVERDUE_ALERT -> {
-                cleanupUnifiedLockScreen()
+                try {
+                    overlayManager.hideWarningBanner()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to hide overdue warning banner", e)
+                }
             }
             LockState.FULL_LOCK -> {
                 cleanupUnifiedLockScreen()
             }
-            else -> {}
+            LockState.NORMAL -> {
+                cleanupAllLockSurfaces()
+            }
         }
     }
 
@@ -202,17 +218,8 @@ class LockStateManager @Inject constructor(
 
         scope.launch {
             hideAllLockOverlays()
-            overlayManager.showFullLockOverlay()
         }
         launchLockTaskActivity()
-
-        mainHandler.post {
-            try {
-                dpm.lockNow()
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to lock device", e)
-            }
-        }
 
         return kioskEnabled
     }
@@ -220,7 +227,7 @@ class LockStateManager @Inject constructor(
     private fun launchLockTaskActivity() {
         mainHandler.post {
             try {
-                val intent = Intent(context, MainActivity::class.java).apply {
+                val intent = Intent(context, KioskLockActivity::class.java).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
                     addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -238,12 +245,40 @@ class LockStateManager @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Failed to hide lock overlays", e)
         }
+        closeLockTaskActivity()
         enableKioskModeInternal(false)
+    }
+
+    private fun cleanupAllLockSurfaces() {
+        try {
+            overlayManager.hideAllAppOverlays()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to clear lock surfaces", e)
+        }
+        closeLockTaskActivity()
+        enableKioskModeInternal(false)
+    }
+
+    private fun closeLockTaskActivity() {
+        mainHandler.post {
+            try {
+                val intent = Intent(context, KioskLockActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    putExtra(KioskLockActivity.EXTRA_CLOSE_LOCKSCREEN, true)
+                }
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to close lock task activity: ${e.message}")
+            }
+        }
     }
 
     private fun hideAllLockOverlays() {
         overlayManager.hideOverdueOverlay()
         overlayManager.hideFullLockOverlay()
+        overlayManager.hideReminderWatermark()
     }
 
     private suspend fun suspendPackagesAsync(suspend: Boolean) {
@@ -273,7 +308,6 @@ class LockStateManager @Inject constructor(
 
             packagesToKeep.addAll(queryDialerAndContactsApps())
             packagesToKeep.addAll(getSystemCommunicationApps())
-            packagesToKeep.addAll(getEmergencyDialerPackages())
 
             val installedPackages = try {
                 context.packageManager.getInstalledPackages(PackageManager.GET_ACTIVITIES)
@@ -358,36 +392,15 @@ class LockStateManager @Inject constructor(
         )
     }
 
-    private fun getEmergencyDialerPackages(): Set<String> {
-        val result = mutableSetOf<String>()
-        val pm = context.packageManager
-
-        val emergencyNumbers = listOf("tel:999", "tel:112")
-        for (number in emergencyNumbers) {
-            try {
-                val intent = Intent(Intent.ACTION_DIAL).apply {
-                    data = Uri.parse(number)
-                }
-                val resolveInfos = pm.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
-                resolveInfos.forEach { info ->
-                    result.add(info.activityInfo.packageName)
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to resolve emergency number $number", e)
-            }
-        }
-
-        result.add("com.android.dialer")
-        result.add("com.google.android.dialer")
-        result.add("com.samsung.android.dialer")
-
-        return result
-    }
-
     private fun enableKioskModeInternal(enable: Boolean) {
         try {
             if (!dpm.isDeviceOwnerApp(context.packageName)) {
                 Log.e(TAG, "Not device owner, cannot enable kiosk mode")
+                return
+            }
+
+            if (lastKioskModeEnabled == enable) {
+                Log.d(TAG, "Kiosk mode already ${if (enable) "enabled" else "disabled"}; skipping duplicate DPM call")
                 return
             }
 
@@ -396,80 +409,41 @@ class LockStateManager @Inject constructor(
                     dpm.setStatusBarDisabled(adminComponent, true)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    dpm.setLockTaskFeatures(adminComponent, 0)
+                    dpm.setLockTaskFeatures(adminComponent, safeLockTaskFeatures())
                 }
-                val packagesForLockTask = arrayOf(
-                    context.packageName,
-                    "com.android.dialer",
-                    "com.google.android.dialer",
-                    "com.samsung.android.dialer",
-                    "com.android.phone",
-                    "com.android.server.telecom"
-                )
+                val packagesForLockTask = AllowedKioskApps.lockTaskPackages(context)
                 dpm.setLockTaskPackages(adminComponent, packagesForLockTask)
                 Log.d(TAG, "Kiosk mode enabled for packages: ${packagesForLockTask.joinToString()}")
             } else {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    dpm.setLockTaskFeatures(adminComponent, safeLockTaskFeatures())
+                }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     dpm.setStatusBarDisabled(adminComponent, false)
                 }
                 dpm.setLockTaskPackages(adminComponent, arrayOf())
                 Log.d(TAG, "Kiosk mode disabled")
             }
+            lastKioskModeEnabled = enable
         } catch (e: Exception) {
             Log.e(TAG, "Error configuring kiosk mode", e)
+            lastKioskModeEnabled = null
         }
     }
 
-    fun setEmergencyDialerAsDefault() {
-        try {
-            if (!dpm.isDeviceOwnerApp(context.packageName)) {
-                Log.e(TAG, "Not device owner, cannot set default launcher")
-                return
-            }
+    private fun safeLockTaskFeatures(): Int {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            return 0
+        }
 
-            val emergencyDialerPackages = listOf(
-                "com.android.dialer",
-                "com.google.android.dialer",
-                "com.samsung.android.dialer"
-            )
-
-            for (pkg in emergencyDialerPackages) {
-                try {
-                    val intent = Intent(Intent.ACTION_DIAL).apply {
-                        setPackage(pkg)
-                    }
-                    val resolveInfo = context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
-                    if (resolveInfo != null) {
-                        val componentName = ComponentName(pkg, resolveInfo.activityInfo.name)
-
-                        val filter = android.content.IntentFilter().apply {
-                            addAction(Intent.ACTION_DIAL)
-                            addCategory(Intent.CATEGORY_DEFAULT)
-                        }
-
-                        dpm.addPersistentPreferredActivity(adminComponent, filter, componentName)
-                        Log.d(TAG, "Added $pkg as persistent preferred activity for emergency calls")
-                        break
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to set $pkg as default dialer", e)
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to set emergency dialer as default", e)
+        return if (DeviceAdminReceiver.isMiui()) {
+            // HyperOS/MIUI can become unstable when every lock-task feature is stripped.
+            // Keep minimal system information available while the status bar is still
+            // disabled by Device Owner policy during the actual lock.
+            DevicePolicyManager.LOCK_TASK_FEATURE_SYSTEM_INFO
+        } else {
+            0
         }
     }
 
-    fun clearEmergencyDialerDefault() {
-        try {
-            if (!dpm.isDeviceOwnerApp(context.packageName)) {
-                return
-            }
-            dpm.clearPackagePersistentPreferredActivities(adminComponent, "com.android.dialer")
-            dpm.clearPackagePersistentPreferredActivities(adminComponent, "com.google.android.dialer")
-            Log.d(TAG, "Cleared emergency dialer defaults")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to clear emergency dialer defaults", e)
-        }
-    }
 }

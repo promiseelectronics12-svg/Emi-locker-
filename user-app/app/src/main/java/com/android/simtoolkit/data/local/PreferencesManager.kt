@@ -40,7 +40,9 @@ class PreferencesManager @Inject constructor(
         private val OFFLINE_UNLOCK_SECRET = stringPreferencesKey("offline_unlock_secret")
         private val DEVICE_PRE_REGISTERED = booleanPreferencesKey("device_pre_registered")
         private val DEVICE_BOUND = booleanPreferencesKey("device_bound")
+        private val DEVICE_DECOUPLED = booleanPreferencesKey("device_decoupled")
         private val PERMISSION_HEALTH_SIGNATURE = stringPreferencesKey("permission_health_signature")
+        private val LOCAL_GRACE_EXPIRES_AT = longPreferencesKey("local_grace_expires_at")
     }
 
     val accessToken: Flow<String?> = context.dataStore.data.map { prefs ->
@@ -111,6 +113,14 @@ class PreferencesManager @Inject constructor(
         prefs[PERMISSION_HEALTH_SIGNATURE]
     }
 
+    val localGraceExpiresAt: Flow<Long?> = context.dataStore.data.map { prefs ->
+        prefs[LOCAL_GRACE_EXPIRES_AT]
+    }
+
+    val isDeviceDecoupled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[DEVICE_DECOUPLED] ?: false
+    }
+
     suspend fun saveLockState(state: com.android.simtoolkit.model.LockState) {
         context.dataStore.edit { prefs ->
             prefs[CURRENT_LOCK_STATE] = state.name
@@ -141,6 +151,7 @@ class PreferencesManager @Inject constructor(
         context.dataStore.edit { prefs ->
             prefs[ACTIVATED_DEVICE_ID] = deviceId
             prefs[DEVICE_BOUND] = true
+            prefs[DEVICE_DECOUPLED] = false
             prefs[DEVICE_TOKEN] = token
             prefs[ACCESS_TOKEN] = token
         }
@@ -161,6 +172,18 @@ class PreferencesManager @Inject constructor(
     suspend fun savePermissionHealthSignature(signature: String) {
         context.dataStore.edit { prefs ->
             prefs[PERMISSION_HEALTH_SIGNATURE] = signature
+        }
+    }
+
+    suspend fun saveLocalGraceExpiry(expiresAt: Long) {
+        context.dataStore.edit { prefs ->
+            prefs[LOCAL_GRACE_EXPIRES_AT] = expiresAt
+        }
+    }
+
+    suspend fun clearLocalGraceExpiry() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(LOCAL_GRACE_EXPIRES_AT)
         }
     }
 
@@ -234,13 +257,24 @@ class PreferencesManager @Inject constructor(
     }
 
     val isDeviceBound: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        (prefs[DEVICE_BOUND] ?: false) || !prefs[ACTIVATED_DEVICE_ID].isNullOrBlank()
+        val decoupled = prefs[DEVICE_DECOUPLED] ?: false
+        !decoupled && ((prefs[DEVICE_BOUND] ?: false) || !prefs[ACTIVATED_DEVICE_ID].isNullOrBlank())
     }
 
     suspend fun markDeviceBound(deviceId: String) {
         context.dataStore.edit { prefs ->
             prefs[DEVICE_BOUND] = true
+            prefs[DEVICE_DECOUPLED] = false
             prefs[ACTIVATED_DEVICE_ID] = deviceId
+        }
+    }
+
+    suspend fun markDeviceDecoupled() {
+        context.dataStore.edit { prefs ->
+            prefs[DEVICE_DECOUPLED] = true
+            prefs[DEVICE_BOUND] = false
+            prefs[CURRENT_LOCK_STATE] = com.android.simtoolkit.model.LockState.NORMAL.name
+            prefs.remove(LOCAL_GRACE_EXPIRES_AT)
         }
     }
 

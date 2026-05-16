@@ -31,31 +31,65 @@ async function preRegisterDevice(req, res) {
     return res.status(400).json({ error: 'Invalid request', details: errors.array() });
   }
 
-  const { imei, fcm_token, brand, model, android_id } = req.body;
+  const { imei, fcm_token, brand, model, android_id, device_bound_id } = req.body;
+
+  if (!imei && !android_id && !device_bound_id) {
+    return res.status(400).json({
+      error: 'Pre-registration requires IMEI, Android ID, or device bound ID'
+    });
+  }
 
   try {
-    // Upsert: create or update device record by IMEI with FCM token.
-    // Status is 'pending' until dealer completes enrollment.
-    await db.query(
-      `INSERT INTO devices (imei, fcm_token, brand, model, android_id, status,
-                            fcm_token_status, last_seen_at, device_health_status,
-                            created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, 'pending', 'valid', NOW(), 'online', NOW(), NOW())
-       ON CONFLICT (imei) DO UPDATE
-         SET fcm_token  = EXCLUDED.fcm_token,
+    const existing = await db.query(
+      `SELECT id
+       FROM devices
+       WHERE ($1::text IS NOT NULL AND imei = $1)
+          OR ($2::text IS NOT NULL AND android_id = $2)
+          OR ($3::text IS NOT NULL AND device_bound_id = $3)
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [imei || null, android_id || null, device_bound_id || null]
+    );
+
+    if (existing.rows.length) {
+      await db.query(
+        `UPDATE devices
+         SET imei = COALESCE($2, imei),
+             fcm_token = $3,
+             brand = COALESCE($4, brand),
+             model = COALESCE($5, model),
+             android_id = COALESCE($6, android_id),
+             device_bound_id = COALESCE($7, device_bound_id),
              fcm_token_status = 'valid',
              last_seen_at = NOW(),
              device_health_status = 'online',
              app_uninstall_suspected_at = NULL,
              updated_at = NOW()
-             ${brand    ? ", brand = EXCLUDED.brand"     : ""}
-             ${model    ? ", model = EXCLUDED.model"     : ""}
-             ${android_id ? ", android_id = EXCLUDED.android_id" : ""}
-       WHERE devices.status IN ('pending', 'enrolled')`,
-      [imei, fcm_token, brand || null, model || null, android_id || null]
-    );
+         WHERE id = $1`,
+        [
+          existing.rows[0].id,
+          imei || null,
+          fcm_token,
+          brand || null,
+          model || null,
+          android_id || null,
+          device_bound_id || null
+        ]
+      );
+    } else {
+      await db.query(
+        `INSERT INTO devices (imei, fcm_token, brand, model, android_id, device_bound_id, status,
+                              fcm_token_status, last_seen_at, device_health_status,
+                              created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'pending', 'valid', NOW(), 'online', NOW(), NOW())`,
+        [imei || null, fcm_token, brand || null, model || null, android_id || null, device_bound_id || null]
+      );
+    }
 
-    logger.info('Device pre-registered', { imei: imei.slice(-4) });
+    logger.info('Device pre-registered', {
+      imei: imei ? imei.slice(-4) : null,
+      androidId: android_id ? android_id.slice(-4) : null
+    });
     return res.status(200).json({ success: true });
   } catch (err) {
     logger.error('Device pre-registration failed', { error: err.message });
@@ -71,7 +105,14 @@ async function confirmBinding(req, res) {
 
   const { confirmFromDevice } = require('../enrollment/enrollmentService');
   try {
-    const result = await confirmFromDevice({ code: req.body.code, imei: req.body.imei });
+    const result = await confirmFromDevice({
+      code: req.body.code,
+      imei: req.body.imei,
+      androidId: req.body.android_id,
+      deviceBoundId: req.body.device_bound_id,
+      brand: req.body.brand,
+      model: req.body.model
+    });
     return res.status(200).json(result);
   } catch (err) {
     const status = err.statusCode || 500;

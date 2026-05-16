@@ -17,7 +17,10 @@ class LocationController {
       });
     } catch (error) {
       logger.error('Pull location error:', error);
-      res.status(400).json({
+      const statusCode = String(error.message || '').includes('released or release is pending')
+        ? 409
+        : 400;
+      res.status(statusCode).json({
         success: false,
         error: error.message
       });

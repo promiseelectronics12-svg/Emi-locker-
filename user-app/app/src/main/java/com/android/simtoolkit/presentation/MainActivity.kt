@@ -381,7 +381,7 @@ class MainActivity : AppCompatActivity() {
             LockState.FULL_LOCK -> Triple(
                 R.color.state_full_lock,
                 "Device Status: Locked",
-                "Contact your dealer or emergency services"
+                "Contact your dealer or use the phone app for calls"
             )
         }
 
@@ -457,12 +457,13 @@ class MainActivity : AppCompatActivity() {
                 val am = getSystemService(ACTIVITY_SERVICE) as ActivityManager
                 val inLockTask = am.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE
 
-                if (lockState == LockState.FULL_LOCK) {
-                    lockStateManager.setEmergencyDialerAsDefault()
-                    if (!inLockTask) startLockTask()
+                if (lockState == LockState.FULL_LOCK || lockState == LockState.REMINDER) {
+                    startActivity(Intent(this@MainActivity, KioskLockActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    })
                 } else {
                     if (inLockTask) stopLockTask()
-                    lockStateManager.clearEmergencyDialerDefault()
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error enforcing lock state", e)

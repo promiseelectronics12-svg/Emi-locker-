@@ -1,6 +1,7 @@
 package com.android.simtoolkit.presentation
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
@@ -11,6 +12,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -383,11 +385,20 @@ class AuthActivity : ComponentActivity() {
         )
     }
 
-    private suspend fun verifyActivation(code: String, @Suppress("UNUSED_PARAMETER") deviceBoundId: String): ActivationOutcome {
-        // Device is not Device Owner at enrollment time — IMEI unavailable.
-        // Backend matches by code hash only (fallback path).
+    private suspend fun verifyActivation(code: String, deviceBoundId: String): ActivationOutcome {
+        val androidId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+        val imei = readDeviceImeiIfAvailable()
         Log.d(TAG, "Submitting activation confirmation to backend")
-        val response = networkModule.apiService.confirmDeviceBinding(BindingConfirmRequest(code))
+        val response = networkModule.apiService.confirmDeviceBinding(
+            BindingConfirmRequest(
+                code = code,
+                imei = imei,
+                android_id = androidId,
+                device_bound_id = deviceBoundId,
+                brand = Build.BRAND,
+                model = Build.MODEL
+            )
+        )
         Log.d(TAG, "Activation confirmation response code=${response.code()}")
         if (!response.isSuccessful) {
             val body = response.errorBody()?.string()
@@ -409,6 +420,9 @@ class AuthActivity : ComponentActivity() {
             result.offlineUnlockSecret?.takeIf { it.isNotBlank() }?.let {
                 preferencesManager.saveOfflineUnlockSecret(it)
             }
+            val dealerName = result.dealerName?.takeIf { it.isNotBlank() } ?: "Dealer"
+            val dealerPhone = result.dealerPhone?.takeIf { it.isNotBlank() }.orEmpty()
+            preferencesManager.saveDealerInfo(dealerName, dealerPhone)
             syncEmiSchedule(result.emiSchedule)
             deviceRegistrationService.registerFcmForDevice(result.deviceId)
             EmiLockerService.start(this@AuthActivity)
@@ -416,6 +430,29 @@ class AuthActivity : ComponentActivity() {
         }
 
         return ActivationOutcome(false, "Activation failed. Ask your dealer for a new code.")
+    }
+
+    @SuppressLint("HardwareIds", "MissingPermission")
+    private fun readDeviceImeiIfAvailable(): String? {
+        if (!hasPermission(Manifest.permission.READ_PHONE_STATE)) return null
+        return try {
+            val telephony = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+            val candidate = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val slotCount = telephony.phoneCount.coerceAtLeast(1)
+                (0 until slotCount)
+                    .asSequence()
+                    .mapNotNull { slot -> runCatching { telephony.getImei(slot) }.getOrNull() }
+                    .firstOrNull { it.matches(Regex("^\\d{15}$")) }
+                    ?: runCatching { telephony.imei }.getOrNull()
+            } else {
+                @Suppress("DEPRECATION")
+                telephony.deviceId
+            }
+            candidate?.filter { it.isDigit() }?.takeIf { it.length == 15 }
+        } catch (error: Exception) {
+            Log.w(TAG, "IMEI read unavailable after owner setup: ${error.message}")
+            null
+        }
     }
 
     private suspend fun syncEmiSchedule(schedule: EmiScheduleDto?) {

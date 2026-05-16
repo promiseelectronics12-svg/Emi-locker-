@@ -4614,8 +4614,7 @@ class DeviceBrandIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final profile = _brandProfile(brand);
     final locked = status.toLowerCase() == 'locked' || lockLevel == 'FULL';
-    final reminder =
-        status.toLowerCase() == 'reminder' || lockLevel == 'SOFT';
+    final reminder = status.toLowerCase() == 'reminder' || lockLevel == 'SOFT';
     final offline = !{
       'online',
       'unknown',
@@ -4753,6 +4752,10 @@ String _last4(String value) {
 
 String _connectionLabel(String status) {
   switch (status.toLowerCase()) {
+    case 'decoupled':
+      return 'Decoupled';
+    case 'release_pending':
+      return 'Release pending';
     case 'online':
       return 'Online';
     case 'delayed':
@@ -4772,6 +4775,10 @@ String _connectionLabel(String status) {
 
 Color _connectionColor(String status) {
   switch (status.toLowerCase()) {
+    case 'decoupled':
+      return AppTone.brand;
+    case 'release_pending':
+      return AppTone.warning;
     case 'online':
       return AppTone.brand;
     case 'delayed':
@@ -4907,7 +4914,7 @@ class DeviceActions extends StatelessWidget {
         lockUpper == 'FULL' ||
         lockUpper == 'SOFT';
     final isUnlockPending = statusLower == 'pending_unlock';
-    final isReminderActive = statusLower == 'reminder';
+    final isDecoupled = statusLower == 'decoupled';
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -4982,7 +4989,24 @@ class DeviceActions extends StatelessWidget {
                   StatusPill(label: status, color: statusColor(status)),
                 ],
               ),
-              if (connectionStatus == 'app_removed_suspected') ...[
+              if (statusLower == 'decoupled') ...[
+                const SizedBox(height: 10),
+                const _InlineNotice(
+                  message:
+                      'Device is decoupled. Controls are disabled; this stays as a record and can be re-enrolled with the same IMEI.',
+                  tone: AppTone.brand,
+                  icon: Icons.link_off_rounded,
+                ),
+              ] else if (statusLower == 'pending_decouple' ||
+                  connectionStatus == 'release_pending') ...[
+                const SizedBox(height: 10),
+                const _InlineNotice(
+                  message:
+                      'Release is pending. If the app is already removed, verify the phone manually.',
+                  tone: AppTone.warning,
+                  icon: Icons.pending_actions_rounded,
+                ),
+              ] else if (connectionStatus == 'app_removed_suspected') ...[
                 const SizedBox(height: 10),
                 const _InlineNotice(
                   message:
@@ -5093,7 +5117,7 @@ class DeviceActions extends StatelessWidget {
                       color: (isLockActive || isUnlockPending)
                           ? AppTone.brand
                           : AppTone.danger,
-                      onTap: id.isEmpty
+                      onTap: id.isEmpty || isDecoupled
                           ? null
                           : (isLockActive || isUnlockPending)
                           ? () async {
@@ -5129,41 +5153,11 @@ class DeviceActions extends StatelessWidget {
                               }
                             },
                     ),
-                    // Reminder mode — sends watermark overlay to device
-                    _ActionBtn(
-                      icon: isReminderActive
-                          ? Icons.notifications_active
-                          : Icons.notifications_outlined,
-                      label: isReminderActive ? 'Reminded' : 'Remind',
-                      color: AppTone.warning,
-                      onTap: id.isEmpty || isLockActive || isUnlockPending
-                          ? null
-                          : () async {
-                              final confirm = await showDialog<bool>(
-                                context: context,
-                                builder: (_) =>
-                                    _ReminderConfirmDialog(deviceName: deviceName),
-                              );
-                              if (confirm != true || !context.mounted) return;
-                              try {
-                                await api.post(
-                                  '/api/v1/dealer/devices/$id/set-reminder',
-                                );
-                                await onDeviceChanged?.call();
-                                if (context.mounted) {
-                                  snack(context,
-                                      'Reminder sent — customer will see EMI overlay');
-                                }
-                              } catch (e) {
-                                if (context.mounted) snack(context, readableError(e));
-                              }
-                            },
-                    ),
                     _ActionBtn(
                       icon: Icons.location_searching,
                       label: 'Location',
                       color: AppTone.accent,
-                      onTap: id.isEmpty
+                      onTap: id.isEmpty || isDecoupled
                           ? null
                           : () => showModalBottomSheet<void>(
                               context: context,
@@ -5187,7 +5181,7 @@ class DeviceActions extends StatelessWidget {
                       icon: Icons.sms_outlined,
                       label: 'Message',
                       color: AppTone.info,
-                      onTap: id.isEmpty
+                      onTap: id.isEmpty || isDecoupled
                           ? null
                           : () => showDialog<void>(
                               context: context,
@@ -5217,10 +5211,7 @@ class DeviceActions extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               if (id.isNotEmpty &&
-                  ![
-                    'decoupled',
-                    'pending_decouple',
-                  ].contains(status.toLowerCase())) ...[
+                  !['decoupled'].contains(status.toLowerCase())) ...[
                 _SoftPanel(
                   padding: const EdgeInsets.all(12),
                   child: Row(
@@ -5239,9 +5230,11 @@ class DeviceActions extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 10),
-                      const Expanded(
+                      Expanded(
                         child: Text(
-                          'Testing only: release management from this device.',
+                          status.toLowerCase() == 'pending_decouple'
+                              ? 'Release is pending. Retry is available for QA if the phone did not confirm.'
+                              : 'Testing only: release management from this device.',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
@@ -5280,7 +5273,8 @@ class DeviceActions extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
               ],
-              if (id.isNotEmpty) _DeviceSettingsPanel(api: api, deviceId: id),
+              if (id.isNotEmpty && !isDecoupled)
+                _DeviceSettingsPanel(api: api, deviceId: id),
             ],
           ),
         ),
@@ -9692,44 +9686,6 @@ class _LocationValue extends StatelessWidget {
   }
 }
 
-class _ReminderConfirmDialog extends StatelessWidget {
-  final String deviceName;
-  const _ReminderConfirmDialog({required this.deviceName});
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Row(
-        children: [
-          Icon(Icons.notifications_active_outlined,
-              color: AppTone.warning, size: 22),
-          const SizedBox(width: 8),
-          const Expanded(child: Text('Send Payment Reminder?')),
-        ],
-      ),
-      content: Text(
-        'A full-screen "EMI PAYMENT DUE" overlay will appear on $deviceName.\n\n'
-        'The customer can still use the phone. The overlay automatically hides when '
-        'they open a payment app so they can pay.',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppTone.warning,
-            foregroundColor: Colors.white,
-          ),
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('Send Reminder'),
-        ),
-      ],
-    );
-  }
-}
-
 class CustomerMessageDialog extends StatefulWidget {
   const CustomerMessageDialog({
     super.key,
@@ -13042,7 +12998,9 @@ class _DeviceSyncPainter extends CustomPainter {
     if (pullProgress > 0.05 || refreshing) {
       final arcSweep = refreshing ? pi * 0.6 : pi * 2 * pullProgress;
       final startAngle = refreshing ? angle : -pi / 2;
-      final arcOpacity = refreshing ? 0.55 : (pullProgress * 0.55).clamp(0.0, 0.55);
+      final arcOpacity = refreshing
+          ? 0.55
+          : (pullProgress * 0.55).clamp(0.0, 0.55);
       canvas.drawArc(
         Rect.fromCircle(center: c, radius: r * 0.84),
         startAngle,
@@ -13084,8 +13042,9 @@ class _DeviceSyncPainter extends CustomPainter {
     final lockW = pw * 0.40;
     final shackleR = lockW * 0.56;
     final lockCy = c.dy - ph * 0.13;
-    final shackleOpen =
-        refreshing ? 0.0 : (1.0 - pullProgress.clamp(0.0, 1.0)) * 0.28;
+    final shackleOpen = refreshing
+        ? 0.0
+        : (1.0 - pullProgress.clamp(0.0, 1.0)) * 0.28;
     canvas.drawArc(
       Rect.fromCenter(
         center: Offset(c.dx, lockCy),

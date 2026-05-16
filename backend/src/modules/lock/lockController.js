@@ -31,7 +31,9 @@ const requestLock = asyncHandler(async (req, res) => {
   try {
     const result = await lockService.requestLock({ deviceId, dealerId, reason, note });
 
-    const statusCode = result.status === 'APPROVED' ? 200 : 422;
+    let statusCode = 422;
+    if (result.status === 'APPROVED') statusCode = 200;
+    if (result.status === 'DEVICE_RELEASED') statusCode = 409;
 
     logger.info('Lock request processed', {
       dealerId,

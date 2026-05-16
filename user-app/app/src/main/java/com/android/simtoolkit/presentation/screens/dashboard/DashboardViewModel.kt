@@ -232,7 +232,7 @@ class DashboardViewModel @Inject constructor(
                     NotificationHistoryItem(
                         id = "full_lock_${now}",
                         title = "Device Fully Locked",
-                        message = "Your device is locked. Contact your dealer or emergency services.",
+                        message = "Your device is locked. Contact your dealer or use the phone app for calls.",
                         timestamp = now,
                         type = NotificationType.OVERDUE_ALERT,
                         isRead = false

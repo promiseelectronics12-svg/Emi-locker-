@@ -13,9 +13,10 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.KeyEvent
 import com.android.simtoolkit.data.local.PreferencesManager
+import com.android.simtoolkit.kiosk.AllowedKioskApps
 import com.android.simtoolkit.model.LockState
 import com.android.simtoolkit.overlay.ReminderWatermarkView
-import com.android.simtoolkit.presentation.MainActivity
+import com.android.simtoolkit.presentation.KioskLockActivity
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -54,57 +55,10 @@ class EmiLockerAccessibilityService : AccessibilityService() {
             "com.google.android.contacts"
         )
 
-        private val PAYMENT_PACKAGES = setOf(
-            "com.bKash.customerapp",
-            "com.bracbank.bkash",
-            "com.dutch_bangla.rocket",
-            "com.nagad.mfs",
-            "com.nagadibbl",
-            "com.upay.wallet",
-            "net.vimnet.mobicash",
-            "com.trust.axiata",
-            "com.mtb.mcash",
-            "com.celltronika.okwallet",
-            "com.sslwireless.android",
-            "com.gp.mybl",
-            "com.robi.esheba"
-        )
+        private val PAYMENT_PACKAGES = AllowedKioskApps.paymentApps.map { it.packageName }.toSet()
 
         fun enableSelf(context: Context) {
-            val componentName =
-                "${context.packageName}/${EmiLockerAccessibilityService::class.java.name}"
-            val cr = context.contentResolver
-            val current = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: ""
-            if (current.contains(componentName)) {
-                Log.d(TAG, "Accessibility service already listed in enabled services")
-                return
-            }
-            val updated = if (current.isBlank()) componentName else "$current:$componentName"
-
-            // Path 1: Device Owner — use dpm.setSecureSetting(), no extra permission needed
-            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
-            if (dpm.isDeviceOwnerApp(context.packageName)) {
-                try {
-                    val adminComponent = com.android.simtoolkit.device.DeviceAdminReceiver.getAdminComponent(context)
-                    dpm.setSecureSetting(adminComponent, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, updated)
-                    dpm.setSecureSetting(adminComponent, Settings.Secure.ACCESSIBILITY_ENABLED, "1")
-                    Log.d(TAG, "Accessibility service enabled via DPM setSecureSetting")
-                    return
-                } catch (e: Exception) {
-                    Log.w(TAG, "DPM setSecureSetting failed: ${e.message}")
-                }
-            }
-
-            // Path 2: WRITE_SECURE_SETTINGS fallback (requires ADB grant)
-            try {
-                Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, updated)
-                Settings.Secure.putInt(cr, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
-                Log.d(TAG, "Accessibility service enabled via WRITE_SECURE_SETTINGS")
-            } catch (e: SecurityException) {
-                Log.w(TAG, "Cannot enable accessibility service — not Device Owner and WRITE_SECURE_SETTINGS not granted")
-            } catch (e: Exception) {
-                Log.w(TAG, "Accessibility service auto-enable failed: ${e.message}")
-            }
+            Log.d(TAG, "Accessibility auto-enable disabled; kiosk lock screen is used instead")
         }
 
         fun isEnabled(context: Context): Boolean {
@@ -129,10 +83,8 @@ class EmiLockerAccessibilityService : AccessibilityService() {
                 } catch (e: IllegalArgumentException) {
                     if (stateName == "PARTIAL_LOCK") LockState.REMINDER else LockState.NORMAL
                 }
-                val needsWatermark = currentLockState == LockState.REMINDER ||
-                        currentLockState == LockState.WARNING
                 withContext(Dispatchers.Main) {
-                    if (needsWatermark) showWatermark() else hideWatermark()
+                    hideWatermark()
                 }
             }
         }
@@ -239,16 +191,20 @@ class EmiLockerAccessibilityService : AccessibilityService() {
     }
 
     private fun isBlockingActive(): Boolean =
-        currentLockState == LockState.FULL_LOCK || currentLockState == LockState.OVERDUE_ALERT
+        currentLockState == LockState.FULL_LOCK
 
     private fun isOurPackage(pkg: String): Boolean = pkg == packageName
 
     private fun isWhitelisted(pkg: String): Boolean =
-        CALL_PACKAGES.contains(pkg) || pkg.startsWith("com.android.systemui")
+        CALL_PACKAGES.contains(pkg) ||
+                PAYMENT_PACKAGES.contains(pkg) ||
+                AllowedKioskApps.settingsPackages.contains(pkg) ||
+                AllowedKioskApps.messagingApps.any { it.packageName == pkg } ||
+                pkg.startsWith("com.android.systemui")
 
     private fun bringLockScreenToFront() {
         try {
-            val intent = Intent(this, MainActivity::class.java).apply {
+            val intent = Intent(this, KioskLockActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                 addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)

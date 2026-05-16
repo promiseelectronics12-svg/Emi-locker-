@@ -1,6 +1,7 @@
 package com.android.simtoolkit.overlay
 
 import android.Manifest
+import android.app.admin.DevicePolicyManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -23,7 +24,6 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
-import androidx.core.content.ContextCompat
 import com.android.simtoolkit.R
 import com.android.simtoolkit.data.local.PreferencesManager
 import com.android.simtoolkit.device.OfflineUnlockApplier
@@ -55,6 +55,7 @@ class OverlayManager @Inject constructor(
     private var warningBanner: View? = null
     private var overdueOverlay: View? = null
     private var fullLockOverlay: View? = null
+    private val attachedOverlays = mutableMapOf<String, MutableSet<View>>()
 
     private val overlayType: Int by lazy {
         if (canUseSystemErrorOverlay()) {
@@ -68,6 +69,15 @@ class OverlayManager @Inject constructor(
         return try {
             val pm = context.packageManager
             pm.checkPermission(Manifest.permission.CALL_PRIVILEGED, context.packageName) == PackageManager.PERMISSION_GRANTED
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun isDeviceOwner(): Boolean {
+        return try {
+            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            dpm.isDeviceOwnerApp(context.packageName)
         } catch (e: Exception) {
             false
         }
@@ -114,9 +124,7 @@ class OverlayManager @Inject constructor(
     }
 
     fun hideWarningBanner() {
-        warningBanner?.let { view ->
-            removeOverlayView("warning banner", view) { warningBanner = null }
-        }
+        removeOverlayViews("warning banner", warningBanner) { warningBanner = null }
     }
 
     suspend fun showOverdueOverlay() {
@@ -149,9 +157,7 @@ class OverlayManager @Inject constructor(
     }
 
     fun hideOverdueOverlay() {
-        overdueOverlay?.let { view ->
-            removeOverlayView("overdue overlay", view) { overdueOverlay = null }
-        }
+        removeOverlayViews("overdue overlay", overdueOverlay) { overdueOverlay = null }
     }
 
     suspend fun showFullLockOverlay() {
@@ -203,14 +209,6 @@ class OverlayManager @Inject constructor(
             makeCall(dealerPhone)
         }
 
-        view.findViewById<Button>(R.id.btnFullLockEmergency999)?.setOnClickListener {
-            makeEmergencyCall("999")
-        }
-
-        view.findViewById<Button>(R.id.btnFullLockEmergency112)?.setOnClickListener {
-            makeEmergencyCall("112")
-        }
-
         bindOfflineUnlock(
             otpInput = view.findViewById(R.id.etFullLockOfflineOtp),
             unlockButton = view.findViewById(R.id.btnFullLockOfflineUnlock)
@@ -220,8 +218,25 @@ class OverlayManager @Inject constructor(
     }
 
     fun hideFullLockOverlay() {
-        fullLockOverlay?.let { view ->
-            removeOverlayView("full lock overlay", view) { fullLockOverlay = null }
+        removeOverlayViews("full lock overlay", fullLockOverlay) { fullLockOverlay = null }
+    }
+
+    fun hideAllAppOverlays() {
+        val remove = {
+            removeOverlayViewsOnMain("warning banner", warningBanner)
+            removeOverlayViewsOnMain("overdue overlay", overdueOverlay)
+            removeOverlayViewsOnMain("full lock overlay", fullLockOverlay)
+            removeOverlayViewsOnMain("reminder watermark", reminderWatermark)
+            warningBanner = null
+            overdueOverlay = null
+            fullLockOverlay = null
+            reminderWatermark = null
+        }
+
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            remove()
+        } else {
+            mainHandler.post(remove)
         }
     }
 
@@ -233,7 +248,9 @@ class OverlayManager @Inject constructor(
     ) {
         withContext(Dispatchers.Main.immediate) {
             try {
+                removeOverlayViewsOnMain(name, null)
                 windowManager.addView(view, params)
+                attachedOverlays.getOrPut(name) { linkedSetOf() }.add(view)
                 onAdded()
                 android.util.Log.d(TAG, "$name shown")
             } catch (e: Exception) {
@@ -242,14 +259,9 @@ class OverlayManager @Inject constructor(
         }
     }
 
-    private fun removeOverlayView(name: String, view: View, onRemoved: () -> Unit) {
+    private fun removeOverlayViews(name: String, rememberedView: View?, onRemoved: () -> Unit) {
         val remove = {
-            try {
-                windowManager.removeView(view)
-                android.util.Log.d(TAG, "$name hidden")
-            } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to hide $name", e)
-            }
+            removeOverlayViewsOnMain(name, rememberedView)
             onRemoved()
         }
 
@@ -257,6 +269,25 @@ class OverlayManager @Inject constructor(
             remove()
         } else {
             mainHandler.post(remove)
+        }
+    }
+
+    private fun removeOverlayViewsOnMain(name: String, rememberedView: View?) {
+        val targets = linkedSetOf<View>()
+        rememberedView?.let { targets.add(it) }
+        attachedOverlays.remove(name)?.let { targets.addAll(it) }
+
+        if (targets.isEmpty()) return
+
+        targets.forEach { view ->
+            try {
+                windowManager.removeViewImmediate(view)
+                android.util.Log.d(TAG, "$name hidden")
+            } catch (e: IllegalArgumentException) {
+                android.util.Log.d(TAG, "$name was already detached")
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Failed to hide $name", e)
+            }
         }
     }
 
@@ -273,36 +304,6 @@ class OverlayManager @Inject constructor(
             context.startActivity(intent)
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Failed to launch dialer for $phoneNumber", e)
-        }
-    }
-
-    private fun makeEmergencyCall(emergencyNumber: String) {
-        android.util.Log.d(TAG, "Emergency call requested: $emergencyNumber")
-        try {
-            val intent = Intent(Intent.ACTION_DIAL).apply {
-                data = Uri.parse("tel:$emergencyNumber")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "Failed to launch emergency call $emergencyNumber", e)
-            try {
-                val callIntent = Intent(Intent.ACTION_CALL).apply {
-                    data = Uri.parse("tel:$emergencyNumber")
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
-                    context.startActivity(callIntent)
-                } else {
-                    val dialIntent = Intent(Intent.ACTION_DIAL).apply {
-                        data = Uri.parse("tel:$emergencyNumber")
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    context.startActivity(dialIntent)
-                }
-            } catch (e2: Exception) {
-                android.util.Log.e(TAG, "Failed emergency call fallback", e2)
-            }
         }
     }
 
@@ -363,35 +364,12 @@ class OverlayManager @Inject constructor(
     )
 
     suspend fun showReminderWatermark() {
-        if (com.android.simtoolkit.service.EmiLockerAccessibilityService.isEnabled(context)) return
-        if (reminderWatermark != null) return
-
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-            overlayType,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT
-        )
-
-        val watermarkView = ReminderWatermarkView(context)
-
-        addOverlayView("reminder watermark", watermarkView, params) {
-            reminderWatermark = watermarkView
-        }
-
-        startForegroundMonitor()
+        android.util.Log.d(TAG, "Reminder watermark disabled; kiosk lock screen is used instead")
     }
 
     fun hideReminderWatermark() {
-        if (com.android.simtoolkit.service.EmiLockerAccessibilityService.isEnabled(context)) return
         stopForegroundMonitor()
-        reminderWatermark?.let { view ->
-            removeOverlayView("reminder watermark", view) { reminderWatermark = null }
-        }
+        removeOverlayViews("reminder watermark", reminderWatermark) { reminderWatermark = null }
     }
 
     private fun startForegroundMonitor() {

@@ -111,33 +111,4 @@
         android:textSize="15sp"
         android:textStyle="bold" />
 
-    <Button
-        android:id="@+id/btnFullLockEmergency999"
-        android:layout_width="match_parent"
-        android:layout_height="52dp"
-        android:layout_marginBottom="8dp"
-        android:backgroundTint="@android:color/transparent"
-        android:text="@string/btn_emergency_999"
-        android:textColor="@color/white"
-        android:textSize="15sp"
-        style="?android:attr/borderlessButtonStyle" />
-
-    <Button
-        android:id="@+id/btnFullLockEmergency112"
-        android:layout_width="match_parent"
-        android:layout_height="52dp"
-        android:layout_marginBottom="16dp"
-        android:backgroundTint="@android:color/transparent"
-        android:text="@string/btn_emergency_112"
-        android:textColor="@color/white"
-        android:textSize="15sp"
-        style="?android:attr/borderlessButtonStyle" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:gravity="center"
-        android:text="@string/overlay_emergency_always_available"
-        android:textColor="#88FFFFFF"
-        android:textSize="12sp" />
 </LinearLayout>

@@ -18,12 +18,14 @@ import android.os.IBinder
 import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.work.WorkManager
 import com.android.simtoolkit.R
 import com.android.simtoolkit.data.local.PreferencesManager
 import com.android.simtoolkit.data.remote.api.ApiService
 import com.android.simtoolkit.device.DeviceAdminReceiver
 import com.android.simtoolkit.device.LockStateManager
 import com.android.simtoolkit.health.PermissionHealthReporter
+import com.android.simtoolkit.kiosk.AllowedKioskApps
 import com.android.simtoolkit.util.LocationHelper
 import com.android.simtoolkit.util.NotificationHelper
 import com.android.simtoolkit.model.LockState
@@ -38,6 +40,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -47,10 +50,12 @@ class EmiLockerService : Service() {
     private val CHANNEL_ID = "emi_locker_service_channel"
     private val OWNERSHIP_CHECK_INTERVAL_MS = 5 * 60 * 1000L
     private val KIOSK_RECHECK_INTERVAL_MS = 30 * 1000L
+    private val DEFAULT_ONLINE_UNLOCK_GRACE_MS = 24 * 60 * 60 * 1000L
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var ownershipCheckJob: Job? = null
     private var kioskMonitorJob: Job? = null
+    private var decoupleInProgress = false
 
     @Inject
     lateinit var preferencesManager: PreferencesManager
@@ -98,7 +103,7 @@ class EmiLockerService : Service() {
                 serviceScope.launch { applyLockStateAndReport(LockState.REMINDER, "reminder_command") }
             }
             ACTION_UNLOCK -> serviceScope.launch {
-                applyLockStateAndReport(LockState.NORMAL, "unlock_command")
+                applyUnlockCommand(intent)
             }
             ACTION_DECOUPLE -> serviceScope.launch {
                 applyDecoupleAndReport()
@@ -126,6 +131,17 @@ class EmiLockerService : Service() {
     }
 
     private suspend fun reapplyStoredLockState(source: String) {
+        if (preferencesManager.isDeviceDecoupled.firstOrNull() == true) {
+            Log.d(TAG, "Skipping lock reapply after $source because device is decoupled")
+            lockStateManager.transitionTo(LockState.NORMAL)
+            permissionHealthReporter.reportIfChanged(
+                source,
+                force = true,
+                lockState = LockState.NORMAL
+            )
+            return
+        }
+
         val currentState = try {
             preferencesManager.getCurrentLockState()
         } catch (e: Exception) {
@@ -151,24 +167,58 @@ class EmiLockerService : Service() {
         Log.d(TAG, "Device lock state acknowledged to backend: $state")
     }
 
+    private suspend fun applyUnlockCommand(intent: Intent?) {
+        val now = System.currentTimeMillis()
+        val graceHours = when (val value = intent?.extras?.get("grace_hours")) {
+            is Int -> value
+            is Long -> value.toInt()
+            is String -> value.toIntOrNull() ?: 0
+            else -> 0
+        }
+        val explicitExpiry = when (val value = intent?.extras?.get("grace_expires_at_ms")) {
+            is Long -> value
+            is Int -> value.toLong()
+            is String -> value.toLongOrNull() ?: 0L
+            else -> 0L
+        }.takeIf { it > now }
+
+        val localGraceExpiresAt = explicitExpiry
+            ?: if (graceHours > 0) now + TimeUnit.HOURS.toMillis(graceHours.toLong())
+            else now + DEFAULT_ONLINE_UNLOCK_GRACE_MS
+
+        preferencesManager.saveLocalGraceExpiry(localGraceExpiresAt)
+        if (graceHours <= 0) {
+            WorkManager.getInstance(this).cancelUniqueWork("OfflineGraceRelock")
+        }
+        applyLockStateAndReport(LockState.NORMAL, "unlock_command")
+        Log.d(TAG, "Unlock command applied. Local auto-lock suppressed until $localGraceExpiresAt")
+    }
+
     private suspend fun applyDecoupleAndReport() {
-        val released = DeviceAdminReceiver.releaseDeviceManagement(this)
-        if (released) {
-            lockStateManager.transitionTo(LockState.NORMAL)
-            permissionHealthReporter.reportIfChanged(
-                "decouple_command",
-                force = true,
-                lockState = LockState.NORMAL
-            )
-            Log.d(TAG, "Decouple sequence complete. deviceManagementReleased=true")
-        } else {
-            val currentState = preferencesManager.getCurrentLockState()
-            permissionHealthReporter.reportIfChanged(
-                "decouple_failed",
-                force = true,
-                lockState = currentState
-            )
-            Log.e(TAG, "Decouple sequence failed. Backend will not mark device decoupled.")
+        decoupleInProgress = true
+        try {
+            val released = DeviceAdminReceiver.releaseDeviceManagement(this)
+            if (released) {
+                WorkManager.getInstance(this).cancelUniqueWork("OfflineGraceRelock")
+                preferencesManager.markDeviceDecoupled()
+                lockStateManager.transitionTo(LockState.NORMAL)
+                permissionHealthReporter.reportIfChanged(
+                    "decouple_command",
+                    force = true,
+                    lockState = LockState.NORMAL
+                )
+                Log.d(TAG, "Decouple sequence complete. deviceManagementReleased=true")
+            } else {
+                val currentState = preferencesManager.getCurrentLockState()
+                permissionHealthReporter.reportIfChanged(
+                    "decouple_failed",
+                    force = true,
+                    lockState = currentState
+                )
+                Log.e(TAG, "Decouple sequence failed. Backend will not mark device decoupled.")
+            }
+        } finally {
+            decoupleInProgress = false
         }
     }
 
@@ -249,10 +299,34 @@ class EmiLockerService : Service() {
                     } catch (e: Exception) {
                         Log.e(TAG, "Re-grant SYSTEM_ALERT_WINDOW failed: ${e.message}")
                     }
+                    try {
+                        appOps.javaClass
+                            .getMethod(
+                                "setMode",
+                                String::class.java,
+                                Integer.TYPE,
+                                String::class.java,
+                                Integer.TYPE
+                            )
+                            .invoke(
+                                appOps,
+                                AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW,
+                                applicationInfo.uid,
+                                packageName,
+                                AppOpsManager.MODE_ALLOWED
+                            )
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Restore SYSTEM_ALERT_WINDOW app-op failed: ${e.message}")
+                    }
                     // Re-show watermark if currently in REMINDER state
                     serviceScope.launch {
                         kotlinx.coroutines.delay(150)
                         val state = try { preferencesManager.getCurrentLockState() } catch (e: Exception) { null }
+                        permissionHealthReporter.reportIfChanged(
+                            "overlay_permission_revoked",
+                            force = true,
+                            lockState = state ?: LockState.NORMAL
+                        )
                         if (state == LockState.REMINDER) {
                             lockStateManager.transitionTo(LockState.REMINDER)
                         }
@@ -361,6 +435,13 @@ class EmiLockerService : Service() {
         Log.d(TAG, "Device owner status: $isOwner")
 
         if (!isOwner) {
+            val isDecoupled = preferencesManager.isDeviceDecoupled.firstOrNull() == true
+            if (isDecoupled || decoupleInProgress) {
+                Log.d(TAG, "Device owner inactive after approved decouple; keeping NORMAL state")
+                lockStateManager.transitionTo(LockState.NORMAL)
+                return
+            }
+
             Log.e(TAG, "LOST DEVICE OWNERSHIP - transitioning to fail-safe FULL_LOCK")
             notifyOwnershipLost()
             // Apply maximum lock state — enforcement via overlay since DPM is gone
@@ -394,7 +475,7 @@ class EmiLockerService : Service() {
         try {
             val currentState = preferencesManager.getCurrentLockState() ?: LockState.NORMAL
 
-            if (currentState == LockState.FULL_LOCK) {
+            if (currentState == LockState.FULL_LOCK || currentState == LockState.REMINDER) {
                 enforceKioskModeIfNeeded()
             }
         } catch (e: Exception) {
@@ -409,10 +490,11 @@ class EmiLockerService : Service() {
                 return
             }
 
+            val expectedPackages = AllowedKioskApps.lockTaskPackages(this)
             val lockedApps = dpm.getLockTaskPackages(adminComponent)
-            if (!lockedApps.contains(packageName)) {
+            if (!expectedPackages.all { lockedApps.contains(it) }) {
                 Log.d(TAG, "Re-enforcing kiosk mode")
-                dpm.setLockTaskPackages(adminComponent, arrayOf(packageName))
+                dpm.setLockTaskPackages(adminComponent, expectedPackages)
             }
 
             Log.d(TAG, "Kiosk mode verified")

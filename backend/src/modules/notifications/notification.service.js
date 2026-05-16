@@ -7,8 +7,7 @@ const {
 } = require('./fcm.service');
 const {
   sendLockConfirmationSMS,
-  sendUnlockConfirmationSMS,
-  sendCriticalAlertSMS
+  sendUnlockConfirmationSMS
 } = require('./sms.service');
 const {
   checkAndIncrementDealerMessageRateLimit,
@@ -24,11 +23,29 @@ function sanitizeMessage(message) {
     .slice(0, 500);
 }
 
+function isReleasedDevice(device) {
+  return ['decoupled', 'pending_decouple'].includes(String(device?.status || '').toLowerCase());
+}
+
+function releasedDeviceError() {
+  return 'Device is released or release is pending. Controls are disabled for this record.';
+}
+
+function lockLevelSmsLabel(lockLevel) {
+  if (lockLevel >= 7) return 'FULL_LOCK';
+  if (lockLevel >= 3) return 'REMINDER_MODE';
+  return 'LOCK';
+}
+
 async function sendLockCommand(deviceId, lockLevel) {
   try {
     const device = await getDeviceById(deviceId);
     if (!device) {
       return { success: false, error: 'Device not found' };
+    }
+
+    if (isReleasedDevice(device)) {
+      return { success: false, error: releasedDeviceError() };
     }
 
     if (!device.fcm_token) {
@@ -66,7 +83,7 @@ async function sendLockCommand(deviceId, lockLevel) {
       const smsResult = await sendLockConfirmationSMS(
         device.phone,
         deviceId,
-        lockLevel >= 7 ? 'FULL_LOCK' : lockLevel >= 3 ? 'REMINDER_MODE' : 'LOCK'
+        lockLevelSmsLabel(lockLevel)
       );
 
       if (smsResult.success) {
@@ -129,6 +146,10 @@ async function sendUnlockCommand(deviceId, expiryHours = 48) {
     const device = await getDeviceById(deviceId);
     if (!device) {
       return { success: false, error: 'Device not found' };
+    }
+
+    if (isReleasedDevice(device)) {
+      return { success: false, error: releasedDeviceError() };
     }
 
     if (!device.fcm_token) {
@@ -227,6 +248,10 @@ async function sendReminderNotification(deviceId, daysUntilDue, amountDue, dueDa
       return { success: false, error: 'Device not found' };
     }
 
+    if (isReleasedDevice(device)) {
+      return { success: false, error: releasedDeviceError() };
+    }
+
     if (!device.fcm_token) {
       return { success: false, error: 'Device has no FCM token' };
     }
@@ -288,6 +313,14 @@ async function sendDealerMessage(
         success: false,
         rateLimit: { allowed: true, currentCount: 0, limit: 10, resetAt: new Date() },
         error: 'Unauthorized: dealer does not have access to this device'
+      };
+    }
+
+    if (isReleasedDevice(device)) {
+      return {
+        success: false,
+        rateLimit: { allowed: true, currentCount: 0, limit: 10, resetAt: new Date() },
+        error: releasedDeviceError()
       };
     }
 

@@ -133,8 +133,12 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   bool _qrBusy = false;
 
   // Step 5 — Show 6-digit code
+  String? _enrollmentId;
+  String? _deviceId;
   String? _enrollmentToken;
   bool _enrollBusy = false;
+  bool _emiSaving = false;
+  bool _fallbackSaving = false;
   String? _error;
   bool _done = false;
 
@@ -260,10 +264,17 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   }
 
   String? _validateStep2() {
-    if (_brandController.text.trim().isEmpty) return 'Enter phone brand.';
-    if (_modelController.text.trim().isEmpty) return 'Enter phone model.';
+    final brand = _brandController.text.trim();
+    final model = _modelController.text.trim();
     final imei1 = _normalizeImei(_imei1Controller.text);
-    if (imei1.isEmpty) return 'Enter IMEI 1.';
+    final hasAnyFallback = brand.isNotEmpty ||
+        model.isNotEmpty ||
+        imei1.isNotEmpty ||
+        _normalizeImei(_imei2Controller.text).isNotEmpty;
+    if (!hasAnyFallback) return null;
+    if (brand.isEmpty) return 'Enter phone brand or leave all fallback fields blank.';
+    if (model.isEmpty) return 'Enter phone model or leave all fallback fields blank.';
+    if (imei1.isEmpty) return 'Enter IMEI 1 or leave all fallback fields blank.';
     if (!_isValidImei(imei1)) return 'IMEI 1 is not a valid IMEI number.';
     final imei2 = _normalizeImei(_imei2Controller.text);
     if (imei2.isNotEmpty && !_isValidImei(imei2)) {
@@ -480,8 +491,12 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   }
 
   int get _totalSteps => widget.requireEvidence ? 8 : 7;
-  int get _qrStep => widget.requireEvidence ? 6 : 5;
-  int get _codeStep => widget.requireEvidence ? 7 : 6;
+  int get _qrStep => 2;
+  int get _codeStep => 3;
+  int get _emiStep => 4;
+  int get _evidenceStep => 5;
+  int get _fallbackStep => widget.requireEvidence ? 6 : 5;
+  int get _reviewStep => widget.requireEvidence ? 7 : 6;
 
   Future<void> _openVaultSetup() async {
     await Navigator.push(
@@ -602,35 +617,19 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   }
 
   Future<void> _createEnrollment() async {
+    if (_enrollmentToken != null && _enrollmentId != null) return;
     setState(() {
       _enrollBusy = true;
       _error = null;
     });
     try {
-      final emi = _calculateEmi();
-      if (emi == null) {
-        throw Exception('Enter valid EMI terms before creating enrollment.');
-      }
       final nidHash = _sha256(_nidController.text.trim());
       final body = <String, dynamic>{
         'customer_name': _nameController.text.trim(),
         'nid_hash': nidHash,
         'phone_number': _phoneController.text.trim(),
-        'brand': _brandController.text.trim(),
-        'model': _modelController.text.trim(),
-        'imei1': _normalizeImei(_imei1Controller.text),
         'tier': _selectedTier,
-        'totalAmount': emi.totalPayable,
-        'downPayment': emi.downPayment,
-        'emiAmount': emi.monthlyEmi,
-        'duration': emi.duration,
-        'startDate': DateFormat('yyyy-MM-dd').format(_startDate),
-        'graceDays': int.parse(_graceDaysController.text.trim()),
-        'phonePrice': emi.phonePrice,
-        'interestRate': emi.interestRate,
       };
-      final imei2 = _normalizeImei(_imei2Controller.text);
-      if (imei2.isNotEmpty) body['imei2'] = imei2;
 
       final res = await widget.api.post(
         '/api/v1/dealer/enrollments',
@@ -639,22 +638,13 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       if (mounted) {
         final d = asMap(res.data);
         final deviceId = text(d['device_id'] ?? d['deviceId']);
-        if (widget.requireEvidence) {
-          if (deviceId.isEmpty) {
-            throw Exception(
-              'Server did not return a device id for evidence registration.',
-            );
-          }
-          await _registerEvidenceForDevice(
-            deviceId: deviceId,
-            nidHash: nidHash,
-          );
-        }
         final token = text(d['token']).trim();
         if (!RegExp(r'^\d{6}$').hasMatch(token)) {
           throw Exception('Server did not return a valid activation code.');
         }
         setState(() {
+          _enrollmentId = text(d['enrollment_id'] ?? d['enrollmentId']);
+          _deviceId = deviceId;
           _enrollmentToken = token;
         });
       }
@@ -662,6 +652,99 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       if (mounted) setState(() => _error = readableError(e));
     } finally {
       if (mounted) setState(() => _enrollBusy = false);
+    }
+  }
+
+  Future<void> _saveEmiTermsAndNext() async {
+    final validation = _validateStep3();
+    if (validation != null) {
+      _next(validation);
+      return;
+    }
+    if (_enrollmentId == null || _enrollmentId!.isEmpty) {
+      await _createEnrollment();
+    }
+    if (_enrollmentId == null || _enrollmentId!.isEmpty) return;
+
+    setState(() {
+      _emiSaving = true;
+      _error = null;
+    });
+    try {
+      final emi = _calculateEmi();
+      if (emi == null) throw Exception('Enter valid EMI terms.');
+      final res = await widget.api.patch(
+        '/api/v1/dealer/enrollments/$_enrollmentId/emi-terms',
+        data: {
+          'totalAmount': emi.totalPayable,
+          'downPayment': emi.downPayment,
+          'emiAmount': emi.monthlyEmi,
+          'duration': emi.duration,
+          'startDate': DateFormat('yyyy-MM-dd').format(_startDate),
+          'graceDays': int.parse(_graceDaysController.text.trim()),
+        },
+      );
+      final data = asMap(res.data);
+      final nextDeviceId = text(data['device_id'] ?? data['deviceId']);
+      if (mounted) {
+        setState(() {
+          if (nextDeviceId.isNotEmpty) _deviceId = nextDeviceId;
+          _step = widget.requireEvidence ? _evidenceStep : _fallbackStep;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = readableError(e));
+    } finally {
+      if (mounted) setState(() => _emiSaving = false);
+    }
+  }
+
+  Future<void> _saveDeviceFallbackAndReview() async {
+    final validation = _validateStep2();
+    if (validation != null) {
+      _next(validation);
+      return;
+    }
+    if (_enrollmentId == null || _enrollmentId!.isEmpty) {
+      setState(() => _step = _reviewStep);
+      return;
+    }
+
+    final body = <String, dynamic>{};
+    final brand = _brandController.text.trim();
+    final model = _modelController.text.trim();
+    final imei1 = _normalizeImei(_imei1Controller.text);
+    final imei2 = _normalizeImei(_imei2Controller.text);
+    if (brand.isNotEmpty) body['brand'] = brand;
+    if (model.isNotEmpty) body['model'] = model;
+    if (imei1.isNotEmpty) body['imei1'] = imei1;
+    if (imei2.isNotEmpty) body['imei2'] = imei2;
+    if (body.isEmpty) {
+      setState(() => _step = _reviewStep);
+      return;
+    }
+
+    setState(() {
+      _fallbackSaving = true;
+      _error = null;
+    });
+    try {
+      final res = await widget.api.patch(
+        '/api/v1/dealer/enrollments/$_enrollmentId/device-fallback',
+        data: body,
+      );
+      final data = asMap(res.data);
+      final nextDeviceId = text(data['device_id'] ?? data['deviceId']);
+      if (mounted) {
+        setState(() {
+          if (nextDeviceId.isNotEmpty) _deviceId = nextDeviceId;
+          _step = _reviewStep;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = readableError(e));
+    } finally {
+      if (mounted) setState(() => _fallbackSaving = false);
     }
   }
 
@@ -691,6 +774,8 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       _facePhoto = null;
       _evidenceRegistered = false;
       _evidenceHash = null;
+      _enrollmentId = null;
+      _deviceId = null;
       _enrollmentToken = null;
       _error = null;
       _done = false;
@@ -769,19 +854,17 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       case 1:
         return _buildStep1();
       case 2:
-        return _buildStep2();
+        return _buildStep5Qr();
       case 3:
-        return _buildStep3EmiTerms();
-      case 4:
-        return widget.requireEvidence
-            ? _buildStep4Evidence()
-            : _buildStep4Review();
-      case 5:
-        return widget.requireEvidence ? _buildStep4Review() : _buildStep5Qr();
-      case 6:
-        return widget.requireEvidence ? _buildStep5Qr() : _buildStep6Code();
-      case 7:
         return _buildStep6Code();
+      case 4:
+        return _buildStep3EmiTerms();
+      case 5:
+        return widget.requireEvidence ? _buildStep4Evidence() : _buildStep2();
+      case 6:
+        return widget.requireEvidence ? _buildStep2() : _buildStep4Review();
+      case 7:
+        return _buildStep4Review();
       default:
         return const SizedBox.shrink();
     }
@@ -983,8 +1066,17 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         ),
         const SizedBox(height: 24),
         FilledButton(
-          onPressed: () => _next(_validateStep1()),
-          child: const Text('Next — Device info'),
+          onPressed: () {
+            final validation = _validateStep1();
+            if (validation != null) {
+              _next(validation);
+              return;
+            }
+            setState(() => _step = _qrStep);
+            _fetchQr();
+            _createEnrollment();
+          },
+          child: const Text('Next - Enrollment QR'),
         ),
       ],
     );
@@ -997,11 +1089,11 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: 3,
+          step: _fallbackStep + 1,
           total: _totalSteps,
-          title: 'Device information',
+          title: 'Device fallback',
           subtitle:
-              'Enter the phone details and scan the box or sticker for IMEI.',
+              'Optional. Use this only if the user app could not read IMEI, brand, or model after owner setup.',
         ),
         const SizedBox(height: 20),
         _Field(
@@ -1054,13 +1146,13 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         const SizedBox(height: 8),
         InlineNotice(
           message:
-              'Scan first, then confirm against the box or *#06# before continuing.',
+              'Leave these fields blank when the user app captured the phone details automatically.',
           tone: AppTone.info,
           icon: Icons.phone_outlined,
         ),
         const SizedBox(height: 24),
         FilledButton(
-          onPressed: () => _next(_validateStep2()),
+          onPressed: _fallbackSaving ? null : _saveDeviceFallbackAndReview,
           child: const Text('Next — EMI terms'),
         ),
       ],
@@ -1077,7 +1169,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: 4,
+          step: _emiStep + 1,
           total: _totalSteps,
           title: 'EMI terms',
           subtitle: 'Capture the exact payment plan before binding the phone.',
@@ -1283,9 +1375,13 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         ),
         const SizedBox(height: 24),
         FilledButton(
-          onPressed: () => _next(_validateStep3()),
+          onPressed: _emiSaving ? null : _saveEmiTermsAndNext,
           child: Text(
-            widget.requireEvidence ? 'Next - Evidence vault' : 'Next - Review',
+            _emiSaving
+                ? 'Saving...'
+                : widget.requireEvidence
+                    ? 'Next - Evidence vault'
+                    : 'Next - Device fallback',
           ),
         ),
       ],
@@ -1297,7 +1393,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: 5,
+          step: _evidenceStep + 1,
           total: _totalSteps,
           title: 'Evidence vault',
           subtitle:
@@ -1378,8 +1474,33 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         ),
         const SizedBox(height: 24),
         FilledButton(
-          onPressed: () => _next(_validateEvidenceStep()),
-          child: const Text('Next - Review'),
+          onPressed: _enrollBusy
+              ? null
+              : () async {
+                  final validation = _validateEvidenceStep();
+                  if (validation != null) {
+                    _next(validation);
+                    return;
+                  }
+                  final deviceId = _deviceId;
+                  if (deviceId == null || deviceId.isEmpty) {
+                    setState(() => _error = 'Create the activation code before registering evidence.');
+                    return;
+                  }
+                  setState(() => _enrollBusy = true);
+                  try {
+                    await _registerEvidenceForDevice(
+                      deviceId: deviceId,
+                      nidHash: _sha256(_nidController.text.trim()),
+                    );
+                    if (mounted) setState(() => _step = _fallbackStep);
+                  } catch (e) {
+                    if (mounted) setState(() => _error = readableError(e));
+                  } finally {
+                    if (mounted) setState(() => _enrollBusy = false);
+                  }
+                },
+          child: Text(_enrollBusy ? 'Saving...' : 'Next - Device fallback'),
         ),
       ],
     );
@@ -1394,9 +1515,9 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: widget.requireEvidence ? 6 : 5,
+          step: _reviewStep + 1,
           total: _totalSteps,
-          title: 'Review before binding',
+          title: 'Review enrollment',
           subtitle:
               'Check everything carefully. Tap Edit to go back and fix a mistake.',
         ),
@@ -1413,8 +1534,8 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         ),
         const SizedBox(height: 12),
         _ReviewSection(
-          title: 'Device',
-          onEdit: () => setState(() => _step = 2),
+          title: 'Device fallback',
+          onEdit: () => setState(() => _step = _fallbackStep),
           children: [
             _ReviewRow('Brand', _brandController.text.trim()),
             _ReviewRow('Model', _modelController.text.trim()),
@@ -1425,7 +1546,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         const SizedBox(height: 12),
         _ReviewSection(
           title: 'EMI terms',
-          onEdit: () => setState(() => _step = 3),
+          onEdit: () => setState(() => _step = _emiStep),
           children: [
             _ReviewRow(
               'Phone price',
@@ -1466,7 +1587,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
           const SizedBox(height: 12),
           _ReviewSection(
             title: 'Evidence vault',
-            onEdit: () => setState(() => _step = 4),
+            onEdit: () => setState(() => _step = _evidenceStep),
             children: [
               _ReviewRow(
                 'Google vault',
@@ -1497,11 +1618,9 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
           onPressed: _enrollBusy
               ? null
               : () {
-                  setState(() => _step = _qrStep);
-                  _fetchQr();
-                  _createEnrollment();
+                  setState(() => _done = true);
                 },
-          child: const Text('Confirm and generate codes'),
+          child: const Text('Finish enrollment record'),
         ),
       ],
     );
@@ -1514,7 +1633,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: widget.requireEvidence ? 7 : 6,
+          step: _qrStep + 1,
           total: _totalSteps,
           title: 'Device Owner setup',
           subtitle:
@@ -1589,12 +1708,26 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         ],
         const SizedBox(height: 24),
         FilledButton(
-          onPressed: () => setState(() => _step = _codeStep),
+          onPressed: _enrollBusy
+              ? null
+              : () async {
+                  await _createEnrollment();
+                  if (mounted && _enrollmentToken != null) {
+                    setState(() => _step = _codeStep);
+                  }
+                },
           child: const Text('Next — Enter code on device'),
         ),
         const SizedBox(height: 8),
         TextButton(
-          onPressed: () => setState(() => _step = _codeStep),
+          onPressed: _enrollBusy
+              ? null
+              : () async {
+                  await _createEnrollment();
+                  if (mounted && _enrollmentToken != null) {
+                    setState(() => _step = _codeStep);
+                  }
+                },
           child: const Text('Skip — phone is already set up'),
         ),
       ],
@@ -1610,7 +1743,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: widget.requireEvidence ? 8 : 7,
+          step: _codeStep + 1,
           total: _totalSteps,
           title: 'Enter code on device',
           subtitle:
@@ -1786,13 +1919,17 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
             const SizedBox(height: 12),
           ],
           FilledButton(
-            onPressed: () => setState(() => _done = true),
-            child: const Text('Binding complete — Done'),
+            onPressed: () => setState(() => _step = _emiStep),
+            child: const Text('Next - EMI details'),
           ),
           const SizedBox(height: 8),
           OutlinedButton(
             onPressed: () {
-              setState(() => _enrollmentToken = null);
+              setState(() {
+                _enrollmentId = null;
+                _deviceId = null;
+                _enrollmentToken = null;
+              });
               _createEnrollment();
             },
             child: const Text('Generate new code'),

@@ -48,6 +48,22 @@
     <!-- Vibration for notifications -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <queries>
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
+        <package android:name="com.bKash.customerapp" />
+        <package android:name="com.konasl.nagad" />
+        <package android:name="com.dbbl.mbs.apps.main" />
+        <package android:name="bd.com.upay.customer" />
+        <package android:name="com.ibbl.cellfin" />
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.WIFI_SETTINGS" />
+        </intent>
+    </queries>
+
     <!-- Required for accessibility service fallback enrollment on non-Device Owner installs. -->
     <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"
@@ -83,6 +99,16 @@
             android:launchMode="singleTask"
             android:screenOrientation="portrait"
             android:lockTaskMode="if_whitelisted" />
+
+        <activity
+            android:name=".presentation.KioskLockActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:lockTaskMode="if_whitelisted"
+            android:screenOrientation="portrait"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true" />
 
         <!-- Android 12+ Device Owner provisioning callbacks.
              Setup Wizard asks these before completing fully managed enrollment. -->
@@ -126,7 +152,9 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 

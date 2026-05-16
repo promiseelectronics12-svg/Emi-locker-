@@ -25,8 +25,19 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
   String _errorMsg = '';
   Map<String, dynamic>? _detail;
   Timer? _ticker;
+  Timer? _sseDebounce;
   Duration _graceRemaining = Duration.zero;
   StreamSubscription<SseEvent>? _sseSub;
+  static const _refreshEvents = {
+    'device_locked',
+    'device_unlocked',
+    'device_unlock_pending',
+    'grace_expired',
+    'device_online',
+    'device_offline',
+    'device_status_changed',
+    'device_runtime_updated',
+  };
 
   @override
   void initState() {
@@ -42,10 +53,10 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
     if (stream != null) {
       _sseSub = stream.listen((event) {
         if (!mounted) return;
-        final eventDeviceId = event.data['deviceId']?.toString() ?? event.data['id']?.toString();
+        final eventDeviceId = _eventDeviceId(event.data);
         if (eventDeviceId == widget.deviceId &&
-            (event.type == 'device_locked' || event.type == 'device_unlocked' || event.type == 'grace_expired')) {
-          _load();
+            _refreshEvents.contains(event.type)) {
+          _scheduleSilentReload();
         }
       });
     }
@@ -54,26 +65,56 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
   @override
   void dispose() {
     _sseSub?.cancel();
+    _sseDebounce?.cancel();
     _ticker?.cancel();
     super.dispose();
   }
 
-  Future<void> _load() async {
-    setState(() { _loading = true; _errorMsg = ''; });
+  String _eventDeviceId(Map<String, dynamic> data) {
+    final nestedDevice = data['device'];
+    if (nestedDevice is Map) {
+      final nestedId =
+          nestedDevice['id'] ??
+          nestedDevice['deviceId'] ??
+          nestedDevice['device_id'];
+      if (nestedId != null) return nestedId.toString();
+    }
+    return (data['deviceId'] ?? data['device_id'] ?? data['id'] ?? '')
+        .toString();
+  }
+
+  void _scheduleSilentReload() {
+    _sseDebounce?.cancel();
+    _sseDebounce = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) _load(silent: true);
+    });
+  }
+
+  Future<void> _load({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _errorMsg = '';
+      });
+    }
     try {
       final res = await widget.api.get(
-          '/api/v1/dealer/devices/${widget.deviceId}/lock-detail');
+        '/api/v1/dealer/devices/${widget.deviceId}/lock-detail',
+      );
       final d = asMap(res.data);
       setState(() {
         _detail = d;
         _loading = false;
+        _errorMsg = '';
       });
       _startGraceTimer(d);
     } catch (e) {
-      setState(() {
-        _errorMsg = readableError(e);
-        _loading = false;
-      });
+      if (!silent) {
+        setState(() {
+          _errorMsg = readableError(e);
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -105,10 +146,7 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
       appBar: AppBar(
         title: Text(widget.deviceName, overflow: TextOverflow.ellipsis),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: _load,
-          ),
+          IconButton(icon: const Icon(Icons.refresh_rounded), onPressed: _load),
         ],
       ),
       body: _buildBody(),
@@ -140,9 +178,10 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               InlineNotice(
-                  message: _errorMsg,
-                  tone: AppTone.danger,
-                  icon: Icons.error_outline),
+                message: _errorMsg,
+                tone: AppTone.danger,
+                icon: Icons.error_outline,
+              ),
               const SizedBox(height: 16),
               OutlinedButton.icon(
                 icon: const Icon(Icons.refresh_rounded),
@@ -158,17 +197,17 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
     final d = _detail!;
     final lock = asMap(d['lock']);
     final emi = asMap(d['emi']);
-    final lockLevel    = text(lock['lock_level'], fallback: 'NONE');
-    final isLocked     = lock['is_locked'] == true;
-    final lockReason   = text(lock['reason'], fallback: 'No reason provided');
-    final lockedAt     = text(lock['locked_at']);
-    final graceExpAt   = text(lock['grace_expires_at'] ?? d['grace_expires_at']);
-    final lastCheckin  = text(d['last_checkin_at']);
-    final emiPaid      = text(emi['installments_paid'], fallback: '0');
-    final emiTotal     = text(emi['installments_total'], fallback: '0');
-    final emiLinked    = emiTotal != '0';
-    final activeGrace  = d['active_grace'];
-    final history      = d['history'] as List? ?? [];
+    final lockLevel = text(lock['lock_level'], fallback: 'NONE');
+    final isLocked = lock['is_locked'] == true;
+    final lockReason = text(lock['reason'], fallback: 'No reason provided');
+    final lockedAt = text(lock['locked_at']);
+    final graceExpAt = text(lock['grace_expires_at'] ?? d['grace_expires_at']);
+    final lastCheckin = text(d['last_checkin_at']);
+    final emiPaid = text(emi['installments_paid'], fallback: '0');
+    final emiTotal = text(emi['installments_total'], fallback: '0');
+    final emiLinked = emiTotal != '0';
+    final activeGrace = d['active_grace'];
+    final history = d['history'] as List? ?? [];
 
     return ListView(
       padding: const EdgeInsets.all(20),
@@ -177,8 +216,15 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: (isLocked ? AppTone.danger : AppTone.brand).withOpacity(0.04),
-            border: Border(left: BorderSide(color: isLocked ? AppTone.danger : AppTone.brand, width: 4)),
+            color: (isLocked ? AppTone.danger : AppTone.brand).withOpacity(
+              0.04,
+            ),
+            border: Border(
+              left: BorderSide(
+                color: isLocked ? AppTone.danger : AppTone.brand,
+                width: 4,
+              ),
+            ),
             borderRadius: const BorderRadius.only(
               topRight: Radius.circular(8),
               bottomRight: Radius.circular(8),
@@ -211,22 +257,32 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
                 ],
               ),
               const SizedBox(height: 6),
-              Text(isLocked ? _humanReason(lockReason) : 'No active lock is applied.',
-                  style: const TextStyle(fontSize: 13, color: AppTone.ink)),
+              Text(
+                isLocked
+                    ? _humanReason(lockReason)
+                    : 'No active lock is applied.',
+                style: const TextStyle(fontSize: 13, color: AppTone.ink),
+              ),
               if (lockedAt.isNotEmpty) ...[
                 const SizedBox(height: 4),
-                Text('Locked at: $lockedAt',
-                    style: const TextStyle(fontSize: 11, color: AppTone.muted)),
+                Text(
+                  'Locked at: $lockedAt',
+                  style: const TextStyle(fontSize: 11, color: AppTone.muted),
+                ),
               ],
               if (graceExpAt.isNotEmpty) ...[
                 const SizedBox(height: 4),
-                Text('Grace expires: $graceExpAt',
-                    style: const TextStyle(fontSize: 11, color: AppTone.muted)),
+                Text(
+                  'Grace expires: $graceExpAt',
+                  style: const TextStyle(fontSize: 11, color: AppTone.muted),
+                ),
               ],
               if (lastCheckin.isNotEmpty) ...[
                 const SizedBox(height: 4),
-                Text('Last check-in: $lastCheckin',
-                    style: const TextStyle(fontSize: 11, color: AppTone.muted)),
+                Text(
+                  'Last check-in: $lastCheckin',
+                  style: const TextStyle(fontSize: 11, color: AppTone.muted),
+                ),
               ],
             ],
           ),
@@ -242,14 +298,21 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
           ),
           child: Row(
             children: [
-              const Icon(Icons.payments_outlined, size: 18, color: AppTone.info),
+              const Icon(
+                Icons.payments_outlined,
+                size: 18,
+                color: AppTone.info,
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   emiLinked
                       ? 'EMI schedule linked: $emiPaid of $emiTotal installments paid'
                       : 'EMI schedule not linked for this device',
-                  style: const TextStyle(fontWeight: FontWeight.w700, color: AppTone.ink),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: AppTone.ink,
+                  ),
                 ),
               ),
             ],
@@ -271,30 +334,37 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.lock_open_outlined,
-                        color: AppTone.brand, size: 16),
+                    const Icon(
+                      Icons.lock_open_outlined,
+                      color: AppTone.brand,
+                      size: 16,
+                    ),
                     const SizedBox(width: 8),
-                    const Text('Grace period active',
-                        style: TextStyle(
-                            fontWeight: FontWeight.w700, color: AppTone.brand)),
+                    const Text(
+                      'Grace period active',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: AppTone.brand,
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 8),
                 LinearProgressIndicator(
                   value: _graceRemaining.inSeconds > 0
                       ? _graceRemaining.inSeconds /
-                          (int.tryParse(
-                                      text(activeGrace['grace_hours'])) ??
-                                  8) /
-                              3600
+                            (int.tryParse(text(activeGrace['grace_hours'])) ??
+                                8) /
+                            3600
                       : 0.0,
                   backgroundColor: AppTone.brand.withOpacity(0.15),
                   color: AppTone.brand,
                 ),
                 const SizedBox(height: 6),
-                Text('Remaining: ${_formatDuration(_graceRemaining)}',
-                    style: const TextStyle(
-                        fontSize: 12, color: AppTone.muted)),
+                Text(
+                  'Remaining: ${_formatDuration(_graceRemaining)}',
+                  style: const TextStyle(fontSize: 12, color: AppTone.muted),
+                ),
               ],
             ),
           ),
@@ -326,11 +396,12 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
 
         // Lock history
         if (history.isNotEmpty) ...[
-          Text('Recent events',
-              style: Theme.of(context)
-                  .textTheme
-                  .labelMedium
-                  ?.copyWith(color: AppTone.muted)),
+          Text(
+            'Recent events',
+            style: Theme.of(
+              context,
+            ).textTheme.labelMedium?.copyWith(color: AppTone.muted),
+          ),
           const SizedBox(height: 10),
           ...history.take(5).map((e) {
             final ev = asMap(e);
@@ -352,13 +423,21 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(text(ev['event_type'], fallback: 'Event'),
-                            style: const TextStyle(
-                                fontSize: 13, fontWeight: FontWeight.w600,
-                                color: AppTone.ink)),
-                        Text(text(ev['created_at'], fallback: ''),
-                            style: const TextStyle(
-                                fontSize: 11, color: AppTone.muted)),
+                        Text(
+                          text(ev['event_type'], fallback: 'Event'),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AppTone.ink,
+                          ),
+                        ),
+                        Text(
+                          text(ev['created_at'], fallback: ''),
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppTone.muted,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -373,11 +452,16 @@ class _LockDetailScreenState extends State<LockDetailScreen> {
 
   String _humanReason(String raw) {
     switch (raw) {
-      case 'MISSED_PAYMENT': return 'Missed payment';
-      case 'LATE_PAYMENT':   return 'Late payment';
-      case 'MANUAL_LOCK':    return 'Manually locked by dealer';
-      case 'FRAUD_ALERT':    return 'Fraud alert triggered';
-      default:               return raw;
+      case 'MISSED_PAYMENT':
+        return 'Missed payment';
+      case 'LATE_PAYMENT':
+        return 'Late payment';
+      case 'MANUAL_LOCK':
+        return 'Manually locked by dealer';
+      case 'FRAUD_ALERT':
+        return 'Fraud alert triggered';
+      default:
+        return raw;
     }
   }
 }

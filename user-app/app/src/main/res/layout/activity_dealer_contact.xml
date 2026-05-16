@@ -164,7 +164,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="8dp"
                     android:layout_weight="1"
-                    android:text="Emergency calls (999, 112) are always available regardless of device lock state."
+                    android:text="The phone app remains available for calls during device lock."
                     android:textColor="@color/orange"
                     android:textSize="11sp" />
 

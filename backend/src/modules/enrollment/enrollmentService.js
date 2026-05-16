@@ -86,6 +86,73 @@ function normalizeEmiTerms({
   };
 }
 
+function hasCompleteEmiTerms(payload = {}) {
+  return (
+    payload.totalAmount !== undefined &&
+    payload.totalAmount !== null &&
+    payload.emiAmount !== undefined &&
+    payload.emiAmount !== null &&
+    payload.duration !== undefined &&
+    payload.duration !== null &&
+    payload.startDate !== undefined &&
+    payload.startDate !== null
+  );
+}
+
+async function upsertActiveSchedule(client, deviceId, emiTerms) {
+  const existing = await client.query(
+    `SELECT id
+     FROM emi_schedules
+     WHERE device_id = $1 AND status = 'active'
+     ORDER BY created_at DESC
+     LIMIT 1
+     FOR UPDATE`,
+    [deviceId]
+  );
+
+  if (existing.rows.length) {
+    const updated = await client.query(
+      `UPDATE emi_schedules
+       SET total_amount = $2,
+           down_payment = $3,
+           emi_amount = $4,
+           duration = $5,
+           start_date = $6,
+           grace_days = $7,
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [
+        existing.rows[0].id,
+        emiTerms.totalAmount,
+        emiTerms.downPayment,
+        emiTerms.emiAmount,
+        emiTerms.duration,
+        emiTerms.startDate,
+        emiTerms.graceDays
+      ]
+    );
+    return updated.rows[0];
+  }
+
+  const created = await client.query(
+    `INSERT INTO emi_schedules
+       (device_id, total_amount, down_payment, emi_amount, duration, start_date, grace_days, status, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', NOW(), NOW())
+     RETURNING *`,
+    [
+      deviceId,
+      emiTerms.totalAmount,
+      emiTerms.downPayment,
+      emiTerms.emiAmount,
+      emiTerms.duration,
+      emiTerms.startDate,
+      emiTerms.graceDays
+    ]
+  );
+  return created.rows[0];
+}
+
 function addMonths(date, months) {
   const result = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   const originalDay = result.getUTCDate();
@@ -181,14 +248,16 @@ async function startEnrollment({
   }
 
   const keyTier = ['standard', 'premium', 'vip'].includes(tier) ? tier : 'standard';
-  const emiTerms = normalizeEmiTerms({
-    totalAmount,
-    downPayment,
-    emiAmount,
-    duration,
-    startDate,
-    graceDays
-  });
+  const emiTerms = hasCompleteEmiTerms({ totalAmount, emiAmount, duration, startDate })
+    ? normalizeEmiTerms({
+        totalAmount,
+        downPayment,
+        emiAmount,
+        duration,
+        startDate,
+        graceDays
+      })
+    : null;
   const dealerIdentity = await resolveDealerIdentity(dealerId);
 
   const stockRow = await db.query(
@@ -208,9 +277,9 @@ async function startEnrollment({
     throw err;
   }
 
-  const deviceRow = await db.query(`SELECT id, status FROM devices WHERE imei = $1 LIMIT 1`, [
-    primaryImei
-  ]);
+  const deviceRow = primaryImei
+    ? await db.query(`SELECT id, status FROM devices WHERE imei = $1 LIMIT 1`, [primaryImei])
+    : { rows: [] };
 
   let device;
   if (!deviceRow.rows.length) {
@@ -219,12 +288,13 @@ async function startEnrollment({
     const created = await db.query(
       `INSERT INTO devices (imei, brand, model, status, created_at, updated_at)
        VALUES ($1, $2, $3, 'pending', NOW(), NOW())
-       ON CONFLICT (imei) DO UPDATE SET updated_at = NOW()
        RETURNING id, status`,
-      [primaryImei, brand || null, model || null]
+      [primaryImei || null, brand || null, model || null]
     );
     [device] = created.rows;
-    logger.info('Device created by dealer during enrollment', { imei: primaryImei.slice(-4) });
+    logger.info('Device created by dealer during enrollment', {
+      imei: primaryImei ? primaryImei.slice(-4) : null
+    });
   } else {
     [device] = deviceRow.rows;
   }
@@ -254,26 +324,208 @@ async function startEnrollment({
       customer_name,
       nid_hash,
       phone_number,
-      brand,
-      model,
-      primaryImei,
+      brand || null,
+      model || null,
+      primaryImei || null,
       secondaryImei || null,
       tokenHash,
       keyTier,
-      emiTerms.totalAmount,
-      emiTerms.downPayment,
-      emiTerms.emiAmount,
-      emiTerms.duration,
-      emiTerms.startDate,
-      emiTerms.graceDays,
+      emiTerms?.totalAmount || null,
+      emiTerms?.downPayment || null,
+      emiTerms?.emiAmount || null,
+      emiTerms?.duration || null,
+      emiTerms?.startDate || null,
+      emiTerms?.graceDays ?? null,
       expiresAt
     ]
   );
 
-  logger.info('Enrollment started', { enrollmentId, imei: primaryImei.slice(-4) });
+  logger.info('Enrollment started', { enrollmentId, imei: primaryImei ? primaryImei.slice(-4) : null });
 
   // Return plaintext token to dealer app — dealer will type it into the user app
   return { enrollment_id: enrollmentId, device_id: device.id, token };
+}
+
+async function getDealerEnrollment(client, dealerIdentity, enrollmentId) {
+  const result = await client.query(
+    `SELECT e.*, d.id AS dev_id
+     FROM enrollments e
+     JOIN devices d ON d.id = e.device_id
+     WHERE e.id = $1
+       AND e.dealer_id = ANY($2::uuid[])
+     LIMIT 1
+     FOR UPDATE OF e`,
+    [enrollmentId, dealerIdentity.keyDealerIds]
+  );
+
+  if (!result.rows.length) {
+    const err = new Error('Enrollment not found.');
+    err.statusCode = 404;
+    throw err;
+  }
+  return result.rows[0];
+}
+
+async function saveEnrollmentEmiTerms({
+  dealerId,
+  enrollmentId,
+  totalAmount,
+  downPayment,
+  emiAmount,
+  duration,
+  startDate,
+  graceDays
+}) {
+  const emiTerms = normalizeEmiTerms({
+    totalAmount,
+    downPayment,
+    emiAmount,
+    duration,
+    startDate,
+    graceDays
+  });
+  const dealerIdentity = await resolveDealerIdentity(dealerId);
+  const client = await db.getClient();
+  let enrollment;
+  let schedule = null;
+
+  try {
+    await client.query('BEGIN');
+    enrollment = await getDealerEnrollment(client, dealerIdentity, enrollmentId);
+
+    const updated = await client.query(
+      `UPDATE enrollments
+       SET total_amount = $2,
+           down_payment = $3,
+           emi_amount = $4,
+           duration = $5,
+           start_date = $6,
+           grace_days = $7
+       WHERE id = $1
+       RETURNING *`,
+      [
+        enrollment.id,
+        emiTerms.totalAmount,
+        emiTerms.downPayment,
+        emiTerms.emiAmount,
+        emiTerms.duration,
+        emiTerms.startDate,
+        emiTerms.graceDays
+      ]
+    );
+    [enrollment] = updated.rows;
+
+    if (enrollment.status === 'confirmed') {
+      schedule = await upsertActiveSchedule(client, enrollment.device_id, emiTerms);
+    }
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  return {
+    success: true,
+    enrollment_id: enrollment.id,
+    device_id: enrollment.device_id,
+    emi_schedule: formatSchedule(schedule)
+  };
+}
+
+async function saveEnrollmentDeviceFallback({ dealerId, enrollmentId, brand, model, imei1, imei2 }) {
+  const primaryImei = normalizeImei(imei1);
+  const secondaryImei = normalizeImei(imei2);
+  if (secondaryImei && primaryImei && primaryImei === secondaryImei) {
+    const err = new Error('IMEI 2 must be different from IMEI 1.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const dealerIdentity = await resolveDealerIdentity(dealerId);
+  const client = await db.getClient();
+  let enrollment;
+
+  try {
+    await client.query('BEGIN');
+    enrollment = await getDealerEnrollment(client, dealerIdentity, enrollmentId);
+
+    if (primaryImei) {
+      const existing = await client.query(
+        `SELECT id, status
+         FROM devices
+         WHERE imei = $1 AND id <> $2
+         LIMIT 1
+         FOR UPDATE`,
+        [primaryImei, enrollment.device_id]
+      );
+      if (
+        existing.rows.length &&
+        !['decoupled', 'pending', 'pending_decouple'].includes(existing.rows[0].status)
+      ) {
+        const err = new Error('This IMEI is already attached to another active device.');
+        err.statusCode = 409;
+        throw err;
+      }
+      if (existing.rows.length) {
+        await client.query(`UPDATE enrollments SET device_id = $2 WHERE id = $1`, [
+          enrollment.id,
+          existing.rows[0].id
+        ]);
+        await client.query(
+          `DELETE FROM devices
+           WHERE id = $1 AND imei IS NULL AND owner_id IS NULL AND status = 'pending'`,
+          [enrollment.device_id]
+        );
+        enrollment.device_id = existing.rows[0].id;
+      }
+    }
+
+    const updated = await client.query(
+      `UPDATE enrollments
+       SET brand = COALESCE($2, brand),
+           model = COALESCE($3, model),
+           imei1 = COALESCE($4, imei1),
+           imei2 = COALESCE($5, imei2)
+       WHERE id = $1
+       RETURNING *`,
+      [
+        enrollment.id,
+        truncateNullable(brand, 64),
+        truncateNullable(model, 64),
+        primaryImei || null,
+        secondaryImei || null
+      ]
+    );
+    [enrollment] = updated.rows;
+
+    await client.query(
+      `UPDATE devices
+       SET imei = COALESCE($2, imei),
+           brand = COALESCE($3, brand),
+           model = COALESCE($4, model),
+           device_name = COALESCE(device_name, NULLIF(CONCAT_WS(' ', $3::text, $4::text), '')),
+           updated_at = NOW()
+       WHERE id = $1`,
+      [
+        enrollment.device_id,
+        primaryImei || null,
+        truncateNullable(brand, 64),
+        truncateNullable(model, 64)
+      ]
+    );
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  return { success: true, enrollment_id: enrollment.id, device_id: enrollment.device_id };
 }
 
 /**
@@ -281,11 +533,12 @@ async function startEnrollment({
  * User app reads real IMEI from device hardware and sends it with the code
  * the dealer typed in. Server verifies both match → binding confirmed.
  */
-async function confirmFromDevice({ code, imei }) {
+async function confirmFromDevice({ code, imei, androidId, deviceBoundId, brand, model }) {
   const tokenHash = crypto.createHash('sha256').update(String(code)).digest('hex');
 
   // On Android 10+ most apps cannot read IMEI without system privilege.
-  // Primary match uses code hash + IMEI; fall back to code-only when IMEI is absent.
+  // Prefer code + IMEI. If IMEI is unavailable, use the Android/device-bound
+  // identifier captured during pre-registration before falling back to code-only.
   let row;
   if (imei) {
     row = await db.query(
@@ -301,8 +554,28 @@ async function confirmFromDevice({ code, imei }) {
     );
   }
 
-  // Fallback: match by token hash alone (when IMEI unavailable or no IMEI match found)
-  if (!imei || !row.rows.length) {
+  if ((!row || !row.rows.length) && (androidId || deviceBoundId)) {
+    row = await db.query(
+      `SELECT e.*, d.id AS dev_id
+       FROM enrollments e
+       JOIN devices d ON d.id = e.device_id
+       WHERE e.token_hash = $1
+         AND e.status = 'pending'
+         AND e.expires_at > NOW()
+         AND (
+           ($2::text IS NOT NULL AND d.android_id = $2)
+           OR ($3::text IS NOT NULL AND d.device_bound_id = $3)
+         )
+       ORDER BY e.created_at DESC
+       LIMIT 1`,
+      [tokenHash, androidId || null, deviceBoundId || null]
+    );
+  }
+
+  // Compatibility fallback for already-created enrollments where the device did
+  // not pre-register yet. This should become unnecessary once the split flow is
+  // fully implemented.
+  if (!row || !row.rows.length) {
     row = await db.query(
       `SELECT e.*, d.id AS dev_id
        FROM enrollments e
@@ -329,6 +602,8 @@ async function confirmFromDevice({ code, imei }) {
   let consumedKey;
   let createdSchedule;
   let customer;
+  let dealerName;
+  let dealerPhone;
   let offlineUnlockSecret;
 
   try {
@@ -355,6 +630,48 @@ async function confirmFromDevice({ code, imei }) {
     [committedEnrollment] = lockedRow.rows;
     committedDealerIdentity = await resolveDealerIdentity(committedEnrollment.dealer_id, client);
     const keyTier = committedEnrollment.tier || 'standard';
+
+    const identifierMatch = await client.query(
+      `SELECT id, status
+       FROM devices
+       WHERE id <> $1
+         AND (
+           ($2::text IS NOT NULL AND imei = $2)
+           OR ($3::text IS NOT NULL AND android_id = $3)
+           OR ($4::text IS NOT NULL AND device_bound_id = $4)
+         )
+       ORDER BY
+         CASE
+           WHEN status = 'decoupled' THEN 0
+           WHEN status = 'pending' THEN 1
+           WHEN status = 'pending_decouple' THEN 2
+           ELSE 3
+         END,
+         created_at DESC
+       LIMIT 1
+       FOR UPDATE`,
+      [committedEnrollment.dev_id, imei || null, androidId || null, deviceBoundId || null]
+    );
+
+    if (identifierMatch.rows.length) {
+      const matched = identifierMatch.rows[0];
+      if (!['decoupled', 'pending', 'pending_decouple'].includes(matched.status)) {
+        const err = new Error('This device is already enrolled.');
+        err.statusCode = 409;
+        throw err;
+      }
+      await client.query(`UPDATE enrollments SET device_id = $2 WHERE id = $1`, [
+        committedEnrollment.id,
+        matched.id
+      ]);
+      await client.query(
+        `DELETE FROM devices
+         WHERE id = $1 AND imei IS NULL AND owner_id IS NULL AND status = 'pending'`,
+        [committedEnrollment.dev_id]
+      );
+      committedEnrollment.dev_id = matched.id;
+      committedEnrollment.device_id = matched.id;
+    }
 
     const keyRow = await client.query(
       `SELECT id, reseller_id
@@ -399,11 +716,12 @@ async function confirmFromDevice({ code, imei }) {
     );
     [customer] = customerResult.rows;
 
-    const dealerPhoneResult = await client.query(
-      `SELECT phone FROM dealers WHERE id = $1 LIMIT 1`,
+    const dealerContactResult = await client.query(
+      `SELECT name, phone FROM dealers WHERE id = $1 LIMIT 1`,
       [committedDealerIdentity.dealerRecordId]
     );
-    const dealerPhone = dealerPhoneResult.rows[0]?.phone || null;
+    dealerName = dealerContactResult.rows[0]?.name || null;
+    dealerPhone = dealerContactResult.rows[0]?.phone || null;
 
     await client.query(
       `UPDATE activation_keys
@@ -415,9 +733,27 @@ async function confirmFromDevice({ code, imei }) {
       [committedEnrollment.dev_id, consumedKey.id]
     );
 
+    const reportedImei = normalizeImei(imei);
+    await client.query(
+      `UPDATE enrollments
+       SET brand = COALESCE($2, brand),
+           model = COALESCE($3, model),
+           imei1 = COALESCE($4, imei1)
+       WHERE id = $1`,
+      [
+        committedEnrollment.id,
+        truncateNullable(brand, 64),
+        truncateNullable(model, 64),
+        reportedImei || null
+      ]
+    );
+
     await client.query(
       `UPDATE devices
        SET status            = 'enrolled',
+           imei              = COALESCE($11, imei),
+           android_id        = COALESCE($12, android_id),
+           device_bound_id   = COALESCE($13, device_bound_id),
            brand             = $2,
            model             = $3,
            dealer_id         = $4,
@@ -432,15 +768,23 @@ async function confirmFromDevice({ code, imei }) {
        WHERE id = $1`,
       [
         committedEnrollment.dev_id,
-        committedEnrollment.brand,
-        committedEnrollment.model,
+        truncateNullable(brand, 64) || committedEnrollment.brand,
+        truncateNullable(model, 64) || committedEnrollment.model,
         committedDealerIdentity.dealerRecordId,
         consumedKey.reseller_id || committedDealerIdentity.resellerId,
         consumedKey.id,
         customer.id,
-        [committedEnrollment.brand, committedEnrollment.model].filter(Boolean).join(' ') || null,
+        [
+          truncateNullable(brand, 64) || committedEnrollment.brand,
+          truncateNullable(model, 64) || committedEnrollment.model
+        ]
+          .filter(Boolean)
+          .join(' ') || null,
         dealerPhone,
-        offlineUnlockSecret
+        offlineUnlockSecret,
+        reportedImei || null,
+        androidId || null,
+        deviceBoundId || null
       ]
     );
 
@@ -449,22 +793,21 @@ async function confirmFromDevice({ code, imei }) {
       [committedEnrollment.id]
     );
 
-    const scheduleResult = await client.query(
-      `INSERT INTO emi_schedules
-         (device_id, total_amount, down_payment, emi_amount, duration, start_date, grace_days, status, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', NOW(), NOW())
-       RETURNING *`,
-      [
-        committedEnrollment.dev_id,
-        committedEnrollment.total_amount,
-        committedEnrollment.down_payment,
-        committedEnrollment.emi_amount,
-        committedEnrollment.duration,
-        committedEnrollment.start_date,
-        committedEnrollment.grace_days
-      ]
-    );
-    [createdSchedule] = scheduleResult.rows;
+    if (
+      committedEnrollment.total_amount &&
+      committedEnrollment.emi_amount &&
+      committedEnrollment.duration &&
+      committedEnrollment.start_date
+    ) {
+      createdSchedule = await upsertActiveSchedule(client, committedEnrollment.dev_id, {
+        totalAmount: committedEnrollment.total_amount,
+        downPayment: committedEnrollment.down_payment || 0,
+        emiAmount: committedEnrollment.emi_amount,
+        duration: committedEnrollment.duration,
+        startDate: committedEnrollment.start_date,
+        graceDays: committedEnrollment.grace_days ?? 7
+      });
+    }
 
     await client.query('COMMIT');
     logger.info('Activation key consumed', { keyId: consumedKey.id, tier: keyTier });
@@ -501,8 +844,16 @@ async function confirmFromDevice({ code, imei }) {
     device_id: committedEnrollment.dev_id,
     device_token: deviceToken,
     offline_unlock_secret: offlineUnlockSecret,
+    dealer_name: dealerName,
+    dealer_phone: dealerPhone,
     emi_schedule: formatSchedule(createdSchedule)
   };
 }
 
-module.exports = { startEnrollment, confirmFromDevice, formatSchedule };
+module.exports = {
+  startEnrollment,
+  confirmFromDevice,
+  formatSchedule,
+  saveEnrollmentDeviceFallback,
+  saveEnrollmentEmiTerms
+};

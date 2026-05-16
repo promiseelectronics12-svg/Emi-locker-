@@ -45,8 +45,9 @@ class PermissionHealthReporter @Inject constructor(
         val snapshot = currentSnapshot()
         val signature = snapshot.signature()
         val previous = preferencesManager.permissionHealthSignature.firstOrNull()
+        val missingDealerContact = preferencesManager.dealerPhone.firstOrNull().isNullOrBlank()
 
-        if (!force && previous == signature) {
+        if (!force && previous == signature && !missingDealerContact) {
             Log.d(TAG, "Permission health unchanged")
             return
         }
@@ -57,6 +58,13 @@ class PermissionHealthReporter @Inject constructor(
                 snapshot.toHeartbeatBody(source, lockState)
             )
             if (response.isSuccessful) {
+                response.body()?.let { body ->
+                    val dealerName = body.dealerName?.takeIf { it.isNotBlank() }
+                    val dealerPhone = body.dealerPhone?.takeIf { it.isNotBlank() }
+                    if (dealerName != null || dealerPhone != null) {
+                        preferencesManager.saveDealerInfo(dealerName ?: "Dealer", dealerPhone.orEmpty())
+                    }
+                }
                 preferencesManager.savePermissionHealthSignature(signature)
                 Log.d(TAG, "Permission health reported: ${snapshot.status}")
             } else {

@@ -51,6 +51,17 @@ class LockService {
     );
     const currentLockLevel = currentState.rows[0]?.lock_level || 'NONE';
     const currentStatus = String(currentState.rows[0]?.status || '').toLowerCase();
+
+    if (['decoupled', 'pending_decouple'].includes(currentStatus)) {
+      return {
+        status: 'DEVICE_RELEASED',
+        decision: 'DEVICE_RELEASED',
+        message: 'Device is released or release is pending. Controls are disabled for this record.',
+        currentLockLevel,
+        currentStatus,
+      };
+    }
+
     const alreadyLocked =
       currentLockLevel === 'FULL' ||
       currentLockLevel === 'SOFT' ||

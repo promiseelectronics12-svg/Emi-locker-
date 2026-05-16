@@ -30,26 +30,20 @@
     <string name="overlay_overdue_message">Your EMI payment is overdue. Your device will be restricted if payment is not made.</string>
     <string name="overlay_overdue_days">%d days overdue</string>
     <string name="overlay_full_lock_title">Device Locked</string>
-    <string name="overlay_full_lock_message">Your device is locked due to overdue EMI payment. Contact your dealer or call emergency services.</string>
+    <string name="overlay_full_lock_message">Your device is locked due to overdue EMI payment. Contact your dealer or use the phone app for calls.</string>
     <string name="overlay_full_lock_days">%d days overdue</string>
     <string name="overlay_dealer_label">Your Dealer</string>
     <string name="overlay_contact_your_dealer">Contact your dealer to resolve</string>
     <string name="overlay_message_from_dealer">Message from Dealer</string>
-    <string name="overlay_emergency_always_available">Emergency calls (999 and 112) are always available</string>
 
     <!-- Buttons -->
     <string name="btn_pay_now">Pay Now</string>
     <string name="btn_contact_dealer">Contact Dealer</string>
     <string name="btn_call_dealer">Call Dealer</string>
-    <string name="btn_emergency">Emergency Call</string>
-    <string name="btn_emergency_999">Emergency Call (999)</string>
-    <string name="btn_emergency_112">Emergency Call (112)</string>
     <string name="btn_dismiss">Dismiss (4h)</string>
     <string name="btn_ok">OK</string>
 
     <!-- Emergency Numbers -->
-    <string name="emergency_number">999</string>
-    <string name="emergency_number_alt">112</string>
     <string name="btn_mark_as_read">Mark as Read</string>
 
     <!-- Currency -->

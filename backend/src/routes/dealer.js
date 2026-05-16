@@ -40,8 +40,21 @@ function warnOptionalFailure(scope, error) {
 function isDeviceStatusConstraintError(error) {
   return (
     error?.code === '23514' &&
-    (error.constraint === 'devices_status_check' ||
-      error.message?.includes('devices_status_check'))
+    (error.constraint === 'devices_status_check' || error.message?.includes('devices_status_check'))
+  );
+}
+
+function isReleasedDeviceStatus(status) {
+  return ['decoupled', 'pending_decouple'].includes(String(status || '').toLowerCase());
+}
+
+function releasedDeviceResponse(res) {
+  return res.status(409).json(
+    buildErrorResponse(
+      409,
+      'DEVICE_RELEASED',
+      'Device is released or release is pending. Controls are disabled for this record.'
+    )
   );
 }
 
@@ -81,7 +94,7 @@ const GRACE_INDEX = { 2: 1, 4: 2, 8: 3, 24: 4 };
 
 const DEFAULT_USER_APP_APK_URL =
   'https://raw.githubusercontent.com/promiseelectronics12-svg/Emi-locker-/apk-releases/user-app/1.0.0/emi-locker-user-1.0.0-release.apk';
-const DEFAULT_USER_APP_APK_CHECKSUM = 'G5hnEcbkVwO1XJ_-QUmlN1CCRepTwXIa-5DK2g9SKGo';
+const DEFAULT_USER_APP_APK_CHECKSUM = 'PLKmbzgMlL2CwxcpZkXnaIl6ecrlh3UHuyV3m59EC54';
 const USER_APP_PACKAGE = 'com.android.simtoolkit';
 const USER_APP_ADMIN_RECEIVER = `${USER_APP_PACKAGE}/com.android.simtoolkit.device.DeviceAdminReceiver`;
 
@@ -189,6 +202,8 @@ router.get(
             lr.status AS latest_lock_request_status,
             lr.created_at AS latest_lock_request_at,
             CASE
+              WHEN d.status = 'decoupled' THEN 'decoupled'
+              WHEN d.status = 'pending_decouple' THEN 'release_pending'
               WHEN d.fcm_token_status = 'invalid' OR d.app_uninstall_suspected_at IS NOT NULL THEN 'app_removed_suspected'
               WHEN d.device_health_status = 'degraded' THEN 'protection_degraded'
               WHEN d.last_seen_at IS NULL THEN 'never_seen'
@@ -429,7 +444,7 @@ router.post(
     const dealerIds = getDealerIds(req.user.id, dealer);
 
     const result = await db.query(
-      `SELECT d.id, d.totp_secret, d.model, d.brand,
+      `SELECT d.id, d.totp_secret, d.model, d.brand, d.status,
               u.phone AS customer_phone, u.name AS customer_name
        FROM devices d
        LEFT JOIN users u ON u.id = d.owner_id
@@ -441,6 +456,8 @@ router.post(
       return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
 
     const device = result.rows[0];
+
+    if (isReleasedDeviceStatus(device.status)) return releasedDeviceResponse(res);
 
     if (!device.totp_secret)
       return res
@@ -564,11 +581,13 @@ router.delete(
     const dealerIds = getDealerIds(req.user.id, dealer);
 
     const device = await db.query(
-      'SELECT id FROM devices WHERE id = $1 AND dealer_id = ANY($2::uuid[])',
+      'SELECT id, status FROM devices WHERE id = $1 AND dealer_id = ANY($2::uuid[])',
       [req.params.deviceId, dealerIds]
     );
     if (!device.rows.length)
       return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
+
+    if (isReleasedDeviceStatus(device.rows[0].status)) return releasedDeviceResponse(res);
 
     try {
       await db.query(
@@ -785,6 +804,9 @@ router.post(
       return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
 
     const device = result.rows[0];
+
+    if (isReleasedDeviceStatus(device.status)) return releasedDeviceResponse(res);
+
     const graceHours = Number(req.body.grace_hours);
     const { method } = req.body;
     const expiresAt = new Date(Date.now() + graceHours * 60 * 60 * 1000);
@@ -989,6 +1011,19 @@ router.post(
         .json(buildErrorResponse(400, 'NO_FCM_TOKEN', 'Device has no active push token'));
     }
 
+    await db.query(
+      `UPDATE devices
+       SET status = 'pending_decouple',
+           lock_level = 'NONE',
+           lock_reason = NULL,
+           locked_at = NULL,
+           locked_by = NULL,
+           decoupling_initiated_at = COALESCE(decoupling_initiated_at, NOW()),
+           updated_at = NOW()
+       WHERE id = $1`,
+      [device.id]
+    );
+
     let fcmResult;
     try {
       const fcmService = require('../modules/notifications/fcm.service');
@@ -1015,9 +1050,13 @@ router.post(
       });
     } catch (error) {
       warnOptionalFailure('test decouple FCM send', error);
-      return res
-        .status(502)
-        .json(buildErrorResponse(502, 'FCM_SEND_FAILED', 'Could not send decouple command'));
+      return res.status(202).json({
+        success: true,
+        status: 'pending_decouple',
+        message:
+          'Release was recorded, but push delivery failed. Verify the phone manually or wait for device confirmation.',
+        fcm: { success: false, error: error.message }
+      });
     }
 
     if (!fcmResult?.success) {
@@ -1031,26 +1070,16 @@ router.post(
           [device.id]
         );
       }
-      return res.status(502).json(
-        buildErrorResponse(
-          502,
-          'FCM_DELIVERY_FAILED',
-          fcmResult?.error || 'Decouple command was not accepted by FCM'
-        )
-      );
+      return res.status(202).json({
+        success: true,
+        status: 'pending_decouple',
+        message:
+          fcmResult?.invalidToken
+            ? 'Release was recorded, but the app push token is invalid. Verify the phone manually or wait for device confirmation.'
+            : 'Release was recorded, but push delivery was not accepted. Verify manually or retry.',
+        fcm: fcmResult
+      });
     }
-
-    await db.query(
-      `UPDATE devices
-       SET status = 'pending_decouple',
-           lock_level = 'NONE',
-           lock_reason = NULL,
-           locked_at = NULL,
-           locked_by = NULL,
-           updated_at = NOW()
-       WHERE id = $1`,
-      [device.id]
-    );
 
     try {
       const sseService = require('../modules/sse/sseService');
@@ -1375,8 +1404,7 @@ router.post(
   '/enrollment-qr',
   asyncHandler(async (req, res) => {
     const apkUrl = process.env.USER_APP_APK_URL || DEFAULT_USER_APP_APK_URL;
-    const apkChecksum =
-      process.env.USER_APP_APK_CHECKSUM || DEFAULT_USER_APP_APK_CHECKSUM;
+    const apkChecksum = process.env.USER_APP_APK_CHECKSUM || DEFAULT_USER_APP_APK_CHECKSUM;
 
     const provisioningPayload = {
       'android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME': USER_APP_ADMIN_RECEIVER,
@@ -1401,91 +1429,20 @@ router.post(
   })
 );
 
-// ── Reminder mode (watermark overlay) ────────────────────────────────────────
-// Sends a REMINDER_MODE command: full-screen "EMI PAYMENT DUE" watermark appears
-// on the customer's device. Phone stays functional. Auto-hides in payment apps.
-// Used manually for testing; production auto-escalation comes from the scheduler.
-
 router.post(
   '/devices/:deviceId/set-reminder',
   param('deviceId').isUUID(),
   validateRequest,
-  asyncHandler(async (req, res) => {
-    const dealer = await getDealerProfile(req.user.id);
-    const dealerIds = getDealerIds(req.user.id, dealer);
-
-    const result = await db.query(
-      `SELECT d.id, d.imei, d.fcm_token, d.status, d.device_name, d.amapi_device_name
-       FROM devices d
-       WHERE d.id = $1 AND d.dealer_id = ANY($2::uuid[])`,
-      [req.params.deviceId, dealerIds]
-    );
-
-    if (!result.rows.length) {
-      return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
-    }
-
-    const device = result.rows[0];
-
-    if (device.status === 'decoupled' || device.status === 'pending_decouple') {
-      return res.status(409).json(buildErrorResponse(409, 'DECOUPLED', 'Device is decoupled'));
-    }
-
-    if (['locked'].includes(device.status)) {
-      return res.status(409).json(buildErrorResponse(
-        409, 'ALREADY_LOCKED',
-        'Device is already locked. Unlock before sending reminder.'
-      ));
-    }
-
-    if (device.status === 'reminder') {
-      return res.status(409).json(buildErrorResponse(
-        409, 'ALREADY_REMINDER',
-        'Reminder is already active on this device.'
-      ));
-    }
-
-    const REMINDER_LOCK_LEVEL = 'REMINDER_MODE';
-
-    const command = await lockCommandService.generateSignedCommand({
-      deviceImei: device.imei || '',
-      actionType: 'REMINDER',
-      lockLevel: REMINDER_LOCK_LEVEL,
-      metadata: { reason: 'PAYMENT_REMINDER', dealerId: dealer.id, requestedBy: req.user.id },
-    });
-
-    const delivery = await lockDeliveryService.deliverCommand(device.id, command, REMINDER_LOCK_LEVEL);
-
-    await db.query(
-      `UPDATE devices
-       SET lock_level = 'SOFT', status = 'reminder', lock_reason = 'PAYMENT_REMINDER',
-           locked_at = NOW(), locked_by = $1, updated_at = NOW()
-       WHERE id = $2`,
-      [req.user.id, device.id]
-    );
-
-    try {
-      const sseService = require('../modules/sse/sseService');
-      sseService.emitDeviceLocked({
-        id: device.id,
-        device_name: device.device_name || device.amapi_device_name,
-        dealer_id: dealer.id,
-        lock_level: 'SOFT',
-        lock_reason: 'PAYMENT_REMINDER',
-        locked_at: new Date().toISOString(),
-      });
-    } catch (e) {
-      warnOptionalFailure('reminder SSE emit', e);
-    }
-
-    return res.json({
-      success: true,
-      status: 'REMINDER_SENT',
-      lockLevel: REMINDER_LOCK_LEVEL,
-      command: { nonce: command.nonce, expiresAt: command.expiresAt },
-      delivery: delivery.results,
-    });
-  })
+  asyncHandler(async (req, res) =>
+    res.status(410).json({
+      ...buildErrorResponse(
+        410,
+        'REMINDER_WATERMARK_REMOVED',
+        'Manual reminder watermark was removed. Use Lock for the kiosk/basic-phone restriction flow.'
+      ),
+      deviceId: req.params.deviceId
+    })
+  )
 );
 
 module.exports = router;

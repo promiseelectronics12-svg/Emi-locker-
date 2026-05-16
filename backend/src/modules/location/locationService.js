@@ -61,6 +61,10 @@ class LocationService {
       throw new Error('Device not found');
     }
 
+    if (['decoupled', 'pending_decouple'].includes(String(device.status || '').toLowerCase())) {
+      throw new Error('Device is released or release is pending. Location controls are disabled.');
+    }
+
     await db.query(
       `UPDATE location_pull_requests
        SET status = 'expired'
@@ -197,10 +201,10 @@ class LocationService {
     // Validate coordinate bounds
     const lat = parseFloat(latitude);
     const lon = parseFloat(longitude);
-    if (isNaN(lat) || lat < -90 || lat > 90) {
+    if (Number.isNaN(lat) || lat < -90 || lat > 90) {
       throw new Error('Invalid latitude: must be a number between -90 and 90');
     }
-    if (isNaN(lon) || lon < -180 || lon > 180) {
+    if (Number.isNaN(lon) || lon < -180 || lon > 180) {
       throw new Error('Invalid longitude: must be a number between -180 and 180');
     }
 

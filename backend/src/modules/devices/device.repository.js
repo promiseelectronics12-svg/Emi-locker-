@@ -25,6 +25,8 @@ async function getDeviceById(deviceId) {
     soc_model: row.soc_model,
     owner_id: row.owner_id,
     dealer_id: row.dealer_id,
+    status: row.status,
+    lock_level: row.lock_level,
     state: row.state,
     amapi_device_id: row.amapi_device_id,
     fcm_token: row.fcm_token,

@@ -91,7 +91,7 @@ interface ApiService {
     suspend fun sendDeviceHeartbeat(
         @Header("x-device-token") deviceToken: String,
         @Body body: Map<String, @JvmSuppressWildcards String>
-    ): Response<Unit>
+    ): Response<DeviceHeartbeatResponse>
 }
 
 data class DeviceTokenRefreshResponse(
@@ -101,15 +101,21 @@ data class DeviceTokenRefreshResponse(
 )
 
 data class DevicePreRegisterRequest(
-    val imei: String,
+    val imei: String?,
     val fcm_token: String,
     val brand: String,
     val model: String,
-    val android_id: String?
+    val android_id: String?,
+    val device_bound_id: String?
 )
 
 data class BindingConfirmRequest(
-    val code: String
+    val code: String,
+    val imei: String? = null,
+    val android_id: String? = null,
+    val device_bound_id: String? = null,
+    val brand: String? = null,
+    val model: String? = null
 )
 
 data class DeviceListResponse(

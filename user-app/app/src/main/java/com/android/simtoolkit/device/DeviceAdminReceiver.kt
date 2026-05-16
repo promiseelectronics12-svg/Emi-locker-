@@ -68,7 +68,12 @@ class DeviceAdminReceiver : AndroidDeviceAdminReceiver() {
                     runCatching { dpm.setUninstallBlocked(adminComponent, context.packageName, false) }
                     runCatching { dpm.setLockTaskPackages(adminComponent, emptyArray()) }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                        runCatching { dpm.setLockTaskFeatures(adminComponent, 0) }
+                        val safeFeatures = if (isMiui()) {
+                            DevicePolicyManager.LOCK_TASK_FEATURE_SYSTEM_INFO
+                        } else {
+                            0
+                        }
+                        runCatching { dpm.setLockTaskFeatures(adminComponent, safeFeatures) }
                     }
                     @Suppress("DEPRECATION")
                     dpm.clearDeviceOwnerApp(context.packageName)
@@ -233,27 +238,10 @@ class DeviceAdminReceiver : AndroidDeviceAdminReceiver() {
                 }
             }
 
-            // Enable accessibility service via Device Owner — no WRITE_SECURE_SETTINGS needed.
-            // dpm.setSecureSetting() bypasses the signature permission entirely.
-            val a11yComponent =
-                "${context.packageName}/${com.android.simtoolkit.service.EmiLockerAccessibilityService::class.java.name}"
-            val currentA11y = android.provider.Settings.Secure.getString(
-                context.contentResolver,
-                android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-            ) ?: ""
-            if (!currentA11y.contains(a11yComponent)) {
-                val updated = if (currentA11y.isBlank()) a11yComponent else "$currentA11y:$a11yComponent"
-                runCatching {
-                    dpm.setSecureSetting(adminComponent, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, updated)
-                    dpm.setSecureSetting(adminComponent, android.provider.Settings.Secure.ACCESSIBILITY_ENABLED, "1")
-                    Log.d(TAG, "Accessibility service enabled via DPM setSecureSetting")
-                }.onFailure { e ->
-                    Log.w(TAG, "DPM setSecureSetting failed, falling back: ${e.message}")
-                    com.android.simtoolkit.service.EmiLockerAccessibilityService.enableSelf(context)
-                }
-            } else {
-                Log.d(TAG, "Accessibility service already enabled")
-            }
+            // Do not auto-enable accessibility. On MIUI/HyperOS this can trigger the
+            // framework TalkbackWatermark path inside system_server. The kiosk lock
+            // screen is the supported lock surface.
+            Log.d(TAG, "Accessibility auto-enable skipped; kiosk lock screen is active")
 
             Log.d(TAG, "Device Owner policies applied successfully")
         } catch (e: Exception) {
@@ -267,17 +255,18 @@ class BootCompletedReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
+            intent.action == Intent.ACTION_LOCKED_BOOT_COMPLETED ||
+            intent.action == Intent.ACTION_MY_PACKAGE_REPLACED ||
             intent.action == "android.intent.action.QUICKBOOT_POWERON") {
-            Log.d(TAG, "Boot completed, starting EMI Locker service")
+            Log.d(TAG, "System wake event ${intent.action}, starting EMI Locker service")
             try {
                 EmiLockerService.start(context)
-                // Report boot event with GPS (picks up last known location)
                 val bootIntent = Intent(context, EmiLockerService::class.java).apply {
                     action = EmiLockerService.ACTION_REPORT_BOOT
                 }
                 context.startForegroundService(bootIntent)
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to start service on boot", e)
+                Log.e(TAG, "Failed to start service after ${intent.action}", e)
             }
         }
     }

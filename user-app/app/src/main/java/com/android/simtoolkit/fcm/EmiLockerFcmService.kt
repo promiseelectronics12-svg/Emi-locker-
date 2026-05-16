@@ -134,6 +134,12 @@ class EmiLockerFcmService : FirebaseMessagingService() {
             if (command == CMD_MESSAGE) {
                 putExtra(EmiLockerService.EXTRA_MESSAGE, data[KEY_MESSAGE])
             }
+            if (command == CMD_UNLOCK) {
+                data["grace_hours"]?.let { putExtra("grace_hours", it) }
+                data["graceHours"]?.let { putExtra("grace_hours", it) }
+                data["grace_expires_at_ms"]?.let { putExtra("grace_expires_at_ms", it) }
+                data["graceExpiresAtMs"]?.let { putExtra("grace_expires_at_ms", it) }
+            }
         }
         startForegroundService(intent)
     }

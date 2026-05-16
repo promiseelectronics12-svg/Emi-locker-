@@ -38,6 +38,8 @@ data class BindingConfirmResponse(
     @SerializedName("device_id") val deviceId: String?,
     @SerializedName("device_token") val deviceToken: String?,
     @SerializedName("offline_unlock_secret") val offlineUnlockSecret: String?,
+    @SerializedName("dealer_name") val dealerName: String?,
+    @SerializedName("dealer_phone") val dealerPhone: String?,
     @SerializedName("emi_schedule") val emiSchedule: EmiScheduleDto?
 )
 
@@ -63,4 +65,11 @@ data class EmiInstallmentDto(
 data class DeviceEmiScheduleResponse(
     @SerializedName("success") val success: Boolean,
     @SerializedName("emi_schedule") val emiSchedule: EmiScheduleDto?
+)
+
+data class DeviceHeartbeatResponse(
+    @SerializedName("success") val success: Boolean,
+    @SerializedName("server_time") val serverTime: String?,
+    @SerializedName("dealer_name") val dealerName: String?,
+    @SerializedName("dealer_phone") val dealerPhone: String?
 )

@@ -36,11 +36,12 @@ router.post(
 router.post(
   '/pre-register',
   rateLimit({ windowMs: 60 * 60 * 1000, max: 10, message: { error: 'Too many pre-registration attempts' } }),
-  body('imei').isString().trim().isLength({ min: 14, max: 16 }),
+  body('imei').optional({ nullable: true, checkFalsy: true }).isString().trim().isLength({ min: 14, max: 16 }),
   body('fcm_token').isString().trim().isLength({ min: 10, max: 4096 }),
   body('brand').optional().isString().trim().isLength({ max: 64 }),
   body('model').optional().isString().trim().isLength({ max: 64 }),
-  body('android_id').optional().isString().trim().isLength({ max: 128 }),
+  body('android_id').optional().isString().trim().isLength({ min: 4, max: 128 }),
+  body('device_bound_id').optional().isString().trim().isLength({ min: 4, max: 256 }),
   preRegisterDevice
 );
 
@@ -50,7 +51,11 @@ router.post(
   '/confirm',
   rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { error: 'Too many attempts. Please wait.' } }),
   body('code').isString().trim().isLength({ min: 6, max: 6 }).isNumeric(),
-  body('imei').optional().isString().trim().isLength({ min: 14, max: 16 }),
+  body('imei').optional({ nullable: true, checkFalsy: true }).isString().trim().isLength({ min: 14, max: 16 }),
+  body('android_id').optional().isString().trim().isLength({ min: 4, max: 128 }),
+  body('device_bound_id').optional().isString().trim().isLength({ min: 4, max: 256 }),
+  body('brand').optional().isString().trim().isLength({ max: 64 }),
+  body('model').optional().isString().trim().isLength({ max: 64 }),
   confirmBinding
 );
 

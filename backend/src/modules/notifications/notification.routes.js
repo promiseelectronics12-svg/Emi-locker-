@@ -74,6 +74,13 @@ router.post(
           });
         }
 
+        if (String(result.error || '').includes('released or release is pending')) {
+          return res.status(409).json({
+            success: false,
+            error: result.error,
+          });
+        }
+
         return res.status(500).json({
           success: false,
           error: result.error,
@@ -131,7 +138,7 @@ router.get(
 
 router.post(
   '/delivery-receipt',
-  async (req, res, next) => {
+  async (req, res) => {
     const apiKey = req.headers['x-api-key'];
     const expectedKey = process.env.FCM_WEBHOOK_API_KEY;
 

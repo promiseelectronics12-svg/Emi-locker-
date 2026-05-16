@@ -183,11 +183,20 @@ function lockLevelRank(level) {
 
 function shouldApplyReportedLockState(previousDevice, reportedLockState) {
   if (!reportedLockState) return false;
+  const previousStatus = String(previousDevice?.status || '').toLowerCase();
+
+  if (previousStatus === 'decoupled') {
+    return reportedLockState.event === 'decoupled';
+  }
+
+  if (previousStatus === 'pending_decouple' && reportedLockState.event !== 'decoupled') {
+    return false;
+  }
+
   if (reportedLockState.lockLevel === 'NONE') {
     return true;
   }
 
-  const previousStatus = String(previousDevice?.status || '').toLowerCase();
   const previousRank = lockLevelRank(previousDevice?.lock_level);
   const reportedRank = lockLevelRank(reportedLockState.lockLevel);
 
@@ -251,10 +260,13 @@ router.post('/heartbeat', validateDeviceToken, async (req, res) => {
     const heartbeatSource = buildHeartbeatSource(source, appVersion, permissionHealth);
 
     const previous = await db.query(
-      `SELECT id, dealer_id, device_name, imei, status, lock_level, lock_reason, last_seen_at,
-              device_health_status, last_heartbeat_source
-       FROM devices
-       WHERE id = $1`,
+      `SELECT d.id, d.dealer_id, d.device_name, d.imei, d.status, d.lock_level, d.lock_reason,
+              d.last_seen_at, d.device_health_status, d.last_heartbeat_source,
+              dl.name AS dealer_name,
+              COALESCE(NULLIF(d.dealer_phone, ''), dl.phone) AS dealer_phone
+       FROM devices d
+       LEFT JOIN dealers dl ON dl.id = d.dealer_id
+       WHERE d.id = $1`,
       [req.deviceAuth.sub]
     );
 
@@ -355,7 +367,12 @@ router.post('/heartbeat', validateDeviceToken, async (req, res) => {
       }
     }
 
-    return res.json({ success: true, server_time: new Date().toISOString() });
+    return res.json({
+      success: true,
+      server_time: new Date().toISOString(),
+      dealer_name: previousDevice?.dealer_name || null,
+      dealer_phone: previousDevice?.dealer_phone || null
+    });
   } catch (error) {
     logger.error('Device heartbeat failed', { error: error.message });
     return res.status(500).json({ success: false, error: 'Failed to record heartbeat' });

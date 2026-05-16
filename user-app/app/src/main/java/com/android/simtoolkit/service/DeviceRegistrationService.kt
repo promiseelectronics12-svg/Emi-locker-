@@ -24,24 +24,31 @@ class DeviceRegistrationService @Inject constructor(
 ) {
     private val TAG = "DeviceRegistration"
 
+    private fun getAndroidId(): String? =
+        Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+
+    private fun getDeviceBoundId(androidId: String?): String =
+        androidId?.let { "ANDROID_ID:$it" } ?: "ANDROID_ID:UNKNOWN"
+
     // Called once at app startup. Modern Android blocks normal apps from reading
-    // IMEI, so this uses Android ID as the public pre-registration identifier.
+    // IMEI, so Android ID is sent as its own field instead of being placed in
+    // the IMEI field.
     suspend fun preRegisterIfNeeded() = withContext(Dispatchers.IO) {
         try {
             val alreadyRegistered = preferencesManager.isDevicePreRegistered.firstOrNull() ?: false
             if (alreadyRegistered) return@withContext
 
             val fcmToken = FirebaseMessaging.getInstance().token.await()
-            val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
-            val deviceIdentifier = androidId?.let { "android:$it" } ?: "android:unknown"
+            val androidId = getAndroidId()
 
             apiService.preRegisterDevice(
                 DevicePreRegisterRequest(
-                    imei       = deviceIdentifier,
+                    imei       = null,
                     fcm_token  = fcmToken,
                     brand      = Build.BRAND,
                     model      = Build.MODEL,
-                    android_id = androidId
+                    android_id = androidId,
+                    device_bound_id = getDeviceBoundId(androidId)
                 )
             )
 
@@ -71,15 +78,15 @@ class DeviceRegistrationService @Inject constructor(
     // Re-registers if FCM token rotates (called from EmiLockerFcmService.onNewToken)
     suspend fun updateFcmToken(newToken: String) = withContext(Dispatchers.IO) {
         try {
-            val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
-            val deviceIdentifier = androidId?.let { "android:$it" } ?: "android:unknown"
+            val androidId = getAndroidId()
             apiService.preRegisterDevice(
                 DevicePreRegisterRequest(
-                    imei       = deviceIdentifier,
+                    imei       = null,
                     fcm_token  = newToken,
                     brand      = Build.BRAND,
                     model      = Build.MODEL,
-                    android_id = androidId
+                    android_id = androidId,
+                    device_bound_id = getDeviceBoundId(androidId)
                 )
             )
             Log.d(TAG, "FCM token updated on server")
