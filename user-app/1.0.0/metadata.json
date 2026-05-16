@@ -4,12 +4,12 @@
     "version":  "1.0.0",
     "versionCode":  1,
     "buildType":  "signed-minified-release",
-    "builtAt":  "2026-05-16T17:19:23+06:00",
+    "builtAt":  "2026-05-16T19:14:03+06:00",
     "apkPath":  "user-app/1.0.0/emi-locker-user-1.0.0-release.apk",
-    "apkSize":  5025124,
-    "apkSha256":  "3cb2a66f380c94bd82c317296645e768897a79cae5877507bb25779b9f440b9e",
-    "provisioningChecksum":  "PLKmbzgMlL2CwxcpZkXnaIl6ecrlh3UHuyV3m59EC54",
+    "apkSize":  5025412,
+    "apkSha256":  "38afda365ddbbf6ad590ccb25e1d472f989549198361af602230a16fcf18b3b8",
+    "provisioningChecksum":  "OK_aNl3bv2rVkMyyXh1HL5iVSRmDYa9gIjChb88Ys7g",
     "signingCertificateSha256":  "571b0a553b2b99e12af5485b2e6256eb3878b060cc4446fd827734489b4f6cc6",
     "sourceBranch":  "main",
-    "sourceCommit":  "d94620bcbed26f8050cafde955305ce5c2290329"
+    "sourceCommit":  "55eac2de06c5c07b02a021fbf03ae9b710f52986"
 }
