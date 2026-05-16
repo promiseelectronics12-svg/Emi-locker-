@@ -267,14 +267,21 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
     final brand = _brandController.text.trim();
     final model = _modelController.text.trim();
     final imei1 = _normalizeImei(_imei1Controller.text);
-    final hasAnyFallback = brand.isNotEmpty ||
+    final hasAnyFallback =
+        brand.isNotEmpty ||
         model.isNotEmpty ||
         imei1.isNotEmpty ||
         _normalizeImei(_imei2Controller.text).isNotEmpty;
     if (!hasAnyFallback) return null;
-    if (brand.isEmpty) return 'Enter phone brand or leave all fallback fields blank.';
-    if (model.isEmpty) return 'Enter phone model or leave all fallback fields blank.';
-    if (imei1.isEmpty) return 'Enter IMEI 1 or leave all fallback fields blank.';
+    if (brand.isEmpty) {
+      return 'Enter phone brand or leave all fallback fields blank.';
+    }
+    if (model.isEmpty) {
+      return 'Enter phone model or leave all fallback fields blank.';
+    }
+    if (imei1.isEmpty) {
+      return 'Enter IMEI 1 or leave all fallback fields blank.';
+    }
     if (!_isValidImei(imei1)) return 'IMEI 1 is not a valid IMEI number.';
     final imei2 = _normalizeImei(_imei2Controller.text);
     if (imei2.isNotEmpty && !_isValidImei(imei2)) {
@@ -652,6 +659,21 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       if (mounted) setState(() => _error = readableError(e));
     } finally {
       if (mounted) setState(() => _enrollBusy = false);
+    }
+  }
+
+  Future<void> _goToCodeStep() async {
+    if (_enrollBusy) return;
+    final validation = _validateStep1();
+    if (validation != null) {
+      _next(validation);
+      return;
+    }
+
+    await _createEnrollment();
+    if (!mounted) return;
+    if (_enrollmentToken != null && _enrollmentToken!.isNotEmpty) {
+      setState(() => _step = _codeStep);
     }
   }
 
@@ -1380,8 +1402,8 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
             _emiSaving
                 ? 'Saving...'
                 : widget.requireEvidence
-                    ? 'Next - Evidence vault'
-                    : 'Next - Device fallback',
+                ? 'Next - Evidence vault'
+                : 'Next - Device fallback',
           ),
         ),
       ],
@@ -1484,7 +1506,10 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
                   }
                   final deviceId = _deviceId;
                   if (deviceId == null || deviceId.isEmpty) {
-                    setState(() => _error = 'Create the activation code before registering evidence.');
+                    setState(
+                      () => _error =
+                          'Create the activation code before registering evidence.',
+                    );
                     return;
                   }
                   setState(() => _enrollBusy = true);
@@ -1629,6 +1654,10 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   // ── Step 4: QR provisioning (Device Owner — new factory-reset phones) ────
 
   Widget _buildStep5Qr() {
+    final codeActionLabel = _enrollBusy
+        ? 'Generating code...'
+        : 'Next - Enter 6-digit code';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1639,6 +1668,21 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
           subtitle:
               'For a brand new phone — scan this QR during Android setup.',
         ),
+        const SizedBox(height: 16),
+        _QrStepActions(
+          busy: _enrollBusy,
+          primaryLabel: codeActionLabel,
+          onCode: _goToCodeStep,
+          onSkip: _goToCodeStep,
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 12),
+          InlineNotice(
+            message: _error!,
+            tone: AppTone.danger,
+            icon: Icons.error_outline,
+          ),
+        ],
         const SizedBox(height: 20),
         if (_qrBusy)
           const Center(
@@ -2119,6 +2163,46 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
 }
 
 // ── Supporting widgets ────────────────────────────────────────────────────
+
+class _QrStepActions extends StatelessWidget {
+  const _QrStepActions({
+    required this.busy,
+    required this.primaryLabel,
+    required this.onCode,
+    required this.onSkip,
+  });
+
+  final bool busy;
+  final String primaryLabel;
+  final VoidCallback onCode;
+  final VoidCallback onSkip;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FilledButton.icon(
+          onPressed: busy ? null : onCode,
+          icon: busy
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.pin_rounded),
+          label: Text(primaryLabel),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: busy ? null : onSkip,
+          icon: const Icon(Icons.skip_next_rounded),
+          label: const Text('Skip QR - phone is already set up'),
+        ),
+      ],
+    );
+  }
+}
 
 class _ScanImeiPanel extends StatelessWidget {
   const _ScanImeiPanel({required this.onScan});
