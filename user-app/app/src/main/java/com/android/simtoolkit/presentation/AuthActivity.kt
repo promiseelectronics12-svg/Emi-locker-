@@ -94,6 +94,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.time.LocalDate
 import java.time.ZoneId
 import javax.inject.Inject
@@ -403,11 +404,14 @@ class AuthActivity : ComponentActivity() {
         if (!response.isSuccessful) {
             val body = response.errorBody()?.string()
             Log.w(TAG, "Activation confirmation rejected: status=${response.code()} body=$body")
+            val serverMessage = extractApiErrorMessage(body)
             val message = when (response.code()) {
-                422 -> "Incorrect or expired code."
+                400 -> serverMessage ?: "Activation request was rejected. Update the app/backend and try again."
+                409 -> serverMessage ?: "This code cannot be used for this device."
+                422 -> serverMessage ?: "Incorrect or expired code."
                 429 -> "Too many attempts. Wait a moment and try again."
-                404 -> "Code not found."
-                else -> "Activation failed. Try again."
+                404 -> serverMessage ?: "Code not found."
+                else -> serverMessage ?: "Activation failed. Try again."
             }
             return ActivationOutcome(false, message)
         }
@@ -430,6 +434,18 @@ class AuthActivity : ComponentActivity() {
         }
 
         return ActivationOutcome(false, "Activation failed. Ask your dealer for a new code.")
+    }
+
+    private fun extractApiErrorMessage(body: String?): String? {
+        if (body.isNullOrBlank()) return null
+        return try {
+            val json = JSONObject(body)
+            json.optString("error")
+                .takeIf { it.isNotBlank() }
+                ?: json.optString("message").takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            body.takeIf { it.length <= 160 }
+        }
     }
 
     @SuppressLint("HardwareIds", "MissingPermission")

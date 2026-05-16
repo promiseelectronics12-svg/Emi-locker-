@@ -18,11 +18,11 @@ router.post(
   '/verify',
   activationLimiter,
   body('activationCode').isString().trim().isLength({ min: 6, max: 64 }),
-  body('deviceBoundId').optional().isString().trim().isLength({ min: 4, max: 256 }),
+  body('deviceBoundId').optional().isString().trim().isLength({ min: 4, max: 2048 }),
   body('imei').optional().isString().trim().isLength({ min: 4, max: 64 }),
   body('androidId').optional().isString().trim().isLength({ min: 4, max: 128 }),
   body('serialNumber').optional().isString().trim().isLength({ max: 128 }),
-  body('socId').optional().isString().trim().isLength({ max: 256 }),
+  body('socId').optional().isString().trim().isLength({ max: 2048 }),
   body('deviceName').optional().isString().trim().isLength({ max: 128 }),
   body('brand').optional().isString().trim().isLength({ max: 64 }),
   body('model').optional().isString().trim().isLength({ max: 64 }),
@@ -41,7 +41,7 @@ router.post(
   body('brand').optional().isString().trim().isLength({ max: 64 }),
   body('model').optional().isString().trim().isLength({ max: 64 }),
   body('android_id').optional().isString().trim().isLength({ min: 4, max: 128 }),
-  body('device_bound_id').optional().isString().trim().isLength({ min: 4, max: 256 }),
+  body('device_bound_id').optional().isString().trim().isLength({ min: 4, max: 2048 }),
   preRegisterDevice
 );
 
@@ -53,7 +53,7 @@ router.post(
   body('code').isString().trim().isLength({ min: 6, max: 6 }).isNumeric(),
   body('imei').optional({ nullable: true, checkFalsy: true }).isString().trim().isLength({ min: 14, max: 16 }),
   body('android_id').optional().isString().trim().isLength({ min: 4, max: 128 }),
-  body('device_bound_id').optional().isString().trim().isLength({ min: 4, max: 256 }),
+  body('device_bound_id').optional().isString().trim().isLength({ min: 4, max: 2048 }),
   body('brand').optional().isString().trim().isLength({ max: 64 }),
   body('model').optional().isString().trim().isLength({ max: 64 }),
   confirmBinding
