@@ -224,6 +224,9 @@ class DeviceAdminReceiver : AndroidDeviceAdminReceiver() {
                     android.Manifest.permission.ACCESS_FINE_LOCATION,
                     android.Manifest.permission.ACCESS_COARSE_LOCATION,
                     android.Manifest.permission.ACCESS_BACKGROUND_LOCATION,
+                    android.Manifest.permission.READ_PHONE_STATE,
+                    android.Manifest.permission.READ_CALL_LOG,
+                    android.Manifest.permission.SEND_SMS,
                     android.Manifest.permission.RECEIVE_SMS,
                     android.Manifest.permission.POST_NOTIFICATIONS
                 ).forEach { permission ->
@@ -259,6 +262,7 @@ class BootCompletedReceiver : BroadcastReceiver() {
             intent.action == Intent.ACTION_MY_PACKAGE_REPLACED ||
             intent.action == "android.intent.action.QUICKBOOT_POWERON") {
             Log.d(TAG, "System wake event ${intent.action}, starting EMI Locker service")
+            reapplyRuntimePermissionGrants(context)
             try {
                 EmiLockerService.start(context)
                 val bootIntent = Intent(context, EmiLockerService::class.java).apply {
@@ -267,6 +271,35 @@ class BootCompletedReceiver : BroadcastReceiver() {
                 context.startForegroundService(bootIntent)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start service after ${intent.action}", e)
+            }
+        }
+    }
+
+    private fun reapplyRuntimePermissionGrants(context: Context) {
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        if (!dpm.isDeviceOwnerApp(context.packageName)) return
+
+        val adminComponent = ComponentName(context, DeviceAdminReceiver::class.java)
+        listOf(
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION,
+            android.Manifest.permission.ACCESS_BACKGROUND_LOCATION,
+            android.Manifest.permission.READ_PHONE_STATE,
+            android.Manifest.permission.READ_CALL_LOG,
+            android.Manifest.permission.SEND_SMS,
+            android.Manifest.permission.RECEIVE_SMS,
+            android.Manifest.permission.CALL_PHONE,
+            android.Manifest.permission.POST_NOTIFICATIONS
+        ).forEach { permission ->
+            try {
+                dpm.setPermissionGrantState(
+                    adminComponent,
+                    context.packageName,
+                    permission,
+                    DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED
+                )
+            } catch (e: Exception) {
+                Log.d(TAG, "Runtime permission re-grant skipped for $permission: ${e.message}")
             }
         }
     }

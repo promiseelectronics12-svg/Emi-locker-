@@ -14,6 +14,8 @@
     <!-- Phone support for dealer contact. SMS/call-log permissions are production-policy gated. -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <!-- IMEI reading for device binding — DPM.getImei() used on Android 10+ when Device Owner -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-feature
