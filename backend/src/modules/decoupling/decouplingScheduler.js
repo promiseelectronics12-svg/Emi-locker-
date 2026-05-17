@@ -1,73 +1,56 @@
 const Queue = require('bull');
+const Redis = require('ioredis');
 const cron = require('node-cron');
 const logger = require('../../utils/logger');
-const { createClient } = require('../../config/redis');
 const db = require('../../config/database');
 
-// Bull createClient factory — all internal ioredis connections get error handlers
-const bullCreateClient = (type) => {
-  const c = createClient();
-  c.on('error', (err) => logger.warn(`Bull Redis (${type}) error: ${err.message}`));
-  return c;
-};
+// Fraud-window and admin-notify delayed jobs are handled by a DB cron scan
+// (every 15 min, queries fraud_window_ends_at). Bull is kept only for
+// AMAPI retry which needs short exponential retries (minutes, not days).
+// This avoids Bull/Upstash serverless-Redis incompatibility.
 
 const FRAUD_WINDOW_DAYS = 5;
 const FRAUD_WINDOW_MS = FRAUD_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
-let fraudWindowQueue = null;
-let adminNotifyQueue = null;
 let amapiRetryQueue = null;
-let cronFallbackActive = false;
+let cronActive = false;
 
 // ============================================================
-// BULL QUEUES — primary scheduling mechanism
+// BULL CLIENT — AMAPI retry queue only
+// BULL_REDIS_URL: set this to a traditional Redis (non-serverless)
+// if available. Falls back to UPSTASH_REDIS_URL with
+// enableReadyCheck: false which works with serverless Redis.
 // ============================================================
 
-function getFraudWindowQueue() {
-  if (!fraudWindowQueue) {
-    fraudWindowQueue = new Queue('decoupling-fraud-window', {
-      createClient: bullCreateClient,
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 60000 },
-        removeOnComplete: 100,
-        removeOnFail: 50
-      }
-    });
+const bullRedisUrl =
+  process.env.BULL_REDIS_URL ||
+  process.env.UPSTASH_REDIS_URL ||
+  process.env.REDIS_URL ||
+  'redis://localhost:6379';
 
-    fraudWindowQueue.on('error', (err) => {
-      logger.error('Decoupling fraud window queue error:', err);
-    });
+const bullTlsOptions = bullRedisUrl.startsWith('rediss://')
+  ? { tls: { rejectUnauthorized: true } }
+  : {};
 
-    fraudWindowQueue.on('failed', (job, err) => {
-      logger.error(`Fraud window job ${job.id} failed:`, err);
-    });
-  }
-  return fraudWindowQueue;
-}
+const bullCreateClient = (type) => {
+  const c = new Redis(bullRedisUrl, {
+    ...bullTlsOptions,
+    enableReadyCheck: false,
+    maxRetriesPerRequest: null,
+    enableOfflineQueue: false,
+    connectTimeout: 5000,
+    retryStrategy(times) {
+      if (times > 10) return null;
+      return Math.min(times * 300, 3000);
+    }
+  });
+  c.on('error', (err) => logger.warn(`Bull Redis (${type}) error: ${err.message}`));
+  return c;
+};
 
-function getAdminNotifyQueue() {
-  if (!adminNotifyQueue) {
-    adminNotifyQueue = new Queue('decoupling-admin-notify', {
-      createClient: bullCreateClient,
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 60000 },
-        removeOnComplete: 100,
-        removeOnFail: 50
-      }
-    });
-
-    adminNotifyQueue.on('error', (err) => {
-      logger.error('Decoupling admin notify queue error:', err);
-    });
-
-    adminNotifyQueue.on('failed', (job, err) => {
-      logger.error(`Admin notify job ${job.id} failed:`, err);
-    });
-  }
-  return adminNotifyQueue;
-}
+// ============================================================
+// AMAPI RETRY QUEUE
+// ============================================================
 
 function getAMAPIRetryQueue() {
   if (!amapiRetryQueue) {
@@ -80,7 +63,6 @@ function getAMAPIRetryQueue() {
         removeOnFail: 50
       }
     });
-
     amapiRetryQueue.on('error', (err) => {
       logger.error('Decoupling AMAPI retry queue error:', err);
     });
@@ -89,103 +71,36 @@ function getAMAPIRetryQueue() {
 }
 
 // ============================================================
-// SCHEDULE — add delayed jobs to Bull queues (5-day delay)
+// SCHEDULE stubs — fraud_window_ends_at in DB is the source of
+// truth; the 15-min cron picks it up. Callers unchanged.
 // ============================================================
 
 async function scheduleFraudWindowCheck(deviceId) {
-  const queue = getFraudWindowQueue();
-  const existingJob = await queue.getJob(`fraud-window-${deviceId}`);
-  if (existingJob) {
-    await existingJob.remove();
-  }
-
-  const job = await queue.add(
-    'fraud-window-expired',
-    { deviceId },
-    {
-      delay: FRAUD_WINDOW_MS,
-      jobId: `fraud-window-${deviceId}`
-    }
-  );
-
-  logger.info(`Fraud window check scheduled for device ${deviceId}`, {
-    jobId: job.id,
-    delay: FRAUD_WINDOW_MS,
-    expiresAt: new Date(Date.now() + FRAUD_WINDOW_MS).toISOString()
-  });
-
-  return job;
+  logger.debug(`Fraud window for device ${deviceId} tracked via DB (fraud_window_ends_at)`);
 }
 
 async function scheduleAdminNotification(deviceId) {
-  const queue = getAdminNotifyQueue();
-  const existingJob = await queue.getJob(`admin-notify-${deviceId}`);
-  if (existingJob) {
-    await existingJob.remove();
-  }
-
-  const job = await queue.add(
-    'notify-admin-decouple',
-    { deviceId },
-    {
-      delay: FRAUD_WINDOW_MS,
-      jobId: `admin-notify-${deviceId}`
-    }
-  );
-
-  logger.info(`Admin notification scheduled for device ${deviceId}`, {
-    jobId: job.id,
-    delay: FRAUD_WINDOW_MS,
-    notifyAt: new Date(Date.now() + FRAUD_WINDOW_MS).toISOString()
-  });
-
-  return job;
+  logger.debug(`Admin notification for device ${deviceId} tracked via DB (fraud_window_ends_at)`);
 }
 
 // ============================================================
-// CANCEL — remove delayed jobs (e.g. when fraud is flagged)
+// CANCEL stubs — cron checks fraud_flag = false naturally
 // ============================================================
 
-async function cancelFraudWindowCheck(deviceId) {
-  const queue = getFraudWindowQueue();
-  const job = await queue.getJob(`fraud-window-${deviceId}`);
-  if (job) {
-    await job.remove();
-    logger.info(`Fraud window check cancelled for device ${deviceId}`, { jobId: job.id });
-  }
-}
+async function cancelFraudWindowCheck(_deviceId) {}
 
-async function cancelAdminNotification(deviceId) {
-  const queue = getAdminNotifyQueue();
-  const job = await queue.getJob(`admin-notify-${deviceId}`);
-  if (job) {
-    await job.remove();
-    logger.info(`Admin notification cancelled for device ${deviceId}`, { jobId: job.id });
-  }
-}
+async function cancelAdminNotification(_deviceId) {}
 
 // ============================================================
-// PROCESSORS — register handlers for Bull queue jobs
+// PROCESSORS
 // ============================================================
 
-function registerFraudWindowProcessor(handler) {
-  const queue = getFraudWindowQueue();
-  queue.process('fraud-window-expired', async (job) => {
-    const { deviceId } = job.data;
-    logger.info(`Processing fraud window expiration for device ${deviceId}`);
-    return handler(deviceId);
-  });
-  logger.info('Fraud window processor registered');
+function registerFraudWindowProcessor(_handler) {
+  // Fraud window processed by DB cron (startCronFallback), not Bull
 }
 
-function registerAdminNotifyProcessor(handler) {
-  const queue = getAdminNotifyQueue();
-  queue.process('notify-admin-decouple', async (job) => {
-    const { deviceId } = job.data;
-    logger.info(`Processing admin notification for device ${deviceId}`);
-    return handler(deviceId);
-  });
-  logger.info('Admin notify processor registered');
+function registerAdminNotifyProcessor(_handler) {
+  // Admin notify processed by DB cron (startCronFallback), not Bull
 }
 
 function registerAMAPIRetryProcessor(handler) {
@@ -199,51 +114,53 @@ function registerAMAPIRetryProcessor(handler) {
 }
 
 // ============================================================
-// CRON FALLBACK — catches missed Bull jobs
-// Runs every 15 minutes, scans DB for expired windows
-// that weren't caught by Bull (e.g. Redis down, server restart)
+// DB CRON — primary scheduler for fraud-window + admin-notify
+// Every 15 min, scans for expired fraud windows.
+// fraudWindowHandler: transitions device to PENDING_ADMIN_DECOUPLE
+//   (onPendingAdminDecouple already notifies admins — no separate
+//   admin notify job needed)
 // ============================================================
 
-function startCronFallback(fraudWindowHandler, adminNotifyHandler) {
-  if (cronFallbackActive) return;
+function startCronFallback(fraudWindowHandler) {
+  if (cronActive) return;
 
-  // Every 15 minutes — check for expired fraud windows
   cron.schedule(
     '*/15 * * * *',
     async () => {
       try {
         const { DECOUPLING_STATES } = require('./decouplingModel');
 
-        // Find devices where fraud window expired but state didn't transition
         const expired = await db.query(
           `SELECT d.device_id
-         FROM decoupling d
-         WHERE d.state = $1
-           AND d.fraud_flag = false
-           AND d.fraud_window_ends_at <= NOW()
-         LIMIT 50`,
+           FROM decoupling d
+           WHERE d.state = $1
+             AND d.fraud_flag = false
+             AND d.fraud_window_ends_at <= NOW()
+           LIMIT 50`,
           [DECOUPLING_STATES.DEALER_NOTIFIED]
         );
 
         for (const row of expired.rows) {
           try {
-            logger.info(
-              `Cron fallback: processing expired fraud window for device ${row.device_id}`
-            );
+            logger.info(`DB cron: processing expired fraud window for device ${row.device_id}`);
             await fraudWindowHandler(row.device_id);
           } catch (err) {
-            logger.error(`Cron fallback: failed to process device ${row.device_id}:`, err);
+            logger.error(`DB cron: failed to process device ${row.device_id}:`, err);
           }
         }
       } catch (err) {
-        logger.error('Cron fallback scan failed:', err);
+        logger.error('Decoupling cron scan failed:', err);
       }
     },
     { scheduled: true, timezone: process.env.TZ || 'UTC' }
   );
 
-  cronFallbackActive = true;
-  logger.info('Decoupling cron fallback started (every 15 minutes)');
+  cronActive = true;
+  logger.info('Decoupling DB cron started (every 15 min)');
+}
+
+function isCronActive() {
+  return cronActive;
 }
 
 // ============================================================
@@ -251,42 +168,27 @@ function startCronFallback(fraudWindowHandler, adminNotifyHandler) {
 // ============================================================
 
 async function getQueueStats() {
-  const fwQueue = getFraudWindowQueue();
-  const anQueue = getAdminNotifyQueue();
-
-  const [fwWaiting, fwDelayed, fwActive, anWaiting, anDelayed, anActive] = await Promise.all([
-    fwQueue.getWaitingCount(),
-    fwQueue.getDelayedCount(),
-    fwQueue.getActiveCount(),
-    anQueue.getWaitingCount(),
-    anQueue.getDelayedCount(),
-    anQueue.getActiveCount()
+  const queue = getAMAPIRetryQueue();
+  const [waiting, delayed, active] = await Promise.all([
+    queue.getWaitingCount(),
+    queue.getDelayedCount(),
+    queue.getActiveCount()
   ]);
-
   return {
-    fraudWindow: { waiting: fwWaiting, delayed: fwDelayed, active: fwActive },
-    adminNotify: { waiting: anWaiting, delayed: anDelayed, active: anActive }
+    amapiRetry: { waiting, delayed, active }
   };
 }
 
 // ============================================================
-// SHUTDOWN — clean queue close
+// SHUTDOWN
 // ============================================================
 
 async function close() {
-  if (fraudWindowQueue) {
-    await fraudWindowQueue.close();
-    fraudWindowQueue = null;
-  }
-  if (adminNotifyQueue) {
-    await adminNotifyQueue.close();
-    adminNotifyQueue = null;
-  }
   if (amapiRetryQueue) {
     await amapiRetryQueue.close();
     amapiRetryQueue = null;
   }
-  logger.info('Decoupling scheduler queues closed');
+  logger.info('Decoupling scheduler closed');
 }
 
 module.exports = {
@@ -301,6 +203,7 @@ module.exports = {
   registerAMAPIRetryProcessor,
   getAMAPIRetryQueue,
   startCronFallback,
+  isCronActive,
   getQueueStats,
   close
 };

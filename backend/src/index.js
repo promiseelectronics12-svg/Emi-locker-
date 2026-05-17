@@ -33,7 +33,7 @@ const routes = require('./routes');
 // Module Schedulers/Init
 const { lockSchedulerService } = require('./modules/lock');
 const { initLocationModule } = require('./modules/location');
-const { initDecouplingModule } = require('./modules/decoupling');
+const { initDecouplingModule, decouplingScheduler } = require('./modules/decoupling');
 const { initKeyCronJobs } = require('./modules/keys/keyScheduler');
 const { initFraudCronJobs } = require('./modules/fraud');
 
@@ -93,7 +93,6 @@ app.use(
 app.get('/health', async (req, res) => {
   let dbStatus = 'disconnected';
   let redisStatus = 'disconnected';
-
   let dbErrorMsg = null;
 
   try {
@@ -111,6 +110,11 @@ app.get('/health', async (req, res) => {
     logger.error('Health check redis error:', err);
   }
 
+  const schedulers = {
+    decouplingCron: decouplingScheduler.isCronActive(),
+    lockScheduler: lockSchedulerService.started === true
+  };
+
   const isHealthy = dbStatus === 'connected' && redisStatus === 'connected';
 
   res.status(isHealthy ? 200 : 503).json({
@@ -118,7 +122,8 @@ app.get('/health', async (req, res) => {
     timestamp: new Date().toISOString(),
     db: dbStatus,
     db_error: dbErrorMsg,
-    redis: redisStatus
+    redis: redisStatus,
+    schedulers
   });
 });
 
