@@ -4,6 +4,8 @@ const db = require('../../config/database');
 const { formatSchedule } = require('../enrollment/enrollmentService');
 const sseService = require('../sse/sseService');
 const logger = require('../../utils/logger');
+const { getActiveAssignment } = require('../assignments/assignmentService');
+const deviceProfileService = require('../profile/deviceProfileService');
 
 const router = express.Router();
 
@@ -300,7 +302,7 @@ router.post('/heartbeat', validateDeviceToken, async (req, res) => {
     const previous = await db.query(
       `SELECT d.id, d.dealer_id, d.device_name, d.imei, d.status, d.lock_level, d.lock_reason,
               d.last_seen_at, d.device_health_status, d.last_heartbeat_source,
-              d.registered_phone,
+              d.registered_phone, d.sim_missing_since, d.locked_at,
               dl.name AS dealer_name,
               COALESCE(NULLIF(d.dealer_phone, ''), dl.phone) AS dealer_phone
        FROM devices d
@@ -312,45 +314,69 @@ router.post('/heartbeat', validateDeviceToken, async (req, res) => {
     const previousDevice = previous.rows[0] || null;
     const previousConnectionStatus = connectionStatusFromLastSeen(previousDevice?.last_seen_at);
 
-    // SIM change detection
-    if (
-      reportedSimPhone &&
-      previousDevice?.registered_phone &&
-      reportedSimPhone !== previousDevice.registered_phone
-    ) {
-      await db.query(
-        `INSERT INTO sim_events (device_id, event_type, old_sim_hash, new_sim_hash, location_lat, location_lon)
-         VALUES ($1, 'SIM_CHANGED', $2, $3, $4, $5)`,
-        [
-          req.deviceAuth.sub,
-          previousDevice.registered_phone,
-          reportedSimPhone,
-          hasLocation ? reportedLat : null,
-          hasLocation ? reportedLng : null
-        ]
-      );
-      await db.query(
-        `INSERT INTO device_history (device_id, event_type, actor_type, details)
-         VALUES ($1, 'SIM_CHANGED', 'device', $2)`,
-        [
-          req.deviceAuth.sub,
-          JSON.stringify({ old_phone: previousDevice.registered_phone, new_phone: reportedSimPhone })
-        ]
-      );
-      if (previousDevice.dealer_id) {
-        safeSse('pushToDealer', [
-          previousDevice.dealer_id,
-          'sim_changed',
-          {
-            deviceId: req.deviceAuth.sub,
-            deviceName: previousDevice.device_name,
-            imei: previousDevice.imei,
-            oldPhone: previousDevice.registered_phone,
-            newPhone: reportedSimPhone
-          }
-        ]);
+    // SIM change / absence detection
+    const deviceId = req.deviceAuth.sub;
+    const assignmentId = await getActiveAssignment(deviceId);
+
+    if (previousDevice?.registered_phone) {
+      if (!reportedSimPhone) {
+        // SIM absent — start or maintain the missing timer
+        if (!previousDevice.sim_missing_since) {
+          await db.query(
+            `UPDATE devices SET sim_missing_since = NOW(), updated_at = NOW() WHERE id = $1`,
+            [deviceId]
+          );
+        }
+      } else if (reportedSimPhone === previousDevice.registered_phone) {
+        // Bound SIM restored — clear the missing timer
+        if (previousDevice.sim_missing_since) {
+          await db.query(
+            `UPDATE devices SET sim_missing_since = NULL, updated_at = NOW() WHERE id = $1`,
+            [deviceId]
+          );
+        }
+      } else {
+        // Wrong SIM — bound SIM is still absent; start or maintain the missing timer
+        if (!previousDevice.sim_missing_since) {
+          await db.query(
+            `UPDATE devices SET sim_missing_since = NOW(), updated_at = NOW() WHERE id = $1`,
+            [deviceId]
+          );
+        }
+        // Record the SIM change event
+        await db.query(
+          `INSERT INTO sim_events (device_id, assignment_id, event_type, old_sim_hash, new_sim_hash, location_lat, location_lon)
+           VALUES ($1, $2, 'SIM_CHANGED', $3, $4, $5, $6)`,
+          [
+            deviceId, assignmentId,
+            previousDevice.registered_phone, reportedSimPhone,
+            hasLocation ? reportedLat : null,
+            hasLocation ? reportedLng : null
+          ]
+        );
+        await db.query(
+          `INSERT INTO device_history (device_id, assignment_id, event_type, actor_type, permanent, details)
+           VALUES ($1, $2, 'SIM_CHANGED', 'device', true, $3)`,
+          [
+            deviceId, assignmentId,
+            JSON.stringify({ old_phone: previousDevice.registered_phone, new_phone: reportedSimPhone })
+          ]
+        );
+        if (previousDevice.dealer_id) {
+          safeSse('pushToDealer', [
+            previousDevice.dealer_id,
+            'sim_changed',
+            {
+              deviceId,
+              deviceName: previousDevice.device_name,
+              imei: previousDevice.imei,
+              oldPhone: previousDevice.registered_phone,
+              newPhone: reportedSimPhone
+            }
+          ]);
+        }
+        logger.info('SIM change detected on heartbeat', { deviceId });
       }
-      logger.info('SIM change detected on heartbeat', { deviceId: req.deviceAuth.sub });
     }
 
     // Location capture — store only if moved >100m from last known point
@@ -367,12 +393,11 @@ router.post('/heartbeat', validateDeviceToken, async (req, res) => {
       if (shouldStore) {
         await db.query(
           `INSERT INTO location_reports
-             (device_id, latitude, longitude, accuracy, timestamp, recorded_at, source)
-           VALUES ($1, $2, $3, $4, NOW(), NOW(), 'gps')`,
+             (device_id, assignment_id, latitude, longitude, accuracy, timestamp, recorded_at, source)
+           VALUES ($1, $2, $3, $4, $5, NOW(), NOW(), 'gps')`,
           [
-            req.deviceAuth.sub,
-            reportedLat,
-            reportedLng,
+            deviceId, assignmentId,
+            reportedLat, reportedLng,
             Number.isFinite(reportedAccuracy) ? reportedAccuracy : null
           ]
         );
@@ -474,11 +499,41 @@ router.post('/heartbeat', validateDeviceToken, async (req, res) => {
       }
     }
 
+    // Pending command fallback — catches missed FCM deliveries
+    let pendingCommand = null;
+    const currentStatus = lockStateDevice?.status || previousDevice?.status;
+    if (currentStatus === 'pending_lock') {
+      pendingCommand = {
+        type: 'LOCK',
+        lockLevel: lockStateDevice?.lock_level || 'FULL',
+        issuedAt: lockStateDevice?.locked_at || previousDevice?.locked_at
+      };
+    } else if (currentStatus === 'pending_unlock') {
+      pendingCommand = { type: 'UNLOCK', issuedAt: previousDevice?.updated_at };
+    } else if (currentStatus === 'pending_decouple') {
+      pendingCommand = { type: 'DECOUPLE', issuedAt: previousDevice?.updated_at };
+    }
+
+    // Fetch monitoring mode so user app can adapt heartbeat interval
+    let currentMode = 'subconscious';
+    try {
+      const profile = await deviceProfileService.getOrCreate(deviceId);
+      currentMode = profile.current_mode;
+      // Auto-expire learning mode
+      if (currentMode === 'learning' && profile.learning_mode_ends_at &&
+          new Date(profile.learning_mode_ends_at) < new Date()) {
+        await deviceProfileService.updateMode(deviceId, 'subconscious');
+        currentMode = 'subconscious';
+      }
+    } catch (_) {}
+
     return res.json({
       success: true,
       server_time: new Date().toISOString(),
       dealer_name: previousDevice?.dealer_name || null,
-      dealer_phone: previousDevice?.dealer_phone || null
+      dealer_phone: previousDevice?.dealer_phone || null,
+      pending_command: pendingCommand,
+      current_mode: currentMode
     });
   } catch (error) {
     logger.error('Device heartbeat failed', { error: error.message });
@@ -574,10 +629,11 @@ router.post('/sms-heartbeat', async (req, res) => {
       }
     }
 
+    const smsAssignmentId = await getActiveAssignment(device.id);
     await db.query(
-      `INSERT INTO device_history (device_id, event_type, actor_type, details)
-       VALUES ($1, 'SMS_HEARTBEAT_RECEIVED', 'device', $2)`,
-      [device.id, JSON.stringify({ sequence: payload.sequence, has_location: hasLoc })]
+      `INSERT INTO device_history (device_id, assignment_id, event_type, actor_type, details)
+       VALUES ($1, $2, 'SMS_HEARTBEAT_RECEIVED', 'device', $3)`,
+      [device.id, smsAssignmentId, JSON.stringify({ sequence: payload.sequence, has_location: hasLoc })]
     );
 
     safeSse('pushToDealer', [device.dealer_id, 'sms_heartbeat', {
@@ -604,10 +660,11 @@ router.post('/call-event', validateDeviceToken, async (req, res) => {
       eventType === 'DECLINED' ? 'CALL_DECLINED' :
       eventType === 'ANSWERED' ? 'CALL_ANSWERED' : 'CALL_MISSED';
 
+    const callAssignmentId = await getActiveAssignment(req.deviceAuth.sub);
     await db.query(
-      `INSERT INTO device_history (device_id, event_type, actor_type, details)
-       VALUES ($1, $2, 'device', $3)`,
-      [req.deviceAuth.sub, historyType, JSON.stringify({ timestamp: req.body?.timestamp })]
+      `INSERT INTO device_history (device_id, assignment_id, event_type, actor_type, details)
+       VALUES ($1, $2, $3, 'device', $4)`,
+      [req.deviceAuth.sub, callAssignmentId, historyType, JSON.stringify({ timestamp: req.body?.timestamp })]
     );
 
     // Count consecutive declines since last answered call
@@ -633,9 +690,9 @@ router.post('/call-event', validateDeviceToken, async (req, res) => {
         const d = deviceRow.rows[0];
         if (d) {
           await db.query(
-            `INSERT INTO device_history (device_id, event_type, actor_type, details)
-             VALUES ($1, 'FRAUD_SUSPECTED', 'system', $2)`,
-            [req.deviceAuth.sub, JSON.stringify({ reason: 'call_decline_threshold', count: consecutiveDeclines })]
+            `INSERT INTO device_history (device_id, assignment_id, event_type, actor_type, details)
+             VALUES ($1, $2, 'FRAUD_SUSPECTED', 'system', $3)`,
+            [req.deviceAuth.sub, callAssignmentId, JSON.stringify({ reason: 'call_decline_threshold', count: consecutiveDeclines })]
           );
           await db.query(
             `UPDATE devices SET status = 'fraud_suspected', updated_at = NOW() WHERE id = $1

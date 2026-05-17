@@ -37,7 +37,7 @@ router.post(
   authenticateToken,
   requireRole('dealer'),
   body('customer_name').isString().trim().isLength({ min: 2, max: 128 }),
-  body('nid_hash').isString().trim().isLength({ min: 64, max: 64 }),
+  body('nid').isString().trim().isLength({ min: 5, max: 50 }).withMessage('NID must be 5–50 characters'),
   body('phone_number').isString().trim().isLength({ min: 7, max: 20 }),
   body('brand').optional({ nullable: true, checkFalsy: true }).isString().trim().isLength({ min: 1, max: 64 }),
   body('model').optional({ nullable: true, checkFalsy: true }).isString().trim().isLength({ min: 1, max: 64 }),

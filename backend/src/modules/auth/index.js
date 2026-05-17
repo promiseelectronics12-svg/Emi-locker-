@@ -719,6 +719,11 @@ async function registerRole(req, res, role) {
   const normalizedEmail = email.toLowerCase().trim();
   const normalizedPhone = phone.trim();
 
+  // Invite role must match the registration endpoint role
+  if (req.validatedInvite && req.validatedInvite.role !== role) {
+    return errorResponse(res, 403, 'INVITE_ROLE_MISMATCH', 'Invite is not valid for this registration type.');
+  }
+
   const existingUser = await db.query(
     'SELECT id FROM users WHERE email = $1 OR phone = $2',
     [normalizedEmail, normalizedPhone]
@@ -762,7 +767,8 @@ async function registerRole(req, res, role) {
 
     if (role === ROLES.DEALER) {
       let resellerId = null;
-      const code = resellerCode || resellerCodeLegacy;
+      // Invite reseller_id takes precedence over user-supplied code
+      const code = req.validatedInvite?.reseller_id || resellerCode || resellerCodeLegacy;
       if (code) {
         const resellerResult = await client.query(
           `SELECT id FROM resellers
@@ -790,6 +796,20 @@ async function registerRole(req, res, role) {
           tradeLicense || tradeLicenseLegacy || null
         ]
       );
+    }
+
+    // Consume invite token atomically — guard against duplicate registrations
+    if (req.validatedInvite) {
+      const consumed = await client.query(
+        `UPDATE dealer_invites
+         SET used_at = NOW(), used_by = $2
+         WHERE id = $1 AND used_at IS NULL AND expires_at > NOW()
+         RETURNING id`,
+        [req.validatedInvite.id, user.id]
+      );
+      if (!consumed.rows.length) {
+        throw Object.assign(new Error('Invite already used or expired.'), { statusCode: 403 });
+      }
     }
 
     const accessToken = generateAccessToken(user);

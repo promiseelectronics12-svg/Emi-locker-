@@ -4,6 +4,7 @@ const logger = require('../../utils/logger');
 const lockDeliveryService = require('./lockDeliveryService');
 const lockCommandService = require('./lockCommandService');
 const sseService = require('../sse/sseService');
+const { getActiveAssignment } = require('../assignments/assignmentService');
 
 const LOCK_LEVELS = {
   NONE: 'NONE',
@@ -229,10 +230,11 @@ class LockSchedulerService {
     );
 
     try {
+      const lockAssignmentId = await getActiveAssignment(deviceId);
       await db.query(
-        `INSERT INTO device_history (device_id, event_type, actor_type, details)
-         VALUES ($1, 'LOCKED', 'system', $2)`,
-        [deviceId, JSON.stringify({ lock_level: lockLevel, reason })]
+        `INSERT INTO device_history (device_id, assignment_id, event_type, actor_type, details)
+         VALUES ($1, $2, 'LOCKED', 'system', $3)`,
+        [deviceId, lockAssignmentId, JSON.stringify({ lock_level: lockLevel, reason })]
       );
     } catch (e) {
       logger.warn('device_history write failed on auto-lock', { deviceId, error: e.message });
@@ -344,10 +346,11 @@ class LockSchedulerService {
               ]
             );
 
+            const graceAssignmentId = await getActiveAssignment(device.id);
             await client.query(
-              `INSERT INTO device_history (device_id, event_type, actor_type, details)
-               VALUES ($1, 'GRACE_EXPIRED', 'system', $2)`,
-              [device.id, JSON.stringify({ lock_level: 'FULL' })]
+              `INSERT INTO device_history (device_id, assignment_id, event_type, actor_type, details)
+               VALUES ($1, $2, 'GRACE_EXPIRED', 'system', $3)`,
+              [device.id, graceAssignmentId, JSON.stringify({ lock_level: 'FULL' })]
             );
 
             await client.query('COMMIT');

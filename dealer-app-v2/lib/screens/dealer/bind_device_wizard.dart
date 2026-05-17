@@ -142,6 +142,9 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   String? _error;
   bool _done = false;
 
+  // Fallback step shown only when dealer explicitly requests it
+  bool _showFallback = false;
+
   @override
   void initState() {
     super.initState();
@@ -504,6 +507,15 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   int get _evidenceStep => 5;
   int get _fallbackStep => widget.requireEvidence ? 6 : 5;
   int get _reviewStep => widget.requireEvidence ? 7 : 6;
+  int get _displayTotalSteps => _totalSteps - (_showFallback ? 0 : 1);
+
+  int _displayStep(int absoluteStep) {
+    final oneBased = absoluteStep + 1;
+    if (!_showFallback && absoluteStep > _fallbackStep) {
+      return oneBased - 1;
+    }
+    return oneBased;
+  }
 
   Future<void> _openVaultSetup() async {
     await Navigator.push(
@@ -625,15 +637,15 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
 
   Future<void> _createEnrollment() async {
     if (_enrollmentToken != null && _enrollmentId != null) return;
+    if (_enrollBusy) return;
     setState(() {
       _enrollBusy = true;
       _error = null;
     });
     try {
-      final nidHash = _sha256(_nidController.text.trim());
       final body = <String, dynamic>{
         'customer_name': _nameController.text.trim(),
-        'nid_hash': nidHash,
+        'nid': _nidController.text.trim(),
         'phone_number': _phoneController.text.trim(),
         'tier': _selectedTier,
       };
@@ -659,21 +671,6 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       if (mounted) setState(() => _error = readableError(e));
     } finally {
       if (mounted) setState(() => _enrollBusy = false);
-    }
-  }
-
-  Future<void> _goToCodeStep() async {
-    if (_enrollBusy) return;
-    final validation = _validateStep1();
-    if (validation != null) {
-      _next(validation);
-      return;
-    }
-
-    await _createEnrollment();
-    if (!mounted) return;
-    if (_enrollmentToken != null && _enrollmentToken!.isNotEmpty) {
-      setState(() => _step = _codeStep);
     }
   }
 
@@ -711,7 +708,11 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       if (mounted) {
         setState(() {
           if (nextDeviceId.isNotEmpty) _deviceId = nextDeviceId;
-          _step = widget.requireEvidence ? _evidenceStep : _fallbackStep;
+          if (widget.requireEvidence) {
+            _step = _evidenceStep;
+          } else {
+            _step = _showFallback ? _fallbackStep : _reviewStep;
+          }
         });
       }
     } catch (e) {
@@ -801,6 +802,7 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       _enrollmentToken = null;
       _error = null;
       _done = false;
+      _showFallback = false;
     });
     _loadInventory();
   }
@@ -856,7 +858,10 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       body: SafeArea(
         child: Column(
           children: [
-            _StepDots(current: _step, total: _totalSteps),
+            _StepDots(
+              current: _displayStep(_step) - 1,
+              total: _displayTotalSteps,
+            ),
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
@@ -870,6 +875,8 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   }
 
   Widget _buildStep() {
+    if (_done) return _buildSuccess();
+
     switch (_step) {
       case 0:
         return _buildStep0();
@@ -927,8 +934,8 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: 1,
-          total: _totalSteps,
+          step: _displayStep(0),
+          total: _displayTotalSteps,
           title: 'Select key type',
           subtitle: 'Choose which key tier to use for this enrollment.',
         ),
@@ -1032,8 +1039,8 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: 2,
-          total: _totalSteps,
+          step: _displayStep(1),
+          total: _displayTotalSteps,
           title: 'Customer information',
           subtitle: 'Enter the NID to check credit history first.',
         ),
@@ -1088,16 +1095,17 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
         ),
         const SizedBox(height: 24),
         FilledButton(
-          onPressed: () {
-            final validation = _validateStep1();
-            if (validation != null) {
-              _next(validation);
-              return;
-            }
-            setState(() => _step = _qrStep);
-            _fetchQr();
-            _createEnrollment();
-          },
+          onPressed: _enrollBusy
+              ? null
+              : () async {
+                  final validation = _validateStep1();
+                  if (validation != null) {
+                    _next(validation);
+                    return;
+                  }
+                  setState(() => _step = _qrStep);
+                  await Future.wait([_fetchQr(), _createEnrollment()]);
+                },
           child: const Text('Next - Enrollment QR'),
         ),
       ],
@@ -1111,8 +1119,8 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: _fallbackStep + 1,
-          total: _totalSteps,
+          step: _displayStep(_fallbackStep),
+          total: _displayTotalSteps,
           title: 'Device fallback',
           subtitle:
               'Optional. Use this only if the user app could not read IMEI, brand, or model after owner setup.',
@@ -1191,8 +1199,8 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: _emiStep + 1,
-          total: _totalSteps,
+          step: _displayStep(_emiStep),
+          total: _displayTotalSteps,
           title: 'EMI terms',
           subtitle: 'Capture the exact payment plan before binding the phone.',
         ),
@@ -1415,8 +1423,8 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: _evidenceStep + 1,
-          total: _totalSteps,
+          step: _displayStep(_evidenceStep),
+          total: _displayTotalSteps,
           title: 'Evidence vault',
           subtitle:
               'Capture customer evidence and back it up encrypted to the dealer Google account.',
@@ -1518,14 +1526,14 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
                       deviceId: deviceId,
                       nidHash: _sha256(_nidController.text.trim()),
                     );
-                    if (mounted) setState(() => _step = _fallbackStep);
+                    if (mounted) setState(() => _step = _showFallback ? _fallbackStep : _reviewStep);
                   } catch (e) {
                     if (mounted) setState(() => _error = readableError(e));
                   } finally {
                     if (mounted) setState(() => _enrollBusy = false);
                   }
                 },
-          child: Text(_enrollBusy ? 'Saving...' : 'Next - Device fallback'),
+          child: Text(_enrollBusy ? 'Saving...' : _showFallback ? 'Next - Device fallback' : 'Next - Review'),
         ),
       ],
     );
@@ -1535,13 +1543,16 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
     final tier = text(_creditProfile?['tier']);
     final imei2 = _imei2Controller.text.trim();
     final calculation = _calculateEmi();
+    final hasFallbackData = _brandController.text.trim().isNotEmpty ||
+        _modelController.text.trim().isNotEmpty ||
+        _imei1Controller.text.trim().isNotEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: _reviewStep + 1,
-          total: _totalSteps,
+          step: _displayStep(_reviewStep),
+          total: _displayTotalSteps,
           title: 'Review enrollment',
           subtitle:
               'Check everything carefully. Tap Edit to go back and fix a mistake.',
@@ -1557,17 +1568,51 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
             _ReviewRow('Phone', _phoneController.text.trim()),
           ],
         ),
-        const SizedBox(height: 12),
-        _ReviewSection(
-          title: 'Device fallback',
-          onEdit: () => setState(() => _step = _fallbackStep),
-          children: [
-            _ReviewRow('Brand', _brandController.text.trim()),
-            _ReviewRow('Model', _modelController.text.trim()),
-            _ReviewRow('IMEI 1', _imei1Controller.text.trim()),
-            _ReviewRow('IMEI 2', imei2.isEmpty ? '—' : imei2),
-          ],
-        ),
+        if (hasFallbackData) ...[
+          const SizedBox(height: 12),
+          _ReviewSection(
+            title: 'Device details',
+            onEdit: () => setState(() => _step = _fallbackStep),
+            children: [
+              _ReviewRow('Brand', _brandController.text.trim()),
+              _ReviewRow('Model', _modelController.text.trim()),
+              _ReviewRow('IMEI 1', _imei1Controller.text.trim()),
+              if (imei2.isNotEmpty) _ReviewRow('IMEI 2', imei2),
+            ],
+          ),
+        ] else ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppTone.page,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.phone_android_outlined, size: 16, color: AppTone.muted),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Device info will be captured automatically by the user app.',
+                    style: TextStyle(fontSize: 12, color: AppTone.muted),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => setState(() {
+                    _showFallback = true;
+                    _step = _fallbackStep;
+                  }),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    foregroundColor: AppTone.muted,
+                  ),
+                  child: const Text('Enter manually', style: TextStyle(fontSize: 12)),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
         _ReviewSection(
           title: 'EMI terms',
@@ -1654,103 +1699,102 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   // ── Step 4: QR provisioning (Device Owner — new factory-reset phones) ────
 
   Widget _buildStep5Qr() {
-    final codeActionLabel = _enrollBusy
-        ? 'Generating code...'
-        : 'Next - Enter 6-digit code';
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: _qrStep + 1,
-          total: _totalSteps,
+          step: _displayStep(_qrStep),
+          total: _displayTotalSteps,
           title: 'Device Owner setup',
-          subtitle:
-              'For a brand new phone — scan this QR during Android setup.',
+          subtitle: 'For a brand new phone — scan this QR during Android setup.',
         ),
-        const SizedBox(height: 16),
-        _QrStepActions(
-          busy: _enrollBusy,
-          primaryLabel: codeActionLabel,
-          onCode: _goToCodeStep,
-          onSkip: _goToCodeStep,
-        ),
+        const SizedBox(height: 20),
+
+        // ── QR hero ──────────────────────────────────────────────────────────
+        if (_qrBusy)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 36),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (_qrValue != null && _qrValue!.isNotEmpty) ...[
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppTone.line),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTone.brand.withValues(alpha: 0.08),
+                    blurRadius: 20,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: QrImageView(
+                data: _qrValue!,
+                version: QrVersions.auto,
+                size: 200,
+                backgroundColor: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // Compact step hints
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppTone.page,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.info_outline, size: 15, color: AppTone.muted),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Power on → tap Welcome screen 6× → camera scans QR → Device Owner installs automatically',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppTone.muted,
+                      height: 1.45,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ] else ...[
+          // QR unavailable / failed
+          InlineNotice(
+            message: _qrError == null
+                ? 'QR setup not available. Use the 6-digit code on the next screen.'
+                : 'QR failed: $_qrError. Use the code on the next screen or retry.',
+            tone: AppTone.warning,
+            icon: Icons.warning_amber_rounded,
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: _qrBusy ? null : _fetchQr,
+            icon: const Icon(Icons.refresh_rounded, size: 16),
+            label: const Text('Retry QR'),
+          ),
+        ],
+
         if (_error != null) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           InlineNotice(
             message: _error!,
             tone: AppTone.danger,
             icon: Icons.error_outline,
           ),
         ],
-        const SizedBox(height: 20),
-        if (_qrBusy)
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(40),
-              child: CircularProgressIndicator(),
-            ),
-          )
-        else if (_qrValue != null && _qrValue!.isNotEmpty) ...[
-          Center(
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTone.line),
-              ),
-              child: QrImageView(
-                data: _qrValue!,
-                version: QrVersions.auto,
-                size: 220,
-                backgroundColor: Colors.white,
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppTone.page,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'For brand new phones:',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: AppTone.ink,
-                    fontSize: 13,
-                  ),
-                ),
-                SizedBox(height: 8),
-                _Step('1', 'Power on the new phone'),
-                _Step('2', 'On the Welcome screen — tap 6 times quickly'),
-                _Step('3', 'Camera appears — scan this QR code'),
-                _Step('4', 'Phone sets up automatically with Device Owner'),
-                _Step('5', 'SIM Toolkit installs by itself'),
-              ],
-            ),
-          ),
-        ] else ...[
-          InlineNotice(
-            message: _qrError == null
-                ? 'QR setup not available. Use the 6-digit code on the next screen instead.'
-                : 'QR setup failed: $_qrError. Use the 6-digit code on the next screen or retry QR setup.',
-            tone: AppTone.warning,
-            icon: Icons.warning_amber_rounded,
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: _qrBusy ? null : _fetchQr,
-            icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Retry QR setup'),
-          ),
-        ],
+
         const SizedBox(height: 24),
+
+        // ── Bottom CTAs ───────────────────────────────────────────────────────
         FilledButton(
           onPressed: _enrollBusy
               ? null
@@ -1760,7 +1804,23 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
                     setState(() => _step = _codeStep);
                   }
                 },
-          child: const Text('Next — Enter code on device'),
+          child: _enrollBusy
+              ? const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    ),
+                    SizedBox(width: 10),
+                    Text('Generating code…'),
+                  ],
+                )
+              : const Text('Next — Enter code on device'),
         ),
         const SizedBox(height: 8),
         TextButton(
@@ -1781,14 +1841,12 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
   // ── Step 5: Show 6-digit code to dealer ──────────────────────────────────
 
   Widget _buildStep6Code() {
-    if (_done) return _buildSuccess();
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WizardHeader(
-          step: _codeStep + 1,
-          total: _totalSteps,
+          step: _displayStep(_codeStep),
+          total: _displayTotalSteps,
           title: 'Enter code on device',
           subtitle:
               'Type this code into the SIM Toolkit app on the customer\'s phone.',
@@ -1962,20 +2020,53 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
             ),
             const SizedBox(height: 12),
           ],
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppTone.page,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Row(
+              children: [
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Waiting for phone to confirm the code…',
+                    style: TextStyle(color: AppTone.muted, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
           FilledButton(
             onPressed: () => setState(() => _step = _emiStep),
-            child: const Text('Next - EMI details'),
+            child: const Text('Already entered — Continue'),
+          ),
+          const SizedBox(height: 4),
+          TextButton.icon(
+            onPressed: () => setState(() => _showFallback = true),
+            icon: const Icon(Icons.edit_outlined, size: 15),
+            label: const Text('Phone couldn\'t capture device info — enter manually'),
+            style: TextButton.styleFrom(foregroundColor: AppTone.muted),
           ),
           const SizedBox(height: 8),
           OutlinedButton(
-            onPressed: () {
-              setState(() {
-                _enrollmentId = null;
-                _deviceId = null;
-                _enrollmentToken = null;
-              });
-              _createEnrollment();
-            },
+            onPressed: _enrollBusy
+                ? null
+                : () async {
+                    setState(() {
+                      _enrollmentId = null;
+                      _deviceId = null;
+                      _enrollmentToken = null;
+                    });
+                    await _createEnrollment();
+                  },
             child: const Text('Generate new code'),
           ),
         ] else if (_error != null) ...[
@@ -2163,46 +2254,6 @@ class _BindDeviceWizardState extends State<BindDeviceWizard> {
 }
 
 // ── Supporting widgets ────────────────────────────────────────────────────
-
-class _QrStepActions extends StatelessWidget {
-  const _QrStepActions({
-    required this.busy,
-    required this.primaryLabel,
-    required this.onCode,
-    required this.onSkip,
-  });
-
-  final bool busy;
-  final String primaryLabel;
-  final VoidCallback onCode;
-  final VoidCallback onSkip;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        FilledButton.icon(
-          onPressed: busy ? null : onCode,
-          icon: busy
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.pin_rounded),
-          label: Text(primaryLabel),
-        ),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-          onPressed: busy ? null : onSkip,
-          icon: const Icon(Icons.skip_next_rounded),
-          label: const Text('Skip QR - phone is already set up'),
-        ),
-      ],
-    );
-  }
-}
 
 class _ScanImeiPanel extends StatelessWidget {
   const _ScanImeiPanel({required this.onScan});

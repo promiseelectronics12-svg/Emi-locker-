@@ -17,6 +17,7 @@ router.use('/reseller', require('./reseller'));
 router.use('/dealers', require('./dealers'));
 
 router.use('/admin', adminRoutes);
+router.use('/admin/invites', require('./invites'));
 router.use('/notifications', require('../modules/notifications/notification.routes'));
 router.use('/alerts', require('./alerts'));
 router.use('/keys', require('../modules/keys/keyRoutes'));

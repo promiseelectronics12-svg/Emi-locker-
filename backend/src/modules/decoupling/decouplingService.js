@@ -4,6 +4,7 @@ const logger = require('../../utils/logger');
 const decouplingModel = require('./decouplingModel');
 const { DECOUPLING_STATES, VALID_TRANSITIONS } = require('./decouplingModel');
 const scheduler = require('./decouplingScheduler');
+const assignmentService = require('../assignments/assignmentService');
 const firebaseService = require('../devices/firebaseService');
 const amapiService = require('../devices/amapiService');
 const lockCommandService = require('../lock/lockCommandService');
@@ -214,19 +215,16 @@ class DecouplingService {
   }
 
   async onDeviceDecoupled(deviceId, actorId) {
-    // Mark device as decoupled
     await db.query(
       `UPDATE devices SET status = 'decoupled', updated_at = NOW() WHERE id = $1`,
       [deviceId]
     );
 
-    // Complete EMI schedule
     await db.query(
       `UPDATE emi_schedules SET status = 'completed', updated_at = NOW() WHERE device_id = $1 AND status = 'active'`,
       [deviceId]
     );
 
-    // Clear sensitive tokens
     await db.query(
       `UPDATE decoupling
        SET rtoc_code_hash = NULL,
@@ -236,6 +234,9 @@ class DecouplingService {
        WHERE device_id = $1`,
       [deviceId]
     );
+
+    // Close the ownership assignment — device is now unowned
+    await assignmentService.closeAssignment(deviceId, 'decoupled');
 
     logger.info(`Device ${deviceId} marked as decoupled in database`);
   }

@@ -4,6 +4,8 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('../../config/database');
 const logger = require('../../utils/logger');
 const { emitEnrollmentComplete } = require('../sse/sseService');
+const assignmentService = require('../assignments/assignmentService');
+const { hashNid, normalizeNid } = require('../../utils/nidUtils');
 
 function createDeviceToken({ deviceId, dealerId, resellerId }) {
   const secret = process.env.DEVICE_TOKEN_SECRET;
@@ -225,7 +227,7 @@ async function resolveDealerIdentity(dealerId, client = db) {
 async function startEnrollment({
   dealerId,
   customer_name,
-  nid_hash,
+  nid,
   phone_number,
   brand,
   model,
@@ -310,19 +312,33 @@ async function startEnrollment({
   const enrollmentId = uuidv4();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
+  // Compute both hashes from raw NID
+  // nid_hash: plain SHA-256 for legacy compat (version 1 behavior retained)
+  // nidHmac: HMAC-SHA256 keyed with NID_PLATFORM_SECRET (version 2)
+  const normalizedNid = normalizeNid(nid);
+  const nid_hash = normalizedNid
+    ? crypto.createHash('sha256').update(normalizedNid).digest('hex')
+    : null;
+  let nidHmac = null;
+  try {
+    if (normalizedNid) nidHmac = hashNid(normalizedNid);
+  } catch (_) {}
+
   await db.query(
     `INSERT INTO enrollments
-       (id, device_id, dealer_id, customer_name, nid_hash, phone_number,
-        brand, model, imei1, imei2, token_hash, tier,
+       (id, device_id, dealer_id, customer_name, nid_hash, nid_hmac, nid_hash_version,
+        phone_number, brand, model, imei1, imei2, token_hash, tier,
         total_amount, down_payment, emi_amount, duration, start_date, grace_days,
         status, expires_at, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pending',$19,NOW())`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,'pending',$21,NOW())`,
     [
       enrollmentId,
       device.id,
       dealerIdentity.dealerRecordId,
       customer_name,
       nid_hash,
+      nidHmac,
+      nidHmac ? 2 : 1,
       phone_number,
       brand || null,
       model || null,
@@ -809,12 +825,36 @@ async function confirmFromDevice({ code, imei, androidId, deviceBoundId, brand, 
       });
     }
 
+    // Create ownership assignment record for this enrollment period
+    const assignmentId = await assignmentService.createAssignment(
+      committedEnrollment.dev_id,
+      {
+        customerId: customer.id,
+        dealerId: committedDealerIdentity.dealerRecordId,
+        emiScheduleId: createdSchedule?.id ?? null
+      },
+      client
+    );
+
+    // Create device behavior profile (learning mode for first 30 days)
+    await client.query(
+      `INSERT INTO device_profiles (device_id, current_mode, learning_mode_ends_at)
+       VALUES ($1, 'learning', NOW() + INTERVAL '30 days')
+       ON CONFLICT (device_id) DO UPDATE
+         SET current_mode = 'learning',
+             learning_mode_ends_at = NOW() + INTERVAL '30 days',
+             updated_at = NOW()`,
+      [committedEnrollment.dev_id]
+    );
+
     try {
       await client.query(
-        `INSERT INTO device_history (device_id, event_type, actor_type, details)
-         VALUES ($1, 'ENROLLED', 'system', $2)`,
+        `INSERT INTO device_history
+           (device_id, assignment_id, event_type, actor_type, permanent, details)
+         VALUES ($1, $2, 'ENROLLED', 'system', true, $3)`,
         [
           committedEnrollment.dev_id,
+          assignmentId,
           JSON.stringify({ enrollment_id: committedEnrollment.id })
         ]
       );

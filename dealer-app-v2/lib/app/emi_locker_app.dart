@@ -32,7 +32,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -4571,7 +4570,7 @@ class DeviceTile extends StatelessWidget {
           device: device,
           onDeviceChanged: onDeviceChanged,
         ),
-      ),
+      ).then((_) => onDeviceChanged?.call()),
     );
   }
 }
@@ -4884,7 +4883,7 @@ class _StatusFilterChips extends StatelessWidget {
   }
 }
 
-class DeviceActions extends StatelessWidget {
+class DeviceActions extends StatefulWidget {
   const DeviceActions({
     super.key,
     required this.api,
@@ -4896,15 +4895,63 @@ class DeviceActions extends StatelessWidget {
   final Future<void> Function()? onDeviceChanged;
 
   @override
+  State<DeviceActions> createState() => _DeviceActionsState();
+}
+
+class _DeviceActionsState extends State<DeviceActions> {
+  late Map<String, dynamic> _device;
+  StreamSubscription<SseEvent>? _sseSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _device = widget.device;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sseSub?.cancel();
+    final stream = AppEventScope.of(context);
+    if (stream == null) return;
+    const events = {
+      'device_locked', 'device_unlocked', 'device_decoupled',
+      'device_decoupling_requested', 'enrollment_complete',
+      'grace_expired', 'device_health_changed',
+    };
+    _sseSub = stream.listen((event) {
+      if (mounted && events.contains(event.type)) _refresh();
+    });
+  }
+
+  @override
+  void dispose() {
+    _sseSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    final id = text(_device['id']);
+    if (id.isEmpty) return;
+    try {
+      final res = await widget.api.get('/api/v1/dealer/devices/$id');
+      final updated = asMap(res.data);
+      if (mounted && updated.isNotEmpty) setState(() => _device = updated);
+    } catch (_) {}
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final id = text(device['id']);
-    final status = text(device['status'], fallback: 'unknown');
-    final lock = text(device['lock_level'], fallback: 'NONE');
+    final api = widget.api;
+    final onDeviceChanged = widget.onDeviceChanged;
+    final id = text(_device['id']);
+    final status = text(_device['status'], fallback: 'unknown');
+    final lock = text(_device['lock_level'], fallback: 'NONE');
     final connectionStatus = text(
-      device['device_connection_status'],
+      _device['device_connection_status'],
       fallback: 'unknown',
     );
-    final deviceName = text(device['device_name'], fallback: 'Device');
+    final deviceName = text(_device['device_name'], fallback: 'Device');
     final connColor = _connectionColor(connectionStatus);
     final statusLower = status.toLowerCase();
     final lockUpper = lock.toUpperCase();
@@ -5018,7 +5065,7 @@ class DeviceActions extends StatelessWidget {
                 const SizedBox(height: 10),
                 _InlineNotice(
                   message: _protectionIssueLabel(
-                    device['last_heartbeat_source'],
+                    _device['last_heartbeat_source'],
                   ),
                   tone: AppTone.danger,
                   icon: Icons.privacy_tip_outlined,
@@ -5028,7 +5075,7 @@ class DeviceActions extends StatelessWidget {
                 const SizedBox(height: 10),
                 _InlineNotice(
                   message:
-                      '${_connectionLabel(connectionStatus)} · Last seen: ${formatDateTime(device['last_seen_at'])}',
+                      '${_connectionLabel(connectionStatus)} · Last seen: ${formatDateTime(_device['last_seen_at'])}',
                   tone: connectionStatus == 'delayed'
                       ? AppTone.warning
                       : AppTone.muted,
@@ -5064,32 +5111,32 @@ class DeviceActions extends StatelessWidget {
                   children: [
                     _infoRow(
                       'IMEI',
-                      text(device['imei'], fallback: '—'),
+                      text(_device['imei'], fallback: '—'),
                       'Lock',
                       lock,
                     ),
                     _infoRow(
                       'EMI status',
                       text(
-                        device['emi_status'] ?? device['agreement_status'],
+                        _device['emi_status'] ?? _device['agreement_status'],
                         fallback: 'Not linked',
                       ),
                       'Customer',
-                      text(device['customer_name'], fallback: '—'),
+                      text(_device['customer_name'], fallback: '—'),
                     ),
                     _infoRow(
                       'Enrolled',
                       formatDateTime(
-                        device['enrolled_at'] ?? device['created_at'],
+                        _device['enrolled_at'] ?? _device['created_at'],
                       ),
                       'Last heartbeat',
-                      formatDateTime(device['last_seen_at']),
+                      formatDateTime(_device['last_seen_at']),
                     ),
                     _infoRow(
                       'Key ID',
-                      text(device['activation_key_id'], fallback: '—'),
+                      text(_device['activation_key_id'], fallback: '—'),
                       'Brand / Model',
-                      '${text(device['brand'], fallback: '?')} ${text(device['model'])}',
+                      '${text(_device['brand'], fallback: '?')} ${text(_device['model'])}',
                     ),
                   ],
                 ),
@@ -5273,8 +5320,6 @@ class DeviceActions extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
               ],
-              if (id.isNotEmpty && !isDecoupled)
-                _DeviceSettingsPanel(api: api, deviceId: id),
             ],
           ),
         ),
@@ -5338,158 +5383,6 @@ class _ActionBtn extends StatelessWidget {
                 color: color,
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DeviceSettingsPanel extends StatefulWidget {
-  const _DeviceSettingsPanel({required this.api, required this.deviceId});
-  final ApiClient api;
-  final String deviceId;
-
-  @override
-  State<_DeviceSettingsPanel> createState() => _DeviceSettingsPanelState();
-}
-
-class _DeviceSettingsPanelState extends State<_DeviceSettingsPanel> {
-  bool _expanded = false;
-  bool _busy = false;
-  bool _loaded = false;
-
-  int _graceHours = 72;
-  String _lockLevel = 'FULL';
-
-  Future<void> _load() async {
-    if (_loaded) return;
-    try {
-      final res = await widget.api.get(
-        '/api/v1/dealer/devices/${widget.deviceId}/settings',
-      );
-      final data = asMap(res.data);
-      if (mounted) {
-        setState(() {
-          _graceHours =
-              int.tryParse('${data['offline_grace_hours'] ?? 72}') ?? 72;
-          _lockLevel = text(data['default_lock_level'], fallback: 'FULL');
-          _loaded = true;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _loaded = true);
-    }
-  }
-
-  Future<void> _save() async {
-    setState(() => _busy = true);
-    try {
-      await widget.api.put(
-        '/api/v1/dealer/devices/${widget.deviceId}/settings',
-        data: {
-          'offline_grace_hours': _graceHours,
-          'default_lock_level': _lockLevel,
-        },
-      );
-      if (mounted) snack(context, 'Device settings saved');
-    } catch (e) {
-      if (mounted) snack(context, readableError(e));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedSize(
-      duration: _medium,
-      curve: Curves.easeOutCubic,
-      child: _SoftPanel(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            InkWell(
-              onTap: () {
-                setState(() => _expanded = !_expanded);
-                if (!_loaded) _load();
-              },
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.tune_outlined,
-                    size: 18,
-                    color: AppTone.muted,
-                  ),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'Device-specific settings',
-                      style: TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                  ),
-                  Icon(
-                    _expanded ? Icons.expand_less : Icons.expand_more,
-                    color: AppTone.muted,
-                  ),
-                ],
-              ),
-            ),
-            if (_expanded) ...[
-              const SizedBox(height: 14),
-              _SettingsRow(
-                label: 'Offline grace period',
-                subtitle: 'Overrides dealer default for this device',
-                child: DropdownButton<int>(
-                  value: _graceHours,
-                  underline: const SizedBox.shrink(),
-                  items: [24, 48, 72, 96, 120, 168]
-                      .map(
-                        (h) => DropdownMenuItem(value: h, child: Text('${h}h')),
-                      )
-                      .toList(),
-                  onChanged: (v) {
-                    if (v != null) setState(() => _graceHours = v);
-                  },
-                ),
-              ),
-              _SettingsRow(
-                label: 'Lock level',
-                child: DropdownButton<String>(
-                  value: _lockLevel,
-                  underline: const SizedBox.shrink(),
-                  items: const [
-                    DropdownMenuItem(value: 'SOFT', child: Text('SOFT')),
-                    DropdownMenuItem(value: 'FULL', child: Text('FULL')),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) setState(() => _lockLevel = v);
-                  },
-                ),
-              ),
-              const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: FilledButton.icon(
-                  onPressed: _busy ? null : _save,
-                  icon: _busy
-                      ? const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(Icons.save_outlined, size: 16),
-                  label: Text(_busy ? 'Saving…' : 'Save'),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size(0, 36),
-                    textStyle: const TextStyle(fontSize: 13),
-                  ),
-                ),
-              ),
-            ],
           ],
         ),
       ),
@@ -5626,7 +5519,7 @@ class _EnrollmentPageState extends State<EnrollmentPage> {
                           ),
                         ).then(
                           (_) =>
-                              setState(() => _keyCountFuture = _loadKeyCount()),
+                              setState(() { _keyCountFuture = _loadKeyCount(); }),
                         ),
               icon: const Icon(Icons.add_circle_outline_rounded),
               label: const Text('Bind New Device'),

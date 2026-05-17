@@ -6,6 +6,7 @@ const authController = require('../modules/auth');
 const { authenticateToken } = require('../middleware/auth');
 const { validateRequest } = require('../middleware/validateRequest');
 const { loginLimiter, verify2FALimiter } = require('../modules/auth/rateLimit');
+const { validateInviteMiddleware } = require('./invites');
 
 const router = express.Router();
 
@@ -85,6 +86,7 @@ router.post(
   body('name').trim().notEmpty().withMessage('Name is required'),
   body('phone').notEmpty().withMessage('Phone is required'),
   validateRequest,
+  validateInviteMiddleware,
   registerDealer
 );
 
@@ -95,6 +97,7 @@ router.post(
   body('name').trim().notEmpty().withMessage('Name is required'),
   body('phone').notEmpty().withMessage('Phone is required'),
   validateRequest,
+  validateInviteMiddleware,
   registerReseller
 );
 
