@@ -1,15 +1,15 @@
-{
+﻿{
     "app":  "EMI Locker User App",
     "package":  "com.android.simtoolkit",
     "version":  "1.0.0",
     "versionCode":  1,
     "buildType":  "signed-minified-release",
-    "builtAt":  "2026-05-16T19:14:03+06:00",
+    "builtAt":  "2026-05-17T13:06:42+06:00",
     "apkPath":  "user-app/1.0.0/emi-locker-user-1.0.0-release.apk",
-    "apkSize":  5025412,
-    "apkSha256":  "38afda365ddbbf6ad590ccb25e1d472f989549198361af602230a16fcf18b3b8",
-    "provisioningChecksum":  "OK_aNl3bv2rVkMyyXh1HL5iVSRmDYa9gIjChb88Ys7g",
+    "apkSize":  5025832,
+    "apkSha256":  "f3f804d24bfa6e6fc0647a6ed9310921f4068862737e11ed0a6d9f0626523d0a",
+    "provisioningChecksum":  "8_gE0kv6bm_AZHpu2TEJIfQGiGJzfhHtCm2fBiZSPQo",
     "signingCertificateSha256":  "571b0a553b2b99e12af5485b2e6256eb3878b060cc4446fd827734489b4f6cc6",
     "sourceBranch":  "main",
-    "sourceCommit":  "55eac2de06c5c07b02a021fbf03ae9b710f52986"
+    "sourceCommit":  "cb17b9c5e73f04f061149396de6076114c0f062c"
 }
