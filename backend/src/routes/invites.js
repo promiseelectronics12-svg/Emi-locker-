@@ -2,7 +2,8 @@ const express = require('express');
 const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
-const { authenticateToken, requireMinRole } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
+const { requireMinRole } = require('../middleware/rbac');
 const logger = require('../utils/logger');
 
 const router = express.Router();
