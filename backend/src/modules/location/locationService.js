@@ -7,17 +7,39 @@ const deviceService = require('../devices/deviceService');
 const kmsSigningService = require('../devices/kmsSigningService');
 const { emitLocationReported } = require('../sse/sseService');
 
-const REDIS_URL =
+const Redis = require('ioredis');
+
+const _bullRedisUrl =
   process.env.BULL_REDIS_URL ||
   process.env.UPSTASH_REDIS_URL ||
   process.env.REDIS_URL ||
   'redis://localhost:6379';
+const _bullTls = _bullRedisUrl.startsWith('rediss://')
+  ? { tls: { rejectUnauthorized: true } }
+  : {};
+
+const _bullCreateClient = (type) => {
+  const c = new Redis(_bullRedisUrl, {
+    ..._bullTls,
+    enableReadyCheck: false,
+    maxRetriesPerRequest: null,
+    connectTimeout: 5000,
+    retryStrategy(times) {
+      if (times > 10) return null;
+      return Math.min(times * 300, 3000);
+    }
+  });
+  c.on('error', (err) => logger.warn(`Location Bull Redis (${type}) error: ${err.message}`));
+  return c;
+};
+
 const AUTO_LOCATION_LOCK_LEVELS = new Set(['FULL', 'FULL_LOCK', 'WIPE']);
 
 class LocationService {
   getLocationPullQueue() {
     if (!this._locationPullQueue) {
-      this._locationPullQueue = new Queue('location-pull', REDIS_URL, {
+      this._locationPullQueue = new Queue('location-pull', {
+        createClient: _bullCreateClient,
         defaultJobOptions: {
           attempts: 3,
           backoff: { type: 'exponential', delay: 2000 },
@@ -39,7 +61,8 @@ class LocationService {
 
   getAutoLocationQueue() {
     if (!this._autoLocationQueue) {
-      this._autoLocationQueue = new Queue('auto-location', REDIS_URL, {
+      this._autoLocationQueue = new Queue('auto-location', {
+        createClient: _bullCreateClient,
         defaultJobOptions: {
           attempts: 3,
           backoff: { type: 'exponential', delay: 2000 },

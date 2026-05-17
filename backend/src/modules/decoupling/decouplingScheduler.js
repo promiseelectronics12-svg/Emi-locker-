@@ -37,7 +37,6 @@ const bullCreateClient = (type) => {
     ...bullTlsOptions,
     enableReadyCheck: false,
     maxRetriesPerRequest: null,
-    enableOfflineQueue: false,
     connectTimeout: 5000,
     retryStrategy(times) {
       if (times > 10) return null;
