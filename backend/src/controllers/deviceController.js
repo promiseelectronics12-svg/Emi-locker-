@@ -76,7 +76,7 @@ const getMyDevices = asyncHandler(async (req, res) => {
 const updateDeviceStatus = asyncHandler(async (req, res) => {
   const { status, reason } = req.body;
 
-  const validStatuses = ['active', 'locked', 'unlocked', 'stolen', 'disabled'];
+  const validStatuses = ['active', 'locked', 'unlocked', 'fraud_suspected', 'disabled'];
   if (!validStatuses.includes(status)) {
     return res.status(400).json({ error: 'Invalid status' });
   }

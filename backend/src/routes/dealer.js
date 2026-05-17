@@ -251,6 +251,79 @@ router.get(
   })
 );
 
+router.get(
+  '/devices/:deviceId',
+  param('deviceId').isUUID(),
+  validateRequest,
+  asyncHandler(async (req, res) => {
+    const dealer = await getDealerProfile(req.user.id);
+    const dealerIds = getDealerIds(req.user.id, dealer);
+
+    const result = await db.query(
+      `SELECT d.*,
+            COALESCE(u.name, e.customer_name) AS customer_name,
+            COALESCE(u.phone, e.phone_number) AS customer_phone,
+            es.id AS emi_schedule_id,
+            es.status AS emi_status,
+            es.duration AS emi_duration,
+            es.start_date AS emi_start_date,
+            es.grace_days AS emi_grace_days,
+            lr.reason_code AS latest_lock_reason,
+            lr.note AS latest_lock_note,
+            lr.status AS latest_lock_request_status,
+            lr.created_at AS latest_lock_request_at,
+            CASE
+              WHEN d.status = 'decoupled' THEN 'decoupled'
+              WHEN d.status = 'pending_decouple' THEN 'release_pending'
+              WHEN d.fcm_token_status = 'invalid' OR d.app_uninstall_suspected_at IS NOT NULL THEN 'app_removed_suspected'
+              WHEN d.device_health_status = 'degraded' THEN 'protection_degraded'
+              WHEN d.last_seen_at IS NULL THEN 'never_seen'
+              WHEN d.last_seen_at < NOW() - INTERVAL '150 minutes' THEN 'offline'
+              WHEN d.last_seen_at < NOW() - INTERVAL '75 minutes' THEN 'delayed'
+              ELSE 'online'
+            END AS device_connection_status,
+            d.last_seen_at,
+            d.device_health_status,
+            d.last_heartbeat_source,
+            d.fcm_token_status,
+            d.app_uninstall_suspected_at,
+            CASE
+              WHEN d.last_location_at IS NULL THEN TRUE
+              WHEN d.last_location_at < NOW() - INTERVAL '15 minutes' THEN TRUE
+              ELSE FALSE
+            END AS location_is_stale,
+            CASE
+              WHEN d.last_location_at IS NULL THEN NULL
+              ELSE FLOOR(EXTRACT(EPOCH FROM (NOW() - d.last_location_at)) / 60)::int
+            END AS last_location_age_minutes
+       FROM devices d
+       LEFT JOIN users u ON u.id = d.owner_id
+       LEFT JOIN LATERAL (
+         SELECT customer_name, phone_number
+         FROM enrollments
+         WHERE device_id = d.id
+         ORDER BY created_at DESC
+         LIMIT 1
+       ) e ON TRUE
+       LEFT JOIN emi_schedules es ON es.device_id = d.id AND es.status = 'active'
+       LEFT JOIN LATERAL (
+         SELECT reason_code, note, status, created_at
+         FROM lock_requests
+         WHERE device_id = d.id
+         ORDER BY created_at DESC
+         LIMIT 1
+       ) lr ON TRUE
+       WHERE d.id = $1 AND d.dealer_id = ANY($2::uuid[])`,
+      [req.params.deviceId, dealerIds]
+    );
+
+    if (!result.rows.length)
+      return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
+
+    return res.json(result.rows[0]);
+  })
+);
+
 // ─── Dealer-level defaults ─────────────────────────────────────────────────
 
 router.get(
@@ -313,96 +386,6 @@ router.put(
          lock_screen_message      = EXCLUDED.lock_screen_message,
          updated_at               = NOW()`,
       [
-        dealer.id,
-        offline_grace_hours,
-        warning_threshold_hours,
-        checkin_interval_minutes,
-        default_lock_level,
-        lock_screen_dealer_name,
-        lock_screen_dealer_phone,
-        lock_screen_message
-      ]
-    );
-
-    return res.json({ success: true });
-  })
-);
-
-// ─── Per-device settings ───────────────────────────────────────────────────
-
-router.get(
-  '/devices/:deviceId/settings',
-  param('deviceId').isUUID(),
-  validateRequest,
-  asyncHandler(async (req, res) => {
-    const dealer = await getDealerProfile(req.user.id);
-    const dealerIds = getDealerIds(req.user.id, dealer);
-
-    // Confirm device belongs to this dealer
-    const device = await db.query(
-      'SELECT id FROM devices WHERE id = $1 AND dealer_id = ANY($2::uuid[])',
-      [req.params.deviceId, dealerIds]
-    );
-    if (!device.rows.length)
-      return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
-
-    const result = await db.query('SELECT * FROM dealer_device_settings WHERE device_id = $1', [
-      req.params.deviceId
-    ]);
-    return res.json(result.rows[0] || { device_id: req.params.deviceId, ...DEFAULT_SETTINGS });
-  })
-);
-
-router.put(
-  '/devices/:deviceId/settings',
-  param('deviceId').isUUID(),
-  body('offline_grace_hours').optional().isInt({ min: 24, max: 168 }),
-  body('warning_threshold_hours').optional().isInt({ min: 1, max: 48 }),
-  body('checkin_interval_minutes').optional().isInt({ min: 60, max: 1440 }),
-  body('default_lock_level').optional().isIn(['SOFT', 'FULL']),
-  body('lock_screen_dealer_name').optional({ nullable: true }).isString().isLength({ max: 80 }),
-  body('lock_screen_dealer_phone').optional({ nullable: true }).isString().isLength({ max: 20 }),
-  body('lock_screen_message').optional({ nullable: true }).isString().isLength({ max: 200 }),
-  validateRequest,
-  asyncHandler(async (req, res) => {
-    const dealer = await getDealerProfile(req.user.id);
-    const dealerIds = getDealerIds(req.user.id, dealer);
-
-    const device = await db.query(
-      'SELECT id FROM devices WHERE id = $1 AND dealer_id = ANY($2::uuid[])',
-      [req.params.deviceId, dealerIds]
-    );
-    if (!device.rows.length)
-      return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
-
-    const {
-      offline_grace_hours = DEFAULT_SETTINGS.offline_grace_hours,
-      warning_threshold_hours = DEFAULT_SETTINGS.warning_threshold_hours,
-      checkin_interval_minutes = DEFAULT_SETTINGS.checkin_interval_minutes,
-      default_lock_level = DEFAULT_SETTINGS.default_lock_level,
-      lock_screen_dealer_name = null,
-      lock_screen_dealer_phone = null,
-      lock_screen_message = null
-    } = req.body;
-
-    await db.query(
-      `INSERT INTO dealer_device_settings
-         (device_id, dealer_id, offline_grace_hours, warning_threshold_hours,
-          checkin_interval_minutes, default_lock_level,
-          lock_screen_dealer_name, lock_screen_dealer_phone, lock_screen_message,
-          updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
-       ON CONFLICT (device_id) DO UPDATE SET
-         offline_grace_hours      = EXCLUDED.offline_grace_hours,
-         warning_threshold_hours  = EXCLUDED.warning_threshold_hours,
-         checkin_interval_minutes = EXCLUDED.checkin_interval_minutes,
-         default_lock_level       = EXCLUDED.default_lock_level,
-         lock_screen_dealer_name  = EXCLUDED.lock_screen_dealer_name,
-         lock_screen_dealer_phone = EXCLUDED.lock_screen_dealer_phone,
-         lock_screen_message      = EXCLUDED.lock_screen_message,
-         updated_at               = NOW()`,
-      [
-        req.params.deviceId,
         dealer.id,
         offline_grace_hours,
         warning_threshold_hours,
@@ -1443,6 +1426,117 @@ router.post(
       deviceId: req.params.deviceId
     })
   )
+);
+
+// ─── Registered phone update ──────────────────────────────────────────────
+
+router.put(
+  '/devices/:deviceId/phone',
+  param('deviceId').isUUID(),
+  body('registered_phone').isString().trim().isLength({ min: 7, max: 20 }),
+  validateRequest,
+  asyncHandler(async (req, res) => {
+    const dealer = await getDealerProfile(req.user.id);
+    const dealerIds = getDealerIds(req.user.id, dealer);
+
+    const device = await db.query(
+      'SELECT id FROM devices WHERE id = $1 AND dealer_id = ANY($2::uuid[])',
+      [req.params.deviceId, dealerIds]
+    );
+    if (!device.rows.length)
+      return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
+
+    const { registered_phone } = req.body;
+    await db.query(
+      'UPDATE devices SET registered_phone = $1, updated_at = NOW() WHERE id = $2',
+      [registered_phone, req.params.deviceId]
+    );
+
+    await db.query(
+      `INSERT INTO device_history (device_id, event_type, actor_type, actor_id, details)
+       VALUES ($1, 'SIM_UPDATED', 'dealer', $2, $3)`,
+      [req.params.deviceId, req.user.id, JSON.stringify({ registered_phone })]
+    );
+
+    return res.json({ success: true });
+  })
+);
+
+// ─── Device history ────────────────────────────────────────────────────────
+
+router.get(
+  '/devices/:deviceId/history',
+  param('deviceId').isUUID(),
+  validateRequest,
+  asyncHandler(async (req, res) => {
+    const dealer = await getDealerProfile(req.user.id);
+    const dealerIds = getDealerIds(req.user.id, dealer);
+
+    const device = await db.query(
+      'SELECT id FROM devices WHERE id = $1 AND dealer_id = ANY($2::uuid[])',
+      [req.params.deviceId, dealerIds]
+    );
+    if (!device.rows.length)
+      return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
+
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+    const offset = parseInt(req.query.offset) || 0;
+    const typeFilter = req.query.type;
+
+    const typeGroups = {
+      lock: ['LOCKED', 'UNLOCKED', 'GRACE_GIVEN', 'GRACE_EXPIRED'],
+      sim: ['SIM_CHANGED', 'SIM_UPDATED'],
+      location: ['LOCATION_ANOMALY'],
+      calls: ['CALL_DECLINED', 'CALL_ANSWERED', 'CALL_MISSED'],
+      fraud: ['FRAUD_SUSPECTED', 'FRAUD_CONFIRMED', 'FRAUD_CLEARED']
+    };
+
+    const allowedTypes = typeFilter && typeGroups[typeFilter] ? typeGroups[typeFilter] : null;
+
+    const result = await db.query(
+      `SELECT id, event_type, actor_type, details, created_at
+       FROM device_history
+       WHERE device_id = $1
+         AND ($2::text[] IS NULL OR event_type = ANY($2))
+       ORDER BY created_at DESC
+       LIMIT $3 OFFSET $4`,
+      [req.params.deviceId, allowedTypes, limit, offset]
+    );
+
+    return res.json({ success: true, history: result.rows });
+  })
+);
+
+// ─── Device location history ───────────────────────────────────────────────
+
+router.get(
+  '/devices/:deviceId/locations',
+  param('deviceId').isUUID(),
+  validateRequest,
+  asyncHandler(async (req, res) => {
+    const dealer = await getDealerProfile(req.user.id);
+    const dealerIds = getDealerIds(req.user.id, dealer);
+
+    const device = await db.query(
+      'SELECT id FROM devices WHERE id = $1 AND dealer_id = ANY($2::uuid[])',
+      [req.params.deviceId, dealerIds]
+    );
+    if (!device.rows.length)
+      return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
+
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+
+    const result = await db.query(
+      `SELECT latitude, longitude, accuracy, source, recorded_at
+       FROM location_reports
+       WHERE device_id = $1
+       ORDER BY recorded_at DESC
+       LIMIT $2`,
+      [req.params.deviceId, limit]
+    );
+
+    return res.json({ success: true, locations: result.rows });
+  })
 );
 
 module.exports = router;

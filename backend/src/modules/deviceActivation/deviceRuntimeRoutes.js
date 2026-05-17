@@ -23,7 +23,21 @@ async function validateDeviceToken(req, res, next) {
       return res.status(401).json({ success: false, error: 'Invalid device token' });
     }
 
-    req.deviceAuth = payload;
+    // Verify device still exists and is in an active state
+    const deviceResult = await db.query(
+      `SELECT id, status FROM devices WHERE id = $1 LIMIT 1`,
+      [payload.sub]
+    );
+    if (!deviceResult.rows.length) {
+      return res.status(401).json({ success: false, error: 'Device not found' });
+    }
+    const deviceStatus = deviceResult.rows[0].status;
+    const blockedStatuses = ['decommissioned', 'stolen', 'suspended', 'decoupled'];
+    if (blockedStatuses.includes(deviceStatus)) {
+      return res.status(403).json({ success: false, error: 'Device access revoked' });
+    }
+
+    req.deviceAuth = { ...payload, deviceStatus };
     next();
   } catch (error) {
     logger.warn('Device token validation failed', { error: error.message });
@@ -207,6 +221,18 @@ function shouldApplyReportedLockState(previousDevice, reportedLockState) {
   return true;
 }
 
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function safeSse(methodName, args, fallback) {
   try {
     const emitter = sseService[methodName];
@@ -259,9 +285,22 @@ router.post('/heartbeat', validateDeviceToken, async (req, res) => {
     const healthStatus = permissionHealth?.status === 'degraded' ? 'degraded' : 'online';
     const heartbeatSource = buildHeartbeatSource(source, appVersion, permissionHealth);
 
+    const reportedSimPhone = req.body?.sim_phone_number
+      ? String(req.body.sim_phone_number).slice(0, 20)
+      : null;
+    const reportedLat = parseFloat(req.body?.lat);
+    const reportedLng = parseFloat(req.body?.lng);
+    const reportedAccuracy = parseFloat(req.body?.gps_accuracy);
+    const hasLocation =
+      Number.isFinite(reportedLat) &&
+      Number.isFinite(reportedLng) &&
+      reportedLat >= -90 && reportedLat <= 90 &&
+      reportedLng >= -180 && reportedLng <= 180;
+
     const previous = await db.query(
       `SELECT d.id, d.dealer_id, d.device_name, d.imei, d.status, d.lock_level, d.lock_reason,
               d.last_seen_at, d.device_health_status, d.last_heartbeat_source,
+              d.registered_phone,
               dl.name AS dealer_name,
               COALESCE(NULLIF(d.dealer_phone, ''), dl.phone) AS dealer_phone
        FROM devices d
@@ -272,6 +311,74 @@ router.post('/heartbeat', validateDeviceToken, async (req, res) => {
 
     const previousDevice = previous.rows[0] || null;
     const previousConnectionStatus = connectionStatusFromLastSeen(previousDevice?.last_seen_at);
+
+    // SIM change detection
+    if (
+      reportedSimPhone &&
+      previousDevice?.registered_phone &&
+      reportedSimPhone !== previousDevice.registered_phone
+    ) {
+      await db.query(
+        `INSERT INTO sim_events (device_id, event_type, old_sim_hash, new_sim_hash, location_lat, location_lon)
+         VALUES ($1, 'SIM_CHANGED', $2, $3, $4, $5)`,
+        [
+          req.deviceAuth.sub,
+          previousDevice.registered_phone,
+          reportedSimPhone,
+          hasLocation ? reportedLat : null,
+          hasLocation ? reportedLng : null
+        ]
+      );
+      await db.query(
+        `INSERT INTO device_history (device_id, event_type, actor_type, details)
+         VALUES ($1, 'SIM_CHANGED', 'device', $2)`,
+        [
+          req.deviceAuth.sub,
+          JSON.stringify({ old_phone: previousDevice.registered_phone, new_phone: reportedSimPhone })
+        ]
+      );
+      if (previousDevice.dealer_id) {
+        safeSse('pushToDealer', [
+          previousDevice.dealer_id,
+          'sim_changed',
+          {
+            deviceId: req.deviceAuth.sub,
+            deviceName: previousDevice.device_name,
+            imei: previousDevice.imei,
+            oldPhone: previousDevice.registered_phone,
+            newPhone: reportedSimPhone
+          }
+        ]);
+      }
+      logger.info('SIM change detected on heartbeat', { deviceId: req.deviceAuth.sub });
+    }
+
+    // Location capture — store only if moved >100m from last known point
+    if (hasLocation) {
+      const lastLoc = await db.query(
+        `SELECT latitude, longitude FROM location_reports
+         WHERE device_id = $1 ORDER BY recorded_at DESC LIMIT 1`,
+        [req.deviceAuth.sub]
+      );
+      const last = lastLoc.rows[0];
+      const shouldStore =
+        !last ||
+        haversineMeters(last.latitude, last.longitude, reportedLat, reportedLng) > 100;
+      if (shouldStore) {
+        await db.query(
+          `INSERT INTO location_reports
+             (device_id, latitude, longitude, accuracy, timestamp, recorded_at, source)
+           VALUES ($1, $2, $3, $4, NOW(), NOW(), 'gps')`,
+          [
+            req.deviceAuth.sub,
+            reportedLat,
+            reportedLng,
+            Number.isFinite(reportedAccuracy) ? reportedAccuracy : null
+          ]
+        );
+      }
+    }
+
     const result = await db.query(
       `UPDATE devices
        SET last_seen_at = NOW(),
@@ -376,6 +483,177 @@ router.post('/heartbeat', validateDeviceToken, async (req, res) => {
   } catch (error) {
     logger.error('Device heartbeat failed', { error: error.message });
     return res.status(500).json({ success: false, error: 'Failed to record heartbeat' });
+  }
+});
+
+// SMS heartbeat — dealer app forwards HMAC-signed SMS received from device
+router.post('/sms-heartbeat', async (req, res) => {
+  try {
+    const { raw_sms, sender_phone, received_at } = req.body || {};
+    if (!raw_sms || !sender_phone) {
+      return res.status(400).json({ success: false, error: 'raw_sms and sender_phone required' });
+    }
+
+    // Find device by registered_phone matching sender
+    const deviceResult = await db.query(
+      `SELECT id, dealer_id, device_name, imei, sms_heartbeat_sequence FROM devices
+       WHERE registered_phone = $1
+         AND status NOT IN ('decoupled', 'decommissioned')
+       LIMIT 1`,
+      [String(sender_phone).slice(0, 20)]
+    );
+    if (!deviceResult.rows.length) {
+      return res.status(404).json({ success: false, error: 'Device not found for sender' });
+    }
+    const device = deviceResult.rows[0];
+
+    // Decode and verify HMAC
+    let payload;
+    try {
+      const decoded = Buffer.from(raw_sms.trim(), 'base64').toString('utf8');
+      const dotIdx = decoded.lastIndexOf('.');
+      if (dotIdx < 0) throw new Error('invalid format');
+      const data = decoded.slice(0, dotIdx);
+      const sig = decoded.slice(dotIdx + 1);
+      const secret = process.env.DEVICE_TOKEN_SECRET;
+      if (!secret) throw new Error('secret not configured');
+      const expected = require('crypto')
+        .createHmac('sha256', secret + device.id)
+        .update(data)
+        .digest('base64');
+      const sigBuf = Buffer.from(sig);
+      const expectedBuf = Buffer.from(expected);
+      if (
+        sigBuf.length !== expectedBuf.length ||
+        !require('crypto').timingSafeEqual(sigBuf, expectedBuf)
+      ) {
+        throw new Error('signature mismatch');
+      }
+      const parts = data.split('|');
+      payload = {
+        deviceId: parts[0],
+        imei: parts[1],
+        timestamp: parts[2],
+        lat: parseFloat(parts[3]),
+        lng: parseFloat(parts[4]),
+        sequence: parseInt(parts[5])
+      };
+    } catch (e) {
+      logger.warn('SMS heartbeat HMAC verification failed', { deviceId: device.id, error: e.message });
+      return res.status(400).json({ success: false, error: 'Invalid SMS payload' });
+    }
+
+    // Replay attack check
+    if (payload.sequence <= (device.sms_heartbeat_sequence || 0)) {
+      logger.warn('SMS heartbeat replay detected', { deviceId: device.id, sequence: payload.sequence });
+      return res.status(400).json({ success: false, error: 'Stale sequence' });
+    }
+
+    // Update device
+    await db.query(
+      `UPDATE devices SET last_sms_heartbeat_at = NOW(), sms_heartbeat_sequence = $2, updated_at = NOW()
+       WHERE id = $1`,
+      [device.id, payload.sequence]
+    );
+
+    // Store location if valid
+    const hasLoc = Number.isFinite(payload.lat) && Number.isFinite(payload.lng);
+    if (hasLoc) {
+      const lastLoc = await db.query(
+        `SELECT latitude, longitude FROM location_reports WHERE device_id = $1 ORDER BY recorded_at DESC LIMIT 1`,
+        [device.id]
+      );
+      const last = lastLoc.rows[0];
+      if (!last || haversineMeters(last.latitude, last.longitude, payload.lat, payload.lng) > 100) {
+        await db.query(
+          `INSERT INTO location_reports
+             (device_id, latitude, longitude, accuracy, timestamp, recorded_at, source)
+           VALUES ($1, $2, $3, 0, NOW(), NOW(), 'sms_heartbeat')`,
+          [device.id, payload.lat, payload.lng]
+        );
+      }
+    }
+
+    await db.query(
+      `INSERT INTO device_history (device_id, event_type, actor_type, details)
+       VALUES ($1, 'SMS_HEARTBEAT_RECEIVED', 'device', $2)`,
+      [device.id, JSON.stringify({ sequence: payload.sequence, has_location: hasLoc })]
+    );
+
+    safeSse('pushToDealer', [device.dealer_id, 'sms_heartbeat', {
+      deviceId: device.id, deviceName: device.device_name, imei: device.imei,
+      receivedAt: new Date().toISOString()
+    }]);
+
+    return res.json({ success: true });
+  } catch (error) {
+    logger.error('SMS heartbeat failed', { error: error.message });
+    return res.status(500).json({ success: false, error: 'Failed to process SMS heartbeat' });
+  }
+});
+
+// Call event — device reports call outcomes from dealer's number
+router.post('/call-event', validateDeviceToken, async (req, res) => {
+  try {
+    const eventType = String(req.body?.event_type || '').toUpperCase();
+    if (!['DECLINED', 'ANSWERED', 'MISSED'].includes(eventType)) {
+      return res.status(400).json({ success: false, error: 'Invalid event_type' });
+    }
+
+    const historyType =
+      eventType === 'DECLINED' ? 'CALL_DECLINED' :
+      eventType === 'ANSWERED' ? 'CALL_ANSWERED' : 'CALL_MISSED';
+
+    await db.query(
+      `INSERT INTO device_history (device_id, event_type, actor_type, details)
+       VALUES ($1, $2, 'device', $3)`,
+      [req.deviceAuth.sub, historyType, JSON.stringify({ timestamp: req.body?.timestamp })]
+    );
+
+    // Count consecutive declines since last answered call
+    if (eventType === 'DECLINED') {
+      const recent = await db.query(
+        `SELECT event_type FROM device_history
+         WHERE device_id = $1
+           AND event_type IN ('CALL_DECLINED', 'CALL_ANSWERED')
+         ORDER BY created_at DESC
+         LIMIT 10`,
+        [req.deviceAuth.sub]
+      );
+      let consecutiveDeclines = 0;
+      for (const row of recent.rows) {
+        if (row.event_type === 'CALL_ANSWERED') break;
+        if (row.event_type === 'CALL_DECLINED') consecutiveDeclines++;
+      }
+      if (consecutiveDeclines >= 3) {
+        const deviceRow = await db.query(
+          `SELECT dealer_id, device_name, imei FROM devices WHERE id = $1`,
+          [req.deviceAuth.sub]
+        );
+        const d = deviceRow.rows[0];
+        if (d) {
+          await db.query(
+            `INSERT INTO device_history (device_id, event_type, actor_type, details)
+             VALUES ($1, 'FRAUD_SUSPECTED', 'system', $2)`,
+            [req.deviceAuth.sub, JSON.stringify({ reason: 'call_decline_threshold', count: consecutiveDeclines })]
+          );
+          await db.query(
+            `UPDATE devices SET status = 'fraud_suspected', updated_at = NOW() WHERE id = $1
+             AND status NOT IN ('locked', 'decoupled', 'fraud_suspected')`,
+            [req.deviceAuth.sub]
+          );
+          safeSse('pushToDealer', [d.dealer_id, 'fraud_suspected', {
+            deviceId: req.deviceAuth.sub, deviceName: d.device_name,
+            imei: d.imei, reason: 'call_decline_threshold'
+          }]);
+        }
+      }
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    logger.error('Call event failed', { error: error.message });
+    return res.status(500).json({ success: false, error: 'Failed to record call event' });
   }
 });
 

@@ -183,7 +183,7 @@ class FraudService {
       );
 
       await db.query(
-        `UPDATE devices SET status = 'locked', lock_level = $1, lock_reason = $2, locked_at = NOW(), locked_by = 'system', updated_at = NOW() WHERE id = $3`,
+        `UPDATE devices SET status = 'locked', lock_level = $1, lock_reason = $2, locked_at = NOW(), locked_by = NULL, updated_at = NOW() WHERE id = $3`,
         [lockLevels.FULL_LOCK, reason, deviceId]
       );
 
@@ -529,8 +529,8 @@ class FraudService {
             POWER(SIN((dl2.longitude - dl1.longitude) * PI() / 180 / 2), 2)
           )) as distance_km,
           EXTRACT(EPOCH FROM (dl2.timestamp - dl1.timestamp)) / 3600 as hours_elapsed
-        FROM device_locations dl1
-        JOIN device_locations dl2 ON dl1.device_id = dl2.device_id
+        FROM location_reports dl1
+        JOIN location_reports dl2 ON dl1.device_id = dl2.device_id
         JOIN devices d ON dl1.device_id = d.id
         WHERE dl2.timestamp > dl1.timestamp
           AND dl2.timestamp <= dl1.timestamp + INTERVAL '2 hours'

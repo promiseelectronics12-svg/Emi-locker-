@@ -673,7 +673,7 @@ class DeviceService {
       'active',
       'locked',
       'unlocked',
-      'stolen',
+      'fraud_suspected',
       'disabled',
       'enrolled',
       'decoupled'

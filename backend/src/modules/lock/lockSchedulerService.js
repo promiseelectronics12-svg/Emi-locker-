@@ -229,6 +229,16 @@ class LockSchedulerService {
     );
 
     try {
+      await db.query(
+        `INSERT INTO device_history (device_id, event_type, actor_type, details)
+         VALUES ($1, 'LOCKED', 'system', $2)`,
+        [deviceId, JSON.stringify({ lock_level: lockLevel, reason })]
+      );
+    } catch (e) {
+      logger.warn('device_history write failed on auto-lock', { deviceId, error: e.message });
+    }
+
+    try {
       sseService.emitDeviceLocked({
         id: deviceId,
         imei,
@@ -310,7 +320,7 @@ class LockSchedulerService {
                    status = 'locked',
                    lock_level = 'FULL',
                    lock_reason = 'GRACE_EXPIRED',
-                   locked_by = 'system',
+                   locked_by = NULL,
                    locked_at = NOW(),
                    updated_at = NOW()
                WHERE id = $1
@@ -332,6 +342,12 @@ class LockSchedulerService {
                   delivery: delivery?.results || null
                 })
               ]
+            );
+
+            await client.query(
+              `INSERT INTO device_history (device_id, event_type, actor_type, details)
+               VALUES ($1, 'GRACE_EXPIRED', 'system', $2)`,
+              [device.id, JSON.stringify({ lock_level: 'FULL' })]
             );
 
             await client.query('COMMIT');

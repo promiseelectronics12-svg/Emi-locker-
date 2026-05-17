@@ -809,6 +809,17 @@ async function confirmFromDevice({ code, imei, androidId, deviceBoundId, brand, 
       });
     }
 
+    try {
+      await client.query(
+        `INSERT INTO device_history (device_id, event_type, actor_type, details)
+         VALUES ($1, 'ENROLLED', 'system', $2)`,
+        [
+          committedEnrollment.dev_id,
+          JSON.stringify({ enrollment_id: committedEnrollment.id })
+        ]
+      );
+    } catch (_) {}
+
     await client.query('COMMIT');
     logger.info('Activation key consumed', { keyId: consumedKey.id, tier: keyTier });
   } catch (err) {
