@@ -1,6 +1,6 @@
 ﻿# User App APK Release And Hosting
 
-Last verified: 2026-05-16
+Last verified: 2026-05-17
 
 ## Current Release
 
@@ -9,11 +9,11 @@ Last verified: 2026-05-16
 - Version: `1.0.0`
 - Version code: `1`
 - Build type: signed, minified release APK
-- APK size: `5,025,412` bytes
+- APK size: `5,025,832` bytes
 - Signing certificate SHA-256: `571b0a553b2b99e12af5485b2e6256eb3878b060cc4446fd827734489b4f6cc6`
-- APK SHA-256: `38afda365ddbbf6ad590ccb25e1d472f989549198361af602230a16fcf18b3b8`
-- Android provisioning package checksum: `OK_aNl3bv2rVkMyyXh1HL5iVSRmDYa9gIjChb88Ys7g`
-- Source commit: `d94620bcbed26f8050cafde955305ce5c2290329`
+- APK SHA-256: `f3f804d24bfa6e6fc0647a6ed9310921f4068862737e11ed0a6d9f0626523d0a`
+- Android provisioning package checksum: `8_gE0kv6bm_AZHpu2TEJIfQGiGJzfhHtCm2fBiZSPQo`
+- Source commit: `cb17b9c5e73f04f061149396de6076114c0f062c`
 
 ## Local Private Signing Files
 
@@ -35,7 +35,7 @@ https://raw.githubusercontent.com/promiseelectronics12-svg/Emi-locker-/apk-relea
 Latest hosted branch commit:
 
 ```text
-743ef8737a3f1ebff01aefd2daf6aecb99bb2e4b
+747099f7598179843f0fdb919c654f8a27d6b326
 ```
 
 Metadata:
@@ -54,7 +54,7 @@ For self-hosted Device Owner provisioning, the QR code should include the packag
 {
   "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": "com.android.simtoolkit/com.android.simtoolkit.device.DeviceAdminReceiver",
   "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": "https://raw.githubusercontent.com/promiseelectronics12-svg/Emi-locker-/apk-releases/user-app/1.0.0/emi-locker-user-1.0.0-release.apk",
-  "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM": "OK_aNl3bv2rVkMyyXh1HL5iVSRmDYa9gIjChb88Ys7g",
+  "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM": "8_gE0kv6bm_AZHpu2TEJIfQGiGJzfhHtCm2fBiZSPQo",
   "android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED": true,
   "android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE": {
     "api_base_url": "https://emi-locker-erkt.onrender.com"
@@ -75,13 +75,13 @@ cd "D:\EMI APP\user-app"
 
 ## Current Verification Result
 
-- `assembleRelease`: passed on 2026-05-16
+- `assembleRelease`: passed on 2026-05-17
 - APK signature verification: passed with APK Signature Scheme v2
 - Compiled manifest includes Android 12+ provisioning callbacks:
   `GET_PROVISIONING_MODE` and `ADMIN_POLICY_COMPLIANCE`
 - Retrofit base URL is normalized with a trailing slash before API creation
 - Kotlin `Map` request bodies suppress wildcards for Retrofit/Gson release builds
 - Release minification is enabled for the current signed release build
-- GitHub branch upload: pushed to `apk-releases` at `743ef8737a3f1ebff01aefd2daf6aecb99bb2e4b`
-- Public raw APK URL check from this machine returned `404` after upload; if the repository/branch is private, Android QR provisioning will not be able to download it without a public HTTPS host.
-- Public raw metadata URL check from this machine returned `404` after upload.
+- GitHub branch upload: pushed to `apk-releases` at `747099f7598179843f0fdb919c654f8a27d6b326`
+- Public raw APK URL check from this machine returned `200` after upload.
+- Public raw metadata URL check from this machine returned `200` after upload.
