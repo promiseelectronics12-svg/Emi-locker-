@@ -322,7 +322,9 @@ async function startEnrollment({
   let nidHmac = null;
   try {
     if (normalizedNid) nidHmac = hashNid(normalizedNid);
-  } catch (_) {}
+  } catch (error) {
+    logger.warn('NID HMAC generation failed during enrollment create', { error: error.message });
+  }
 
   await db.query(
     `INSERT INTO enrollments
@@ -858,7 +860,12 @@ async function confirmFromDevice({ code, imei, androidId, deviceBoundId, brand, 
           JSON.stringify({ enrollment_id: committedEnrollment.id })
         ]
       );
-    } catch (_) {}
+    } catch (error) {
+      logger.warn('Enrollment history write failed', {
+        deviceId: committedEnrollment.dev_id,
+        error: error.message
+      });
+    }
 
     await client.query('COMMIT');
     logger.info('Activation key consumed', { keyId: consumedKey.id, tier: keyTier });
