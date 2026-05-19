@@ -3,6 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+
 import '../core/local_vault.dart';
 import '../core/google_vault.dart';
 import '../core/google_auth.dart';
@@ -38,6 +41,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../core/biometric_service.dart';
+import '../core/fcm_service.dart';
 import '../widgets/locky_mascot.dart';
 
 const storage = FlutterSecureStorage();
@@ -220,6 +224,9 @@ Color roleAccentLight(AppUser user) =>
 Future<void> bootstrapEmiLockerApp() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: '.env');
+  await Firebase.initializeApp();
+  FirebaseMessaging.onBackgroundMessage(firebaseBackgroundHandler);
+  await FcmService.initialize();
   // Lock to portrait — the gyroscope should never rotate the dealer UI.
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
@@ -387,6 +394,30 @@ class _EmiLockerAppState extends State<EmiLockerApp>
     _sse.start();
     unawaited(_persistSession(next));
     unawaited(_maybeSyncVaultToDrive());
+    unawaited(_registerFcmToken());
+  }
+
+  Future<void> _registerFcmToken() async {
+    try {
+      await FcmService.requestPermission();
+      final token = await FcmService.getToken();
+      if (token == null) return;
+      await api.post('/api/v1/dealer/fcm-token', data: {'token': token});
+      FcmService.onTokenRefresh.listen((newToken) {
+        unawaited(
+          api.post('/api/v1/dealer/fcm-token', data: {'token': newToken}),
+        );
+      });
+      FcmService.onNotificationTap.listen(_handleNotificationTap);
+    } catch (e) {
+      if (kDebugMode) debugPrint('[FCM] registration error: $e');
+    }
+  }
+
+  void _handleNotificationTap(Map<String, String> data) {
+    final deviceId = data['device_id'] ?? data['deviceId'] ?? '';
+    if (deviceId.isEmpty) return;
+    _navigatorKey.currentState?.pushNamed('/device', arguments: deviceId);
   }
 
   Future<void> _persistSession(Session next) async {
@@ -474,6 +505,19 @@ class _EmiLockerAppState extends State<EmiLockerApp>
       scaffoldMessengerKey: _scaffoldMessengerKey,
       title: 'EMI Locker',
       debugShowCheckedModeBanner: false,
+      onGenerateRoute: (settings) {
+        if (settings.name == '/device') {
+          final deviceId = settings.arguments?.toString() ?? '';
+          return MaterialPageRoute<void>(
+            builder: (_) => LockDetailScreen(
+              api: api,
+              deviceId: deviceId,
+              deviceName: 'Device',
+            ),
+          );
+        }
+        return null;
+      },
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
@@ -4915,9 +4959,13 @@ class _DeviceActionsState extends State<DeviceActions> {
     final stream = AppEventScope.of(context);
     if (stream == null) return;
     const events = {
-      'device_locked', 'device_unlocked', 'device_decoupled',
-      'device_decoupling_requested', 'enrollment_complete',
-      'grace_expired', 'device_health_changed',
+      'device_locked',
+      'device_unlocked',
+      'device_decoupled',
+      'device_decoupling_requested',
+      'enrollment_complete',
+      'grace_expired',
+      'device_health_changed',
     };
     _sseSub = stream.listen((event) {
       if (mounted && events.contains(event.type)) _refresh();
@@ -5518,8 +5566,9 @@ class _EnrollmentPageState extends State<EnrollmentPage> {
                             ),
                           ),
                         ).then(
-                          (_) =>
-                              setState(() { _keyCountFuture = _loadKeyCount(); }),
+                          (_) => setState(() {
+                            _keyCountFuture = _loadKeyCount();
+                          }),
                         ),
               icon: const Icon(Icons.add_circle_outline_rounded),
               label: const Text('Bind New Device'),
