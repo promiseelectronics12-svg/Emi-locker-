@@ -4,11 +4,15 @@ const db = require('../../config/database');
 const sseService = require('../sse/sseService');
 const logger = require('../../utils/logger');
 const { getActiveAssignment } = require('../assignments/assignmentService');
+const dealerNotificationService = require('../notifications/dealerNotificationService');
+
+// SIM-missing direct lock removed 2026-05-19.
+// SIM absence is now a time-escalating risk signal handled by riskScheduler.
+// Lock requires: overdue_emi && risk_score >= 6 && dealer_window_expired.
 
 let fraudDetectionTask = null;
 let offlineCheckTask = null;
 let locationRetentionTask = null;
-let simMissingCheckTask = null;
 
 function initFraudCronJobs() {
   logger.info('Initializing fraud detection cron jobs');
@@ -44,14 +48,7 @@ function initFraudCronJobs() {
     }
   });
 
-  // Every 5 min: devices with bound SIM absent > 5 min → lock
-  simMissingCheckTask = cron.schedule('*/5 * * * *', async () => {
-    try {
-      await runSimMissingCheck();
-    } catch (error) {
-      logger.error('SIM missing check failed', { error: error.message });
-    }
-  });
+  // SIM-missing task removed. riskScheduler handles SIM absence as time-escalating risk signal.
 
   logger.info('Fraud detection cron jobs scheduled');
 }
@@ -130,64 +127,11 @@ async function runLocationRetention() {
   });
 }
 
-async function runSimMissingCheck() {
-  // Grace period: 5 minutes. Devices where bound SIM has been absent
-  // for more than 5 minutes → lock immediately.
-  const graceCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-
-  const result = await db.query(
-    `SELECT d.id, d.dealer_id, d.device_name, d.imei
-     FROM devices d
-     WHERE d.sim_missing_since IS NOT NULL
-       AND d.sim_missing_since < $1
-       AND d.status NOT IN ('locked', 'fraud_suspected', 'decoupled', 'decommissioned', 'disabled', 'suspended', 'pending')
-       AND d.registered_phone IS NOT NULL`,
-    [graceCutoff]
-  );
-
-  if (!result.rows.length) return;
-
-  logger.info('SIM missing check locking devices', { count: result.rows.length });
-
-  for (const device of result.rows) {
-    try {
-      await db.query(
-        `UPDATE devices
-         SET status = 'locked',
-             lock_level = 'FULL',
-             lock_reason = 'SIM_REMOVED',
-             locked_at = COALESCE(locked_at, NOW()),
-             updated_at = NOW()
-         WHERE id = $1`,
-        [device.id]
-      );
-      const assignmentId = await getActiveAssignment(device.id);
-      await db.query(
-        `INSERT INTO device_history (device_id, assignment_id, event_type, actor_type, permanent, details)
-         VALUES ($1, $2, 'LOCKED', 'system', false, $3)`,
-        [device.id, assignmentId, JSON.stringify({ reason: 'SIM_REMOVED', lock_level: 'FULL' })]
-      );
-      try {
-        if (device.dealer_id) {
-          sseService.pushToDealer(device.dealer_id, 'device_locked', {
-            deviceId: device.id,
-            deviceName: device.device_name,
-            imei: device.imei,
-            reason: 'SIM_REMOVED'
-          });
-        }
-      } catch (_) {}
-    } catch (err) {
-      logger.error('Failed to lock device for SIM removal', { deviceId: device.id, error: err.message });
-    }
-  }
-}
 
 function stopFraudCronJobs() {
   if (fraudDetectionTask) fraudDetectionTask.stop();
   if (offlineCheckTask) offlineCheckTask.stop();
   if (locationRetentionTask) locationRetentionTask.stop();
-  if (simMissingCheckTask) simMissingCheckTask.stop();
   logger.info('Fraud detection cron jobs stopped');
 }
 
@@ -202,5 +146,4 @@ module.exports = {
   runFraudDetectionNow,
   runOfflineFraudCheck,
   runLocationRetention,
-  runSimMissingCheck,
 };

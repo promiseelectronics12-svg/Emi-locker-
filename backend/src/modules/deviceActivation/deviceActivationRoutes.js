@@ -153,7 +153,8 @@ router.post(
 router.post(
   '/:deviceId/events',
   rateLimit({ windowMs: 60 * 1000, max: 5, message: { error: 'Rate limit exceeded' } }),
-  body('type').isString().isIn(['shutdown_detected', 'boot_after_shutdown']),
+  body('type').isString().isIn(['shutdown_detected', 'boot_after_shutdown', 'app_tamper']),
+  body('reason').optional().isString().trim().isLength({ max: 128 }),
   body('lat').optional().isFloat({ min: -90, max: 90 }),
   body('lng').optional().isFloat({ min: -180, max: 180 }),
   body('timestamp').optional().isString(),

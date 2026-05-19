@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const db = require('../../config/database');
 const logger = require('../../utils/logger');
 const fcmService = require('../notifications/fcm.service');
+const dealerNotificationService = require('../notifications/dealerNotificationService');
 const deviceService = require('../devices/deviceService');
 const kmsSigningService = require('../devices/kmsSigningService');
 const { emitLocationReported } = require('../sse/sseService');
@@ -181,6 +182,11 @@ class LocationService {
              WHERE id = $1`,
             [deviceId]
           );
+          dealerNotificationService.notifyAppRemovedSuspected(device, 'LOCATION_PULL_FCM_TOKEN_INVALID')
+            .catch((error) => logger.warn('Dealer app-removal notification failed', {
+              deviceId,
+              error: error.message
+            }));
         }
       } catch (err) {
         logger.warn(`FCM delivery failed for location pull on device ${deviceId}: ${err.message}`);

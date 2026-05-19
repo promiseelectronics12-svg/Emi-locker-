@@ -6,6 +6,8 @@ const sseService = require('../sse/sseService');
 const logger = require('../../utils/logger');
 const { getActiveAssignment } = require('../assignments/assignmentService');
 const deviceProfileService = require('../profile/deviceProfileService');
+const dealerNotificationService = require('../notifications/dealerNotificationService');
+const { riskService } = require('../risk');
 
 const router = express.Router();
 
@@ -326,14 +328,22 @@ router.post('/heartbeat', validateDeviceToken, async (req, res) => {
             `UPDATE devices SET sim_missing_since = NOW(), updated_at = NOW() WHERE id = $1`,
             [deviceId]
           );
+          dealerNotificationService.notifySimRemoved(previousDevice, {
+            oldPhone: previousDevice.registered_phone,
+            wrongSim: false
+          }).catch((error) => logger.warn('Dealer SIM-missing notification failed', {
+            deviceId,
+            error: error.message
+          }));
         }
       } else if (reportedSimPhone === previousDevice.registered_phone) {
-        // Bound SIM restored — clear the missing timer
+        // Bound SIM restored — clear the missing timer and risk signal (fix #6)
         if (previousDevice.sim_missing_since) {
           await db.query(
             `UPDATE devices SET sim_missing_since = NULL, updated_at = NOW() WHERE id = $1`,
             [deviceId]
           );
+          riskService.removeSignal(deviceId, 'sim_missing').catch(() => {});
         }
       } else {
         // Wrong SIM — bound SIM is still absent; start or maintain the missing timer
@@ -375,6 +385,14 @@ router.post('/heartbeat', validateDeviceToken, async (req, res) => {
             }
           ]);
         }
+        dealerNotificationService.notifySimRemoved(previousDevice, {
+          oldPhone: previousDevice.registered_phone,
+          newPhone: reportedSimPhone,
+          wrongSim: true
+        }).catch((error) => logger.warn('Dealer wrong-SIM notification failed', {
+          deviceId,
+          error: error.message
+        }));
         logger.info('SIM change detected on heartbeat', { deviceId });
       }
     }
@@ -525,7 +543,9 @@ router.post('/heartbeat', validateDeviceToken, async (req, res) => {
         await deviceProfileService.updateMode(deviceId, 'subconscious');
         currentMode = 'subconscious';
       }
-    } catch (_) {}
+    } catch (error) {
+      logger.warn('Failed to resolve device monitoring mode', { deviceId, error: error.message });
+    }
 
     return res.json({
       success: true,
@@ -544,7 +564,7 @@ router.post('/heartbeat', validateDeviceToken, async (req, res) => {
 // SMS heartbeat — dealer app forwards HMAC-signed SMS received from device
 router.post('/sms-heartbeat', async (req, res) => {
   try {
-    const { raw_sms, sender_phone, received_at } = req.body || {};
+    const { raw_sms, sender_phone } = req.body || {};
     if (!raw_sms || !sender_phone) {
       return res.status(400).json({ success: false, error: 'raw_sms and sender_phone required' });
     }
@@ -591,7 +611,7 @@ router.post('/sms-heartbeat', async (req, res) => {
         timestamp: parts[2],
         lat: parseFloat(parts[3]),
         lng: parseFloat(parts[4]),
-        sequence: parseInt(parts[5])
+        sequence: parseInt(parts[5], 10)
       };
     } catch (e) {
       logger.warn('SMS heartbeat HMAC verification failed', { deviceId: device.id, error: e.message });
@@ -656,9 +676,12 @@ router.post('/call-event', validateDeviceToken, async (req, res) => {
       return res.status(400).json({ success: false, error: 'Invalid event_type' });
     }
 
-    const historyType =
-      eventType === 'DECLINED' ? 'CALL_DECLINED' :
-      eventType === 'ANSWERED' ? 'CALL_ANSWERED' : 'CALL_MISSED';
+    let historyType = 'CALL_MISSED';
+    if (eventType === 'DECLINED') {
+      historyType = 'CALL_DECLINED';
+    } else if (eventType === 'ANSWERED') {
+      historyType = 'CALL_ANSWERED';
+    }
 
     const callAssignmentId = await getActiveAssignment(req.deviceAuth.sub);
     await db.query(

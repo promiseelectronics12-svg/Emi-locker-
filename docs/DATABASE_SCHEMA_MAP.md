@@ -2,18 +2,40 @@
 
 This is the living schema map for tables that affect runtime flows. Keep this aligned with Neon migrations and backend code.
 
+Current architecture decisions, including removed `partial_lock` / `stolen` / old reminder behavior, are summarized in `docs/CURRENT_ARCHITECTURE_AND_SUPERSEDED_PLANS.md`.
+
 ## Critical Tables
 
 | Table | Flow | Purpose | Important fields to track |
 | --- | --- | --- | --- |
 | `devices` | All device operations | Main enrolled device record | `id`, `dealer_id`, `fcm_token`, `last_seen_at`, `device_health_status`, `fcm_token_status`, `app_uninstall_suspected_at`, lock fields |
 | `pending_enrollments` | Enrollment | Stores binding state before device confirmation | binding code, customer data, EMI terms, status |
-| `emi_schedules` | EMI/reminders | Active finite EMI contract after device confirms | `total_amount`, `down_payment`, `emi_amount`, `duration`, `start_date`, `grace_days` |
+| `emi_schedules` | EMI contract | Active finite EMI contract after device confirms | `total_amount`, `down_payment`, `emi_amount`, `duration`, `start_date`, `grace_days` |
 | `location_pulls` | Pull location | Dealer request state | `device_id`, status, expiry, completed timestamp |
 | `device_locations` | Pull/history | Reported GPS points | `device_id`, `latitude`, `longitude`, `accuracy`, `timestamp`, `pull_id` |
 | `device_events` | Runtime/device reports | Device command results and permission/status reports | event type, payload, created timestamp |
 | `evidence_records` | Evidence vault | Metadata for encrypted dealer-owned evidence | device/customer reference, encrypted file refs, status |
 | `audit_logs` | Security | Admin/dealer action history | actor, action, target, created timestamp |
+
+## Planned Foundation Tables
+
+These are current architecture requirements, not all necessarily implemented in production yet.
+
+| Table | Flow | Purpose | Important fields to track |
+| --- | --- | --- | --- |
+| `device_assignments` | Re-enroll / resale / clean sheet | Separates physical hardware from customer ownership period | `device_id`, `customer_id`, `dealer_id`, `contract_id`, `started_at`, `ended_at`, `status`, `reenroll_type` |
+| `dealer_invites` | Dealer onboarding | One-time invite-only dealer account creation | `email`, `role`, `reseller_id`, `token_hash`, `expires_at`, `used_at`, `status` |
+| `customer_credit_profiles` | Credit score | Minimal NID-based credit score without exposing history | `nid_hmac`, `encrypted_name`, `score_band`, `score_version`, `updated_at` |
+
+## Risk Engine Tables (migration 131 — 2026-05-19)
+
+| Table | Purpose | Key fields |
+|-------|---------|-----------|
+| `device_risk_scores` | Current active signals + total score per device | `device_id` (PK), `total_score`, `signals` (JSONB — `{type: {weight, since, details}}`), `dealer_notified_at` |
+| `risk_signal_log` | Immutable audit of every signal change | `device_id`, `signal_type`, `weight`, `action` (`recorded`/`escalated`/`cleared`), `details`, `created_at` |
+| `auto_lock_decisions` | Every evaluation of the auto-lock rule | `device_id`, `is_overdue`, `risk_score`, `signal_breakdown` (JSONB), `dealer_notified_at`, `window_expires_at`, `window_expired`, `decision`, `evaluated_at` |
+
+Lock rule stored in every `auto_lock_decisions` row: `overdue_emi && risk_score >= 6 && dealer_window_expired`.
 
 ## Schema Update Rule
 
@@ -38,6 +60,8 @@ When a migration changes one of these tables:
 
 | Table | Field | Allowed runtime values |
 | --- | --- | --- |
-| `devices` | `status` | `pending`, `enrolled`, `active`, `locked`, `unlocked`, `partial_lock`, `reminder`, `pending_lock`, `pending_unlock`, `pending_decouple`, `decoupled`, `disabled`, `suspended`, `stolen` |
+| `devices` | `status` | Current direction: `pending`, `enrolled`, `active`, `locked`, `unlocked`, `pending_lock`, `pending_unlock`, `pending_decouple`, `decoupled`, `disabled`, `suspended`, `fraud_suspected` |
 
 Migration `123_device_pending_statuses.sql` aligns the live Neon `devices_status_check` constraint with backend command states. This prevents dealer lock/unlock requests from failing while the backend waits for device confirmation.
+
+Historical note: older docs and early migrations mention `partial_lock`, `reminder`, and `stolen`. Those are superseded for new product behavior. `fraud_suspected` replaces `stolen`; reminder is treated as an event/history/UI concept, not the primary lock state.

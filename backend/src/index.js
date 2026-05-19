@@ -36,6 +36,7 @@ const { initLocationModule } = require('./modules/location');
 const { initDecouplingModule, decouplingScheduler } = require('./modules/decoupling');
 const { initKeyCronJobs } = require('./modules/keys/keyScheduler');
 const { initFraudCronJobs } = require('./modules/fraud');
+const { initRiskScheduler } = require('./modules/risk');
 
 // Load environment config after imports but before opening network resources.
 validateEnvironment();
@@ -145,6 +146,7 @@ const startServer = async () => {
     initDecouplingModule();
     initKeyCronJobs();
     initFraudCronJobs();
+    initRiskScheduler();
 
     logger.info('All module schedulers initialized');
 

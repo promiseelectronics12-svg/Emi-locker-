@@ -2,6 +2,7 @@ const { validationResult } = require('express-validator');
 const logger = require('../../utils/logger');
 const db = require('../../config/database');
 const { verifyStagingActivation } = require('./deviceActivationService');
+const dealerNotificationService = require('../notifications/dealerNotificationService');
 
 async function verifyActivation(req, res) {
   const errors = validationResult(req);
@@ -123,11 +124,11 @@ async function confirmBinding(req, res) {
 
 async function reportDeviceEvent(req, res) {
   const { deviceId } = req.params;
-  const { type, lat, lng, timestamp } = req.body;
+  const { type, lat, lng, reason, timestamp } = req.body;
 
   if (!deviceId || !type) return res.status(400).json({ error: 'deviceId and type required' });
 
-  const allowed = ['shutdown_detected', 'boot_after_shutdown'];
+  const allowed = ['shutdown_detected', 'boot_after_shutdown', 'app_tamper'];
   if (!allowed.includes(type)) return res.status(400).json({ error: 'Unknown event type' });
 
   try {
@@ -143,6 +144,25 @@ async function reportDeviceEvent(req, res) {
         timestamp || Date.now().toString()
       ]
     );
+    if (type === 'shutdown_detected' || type === 'app_tamper') {
+      const deviceResult = await db.query(
+        `SELECT id, dealer_id, device_name, imei, model, brand
+         FROM devices WHERE id = $1 LIMIT 1`,
+        [deviceId]
+      );
+      const device = deviceResult.rows[0];
+      if (device?.dealer_id) {
+        if (type === 'shutdown_detected') {
+          dealerNotificationService.notifyShutdownDetected(device, { lat, lng }).catch((error) => {
+            logger.warn('Dealer shutdown notification failed', { deviceId, error: error.message });
+          });
+        } else {
+          dealerNotificationService.notifyAppTamper(device, reason || 'APP_TAMPER').catch((error) => {
+            logger.warn('Dealer app tamper notification failed', { deviceId, error: error.message });
+          });
+        }
+      }
+    }
     logger.info(`Device event: ${type} deviceId=${deviceId} lat=${lat} lng=${lng}`);
     return res.json({ success: true });
   } catch (err) {

@@ -2,6 +2,8 @@
 
 This index records the routes that connect the dealer app, backend, user app, and admin surfaces. Keep this file updated whenever a route is added, removed, renamed, or changes response shape.
 
+Current architecture decisions and superseded plans are documented in `docs/CURRENT_ARCHITECTURE_AND_SUPERSEDED_PLANS.md`.
+
 ## Backend Base
 
 | Item | Value |
@@ -37,7 +39,7 @@ This index records the routes that connect the dealer app, backend, user app, an
 | FCM token update | POST | `/api/v1/device-activation/:deviceId/fcm` | Store current FCM token | Update device push target |
 | Location report | POST | `/api/v1/location/:deviceId/report` | Send GPS result with `x-device-token` | Store location, complete pull, emit SSE |
 | EMI schedule refresh | GET | `/api/v1/device/emi-schedule` | Sync active finite schedule | Return current active schedule |
-| Heartbeat | POST | `/api/v1/device/heartbeat` | Report alive/permission status every hour | Update health and permission state |
+| Heartbeat | POST | `/api/v1/device/heartbeat` | Report alive/permission/SIM/status on adaptive schedule | Update health and permission state; optionally return pending command hint |
 | Runtime events | POST | `/api/v1/device-activation/:deviceId/events` | Report command results, permission changes, lock state | Persist actual device state and emit SSE |
 
 ## SSE Events To Maintain
@@ -56,7 +58,7 @@ The user app may include these fields in `POST /api/v1/device/heartbeat`:
 | --- | --- |
 | `permission_health` | `healthy` or `degraded` |
 | `permission_degraded_reasons` | Comma-separated reason codes |
-| `permission_overlay` | Overlay permission state |
+| `permission_overlay` | Legacy/fallback overlay permission state; current primary lock path is kiosk/Device Owner |
 | `permission_location` | Fine or coarse location available |
 | `permission_background_location` | Background location available where Android requires it |
 | `permission_sms` | SMS receive permission available |
@@ -66,6 +68,24 @@ The user app may include these fields in `POST /api/v1/device/heartbeat`:
 | `permission_battery_unrestricted` | Battery optimization ignored/unrestricted |
 | `enrollment_confirmed` | Backend after user confirms code | Dealer app enrollment/inventory | `deviceId`, customer summary, schedule summary |
 | `message_delivery_changed` | Backend/user app when available | Dealer message UI | `deviceId`, message id, accepted/delivered/failed |
+
+## Risk Engine Routes (Stream C — 2026-05-19)
+
+Auth: dealer/admin JWT. All under `/api/v1/risk/`.
+
+| Method | Route | Role | Purpose |
+|--------|-------|------|---------|
+| GET | `/risk/:deviceId/score` | dealer, admin | Current risk score + signal breakdown + last 50 signals + last 20 lock decisions |
+| POST | `/risk/:deviceId/signal` | admin | Record a signal manually (body: `{signalType, details}`) |
+| DELETE | `/risk/:deviceId/signal/:signalType` | admin | Clear a resolved signal |
+| POST | `/risk/:deviceId/evaluate` | admin | Force immediate lock-decision evaluation |
+
+### SSE Events Added
+
+| Event | Payload | Sent to |
+|-------|---------|---------|
+| `risk_score_changed` | `{deviceId, totalScore, signals, updatedAt}` | management + dealer |
+| `risk_score_threshold` | `{deviceId, riskScore, signalBreakdown, windowExpiresAt, message}` | dealer |
 
 ## Route Hygiene Rules
 

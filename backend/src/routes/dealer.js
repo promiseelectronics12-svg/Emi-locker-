@@ -12,6 +12,7 @@ const { getDealerInventory } = require('../modules/keys/keyController');
 const lockCommandService = require('../modules/lock/lockCommandService');
 const lockDeliveryService = require('../modules/lock/lockDeliveryService');
 const { LOCK_LEVELS } = require('../modules/lock/lockVerificationService');
+const dealerNotificationService = require('../modules/notifications/dealerNotificationService');
 
 const router = express.Router();
 
@@ -1052,6 +1053,8 @@ router.post(
            WHERE id = $1`,
           [device.id]
         );
+        dealerNotificationService.notifyAppRemovedSuspected(device, 'DECOUPLE_FCM_TOKEN_INVALID')
+          .catch((error) => warnOptionalFailure('dealer app-removal notification', error));
       }
       return res.status(202).json({
         success: true,
@@ -1479,8 +1482,8 @@ router.get(
     if (!device.rows.length)
       return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
 
-    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
-    const offset = parseInt(req.query.offset) || 0;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
+    const offset = parseInt(req.query.offset, 10) || 0;
     const typeFilter = req.query.type;
 
     const typeGroups = {
@@ -1507,6 +1510,30 @@ router.get(
   })
 );
 
+// ─── Dealer FCM token registration ────────────────────────────────────────
+// Called by dealer app on every login + token refresh.
+// Stores the push token so backend can send alerts (SIM removed, lock events, etc.)
+
+router.post(
+  '/fcm-token',
+  body('token').notEmpty().isString().isLength({ min: 10, max: 512 }),
+  validateRequest,
+  asyncHandler(async (req, res) => {
+    const dealer = await getDealerProfile(req.user.id);
+    if (!dealer)
+      return res
+        .status(404)
+        .json(buildErrorResponse(404, 'DEALER_NOT_FOUND', 'Dealer profile not found'));
+
+    await db.query(
+      `UPDATE dealers SET fcm_token = $1, updated_at = NOW() WHERE id = $2`,
+      [req.body.token, dealer.id]
+    );
+
+    return res.json({ registered: true });
+  })
+);
+
 // ─── Device location history ───────────────────────────────────────────────
 
 router.get(
@@ -1524,7 +1551,7 @@ router.get(
     if (!device.rows.length)
       return res.status(404).json(buildErrorResponse(404, 'DEVICE_NOT_FOUND', 'Device not found'));
 
-    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
 
     const result = await db.query(
       `SELECT latitude, longitude, accuracy, source, recorded_at

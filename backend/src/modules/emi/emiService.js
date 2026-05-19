@@ -2,6 +2,7 @@ const emiModel = require('./emiModel');
 const decouplingService = require('./decouplingService');
 const firebaseService = require('../devices/firebaseService');
 const logger = require('../../utils/logger');
+const dealerNotificationService = require('../notifications/dealerNotificationService');
 
 const LOCK_REASON_CODES = {
   OVERDUE_1: { lockLevel: 'reminder', minDaysOverdue: 1, maxDaysOverdue: 3 },
@@ -198,6 +199,17 @@ class EmiService {
         }
       });
     }
+
+    dealerNotificationService.notifyPaymentConfirmed(device, {
+      paymentId: payment.id,
+      amount,
+      installmentNumber,
+      isFinalPayment
+    }).catch((error) => logger.warn('Dealer payment notification failed', {
+      deviceId,
+      paymentId: payment.id,
+      error: error.message
+    }));
 
     return {
       ...payment,

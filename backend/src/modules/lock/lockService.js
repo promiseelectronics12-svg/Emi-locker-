@@ -408,6 +408,56 @@ class LockService {
     };
   }
 
+  // System-initiated auto-lock from risk engine. Bypasses dealer identity verification.
+  // Uses same signed command + delivery pipeline as dealer locks.
+  // DB lock_level = 'FULL' (canonical DB value); command lockLevel = 'FULL_LOCK' (FCM payload).
+  async requestAutoLock({ deviceId, reason, riskScore, signalBreakdown }) {
+    const deviceImei = await this.getDeviceImei(deviceId);
+
+    const command = await lockCommandService.generateSignedCommand({
+      deviceImei,
+      actionType: 'LOCK',
+      lockLevel: LOCK_LEVELS.FULL_LOCK,
+      metadata: {
+        reason: reason || 'AUTO_LOCK_RISK_ENGINE',
+        riskScore,
+        signals: Object.keys(signalBreakdown || {}),
+        initiatedBy: 'risk_engine',
+      },
+    });
+
+    await lockDeliveryService.deliverCommand(deviceId, command, LOCK_LEVELS.FULL_LOCK);
+
+    await db.query(
+      `UPDATE devices
+       SET lock_level = 'FULL', status = 'locked',
+           lock_reason = $1, locked_at = COALESCE(locked_at, NOW()), updated_at = NOW()
+       WHERE id = $2`,
+      [reason || 'AUTO_LOCK_RISK_ENGINE', deviceId]
+    );
+
+    const updatedDevice = await this.getDeviceForSse(deviceId);
+    if (updatedDevice) {
+      sseService.emitDeviceLocked(updatedDevice);
+    }
+
+    await locationScheduler.handleDeviceLockChange(deviceId, LOCK_LEVELS.FULL_LOCK);
+
+    await this.logAuditEvent({
+      actor: 'system:risk_engine',
+      action: 'AUTO_LOCK',
+      deviceId,
+      metadata: {
+        reason, riskScore,
+        signals: Object.keys(signalBreakdown || {}),
+        commandNonce: command.nonce,
+      },
+      result: 'approved',
+    });
+
+    return { status: 'LOCKED', deviceId };
+  }
+
   async logAuditEvent({ actor, action, deviceId, metadata, result }) {
     try {
       await db.query(

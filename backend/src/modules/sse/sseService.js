@@ -10,6 +10,7 @@
 
 // clients: Map<userId, { res, role, dealerId? }>
 const clients = new Map();
+const dealerNotificationService = require('../notifications/dealerNotificationService');
 
 // ── Connection management ────────────────────────────────────────────────────
 
@@ -104,6 +105,9 @@ function emitDeviceLocked(device) {
       lockLevel: device.lock_level,
       reason: device.lock_reason
     });
+    dealerNotificationService.notifyDeviceLocked(device).catch((error) => {
+      console.warn('[SSE] Dealer device_locked push failed', { deviceId: device.id, error: error.message });
+    });
   }
 }
 
@@ -117,6 +121,9 @@ function emitDeviceUnlocked(device, graceHours) {
   pushToManagement('device_unlocked', payload);
   if (device.dealer_id) {
     pushToDealer(device.dealer_id, 'device_unlocked', payload);
+    dealerNotificationService.notifyDeviceUnlocked(device, graceHours).catch((error) => {
+      console.warn('[SSE] Dealer device_unlocked push failed', { deviceId: device.id, error: error.message });
+    });
   }
 }
 
@@ -222,6 +229,19 @@ function emitKeyRequestApproved(resellerId, quantity, tier) {
   });
 }
 
+function emitRiskScoreChanged(device, scoreData) {
+  const payload = {
+    deviceId: device.id,
+    totalScore: scoreData.totalScore,
+    signals: scoreData.signals,
+    updatedAt: new Date().toISOString(),
+  };
+  pushToManagement('risk_score_changed', payload);
+  if (device.dealer_id) {
+    pushToDealer(device.dealer_id, 'risk_score_changed', payload);
+  }
+}
+
 module.exports = {
   addClient,
   removeClient,
@@ -241,5 +261,6 @@ module.exports = {
   emitLocationReported,
   emitDeviceHealthChanged,
   emitKeyRequested,
-  emitKeyRequestApproved
+  emitKeyRequestApproved,
+  emitRiskScoreChanged
 };

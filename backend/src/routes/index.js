@@ -25,6 +25,7 @@ router.use('/device-activation', require('../modules/deviceActivation/deviceActi
 router.use('/device', require('../modules/deviceActivation/deviceRuntimeRoutes'));
 router.use('/location', require('../modules/location/locationRoutes'));
 router.use('/fraud', require('../modules/fraud/fraudRoutes'));
+router.use('/risk', require('../modules/risk/riskRoutes'));
 router.use('/evidence', require('./evidence'));
 router.use('/credit', require('../modules/credit/creditRoutes'));
 router.use('/events', require('../modules/sse/sseRoutes'));

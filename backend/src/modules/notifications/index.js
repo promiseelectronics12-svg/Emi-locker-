@@ -22,6 +22,7 @@ const {
   getNotificationStatsByDevice,
 } = require('./notification.repository');
 const notificationRoutes = require('./notification.routes');
+const dealerNotificationService = require('./dealerNotificationService');
 
 module.exports = {
   initializeFCM,
@@ -47,5 +48,6 @@ module.exports = {
   findNotificationsByDevice,
   findPendingNotifications,
   getNotificationStatsByDevice,
+  dealerNotificationService,
   notificationRoutes,
 };

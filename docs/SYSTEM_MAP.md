@@ -2,6 +2,8 @@
 
 This file is the living collaboration map for EMI Locker. Update it in the same change whenever backend routes, app flows, database tables, FCM commands, SSE events, or security assumptions change.
 
+Current product decisions, including removed plans, live in `docs/CURRENT_ARCHITECTURE_AND_SUPERSEDED_PLANS.md`. If an older Markdown file conflicts with that document, treat the current architecture document as the source of truth.
+
 ## Ownership Model
 
 | Area | Primary owner | Responsibility |
@@ -10,7 +12,7 @@ This file is the living collaboration map for EMI Locker. Update it in the same 
 | System building | Codex + builder | Implementation, architecture hygiene, documentation updates |
 | Backend maintenance | Backend developer | Render service, API contracts, Neon schema, FCM/SSE command flow |
 | Dealer app maintenance | Flutter developer | Dealer UX, command screens, real-time status, evidence capture |
-| User app maintenance | Kotlin developer | Device command receiver, permissions, lock overlay, heartbeat, offline OTP |
+| User app maintenance | Kotlin developer | Device command receiver, permissions, kiosk lock screen, adaptive heartbeat, offline SMS/OTP fallback |
 | QC / field testing | Tester | Real-device test runs, fault reporting, permission tamper checks |
 
 ## Source Of Truth Rule
@@ -28,16 +30,34 @@ A code change is not complete unless the matching documentation is updated:
 
 ## High-Level Architecture
 
+Three-app platform. All three share one Firebase project and one backend.
+
 ```mermaid
 flowchart LR
-  Dealer["Dealer App\nFlutter"] -->|JWT API calls| Backend["Backend\nNode.js on Render"]
+  Dealer["Dealer App\nFlutter\ncom.emilocker.dealerapp"] -->|JWT API calls| Backend["Backend\nNode.js on Render"]
+  Customer["EMI Locker\nCustomer App\ncom.emilocker.app"] -->|JWT + IMEI auth| Backend
   Backend -->|SQL| Neon["Neon PostgreSQL"]
   Backend -->|FCM data command| FCM["Firebase Cloud Messaging"]
-  FCM --> User["User App\nKotlin Android"]
-  User -->|x-device-token JWT| Backend
+  FCM --> DPS["DeviceProtectionService\nKotlin Android\nDevice Owner"]
+  FCM --> Customer
+  FCM --> Dealer
+  DPS -->|x-device-token JWT + adaptive heartbeat| Backend
   Backend -->|SSE events| Dealer
-  Dealer -->|Evidence encrypted locally| Drive["Dealer Google Drive\noptional evidence vault"]
+  Dealer -->|Optional encrypted local backup| Drive["Dealer Google Drive\noptional workspace backup"]
 ```
+
+## Current Product Architecture Summary
+
+| Area | Current decision |
+| --- | --- |
+| Lock enforcement | One primary kiosk lock screen. Removable watermark/overlay is not the main enforcement path. |
+| Runtime state | No separate `PARTIAL_LOCK` product path. Use normal, pending, locked, decoupled, fraud/risk, and history/reminder events. |
+| Heartbeat | Adaptive 10-15 minute normal baseline; stationary/healthy may stretch to 20 min; alert mode 5 min; lockdown pending 3 min; SMS fallback rare and cost-aware. |
+| Location | Phone-side meaningful timeline filtering; backend stores limited/capped points, not raw GPS streams. |
+| SIM binding | Bound SIM must remain present; wrong/missing SIM triggers risk/lock after persisted grace. |
+| Re-enroll | Reconnect and resale/clean-sheet are separate flows. Resale clean sheet requires admin approval. |
+| Dealer onboarding | Production direction is invite-only dealer activation, not open signup. |
+| Backup | Backend and company-controlled encrypted backups are source of truth; dealer Google backup is optional convenience. |
 
 ## Command Lifecycle Contract
 
@@ -136,7 +156,7 @@ sequenceDiagram
   B->>F: Send device command
   B-->>D: Return accepted status immediately
   F->>U: Deliver command
-  U->>U: Apply lock overlay/admin behavior
+  U->>U: Apply kiosk lock / Device Owner behavior
   U->>B: POST command result / status sync
   B->>DB: Persist actual device state
   B-->>D: SSE lock_status_changed
@@ -152,7 +172,7 @@ sequenceDiagram
   participant DB as Neon DB
   participant D as Dealer App
 
-  U->>U: Check overlay/location/SMS/notification/admin/battery state
+  U->>U: Check kiosk/location/SMS/notification/admin/battery/SIM state
   U->>B: POST /api/v1/device/heartbeat with permission snapshot
   B->>DB: Store online or degraded device health
   B-->>D: SSE device_health_changed
@@ -174,20 +194,30 @@ The user app reports permission health on app start, dashboard resume, foregroun
 
 ## Service Tier Contract
 
-The Normal / Premium / VIP business behavior is defined in `docs/THREE_TIER_SERVICE_GUIDE.md`.
+Two tiers only: **Standard** and **Premium**. VIP is removed. Full behavior in `docs/THREE_TIER_SERVICE_GUIDE.md`.
 
-Do not treat key tier as only a UI label. During confirmed enrollment, key/enrollment tier must become runtime service policy for backend scheduler, dealer UI, user app behavior, and future VIP payment app behavior.
+Do not treat key tier as only a UI label. During confirmed enrollment, key/enrollment tier must become runtime service policy for backend scheduler, dealer UI, DeviceProtectionService behavior, and EMI Locker customer app push behavior.
 
 ```mermaid
 flowchart LR
-  Key["Activation Key\nstandard / premium / vip"] --> Enrollment["Pending Enrollment"]
+  Key["Activation Key\nstandard / premium"] --> Enrollment["Pending Enrollment"]
   Enrollment --> Confirm["Device Confirms Code"]
   Confirm --> Schedule["Active EMI Schedule\nservice_tier"]
   Schedule --> BackendPolicy["Backend Tier Policy"]
   BackendPolicy --> DealerUX["Dealer App Tier UI"]
-  BackendPolicy --> UserAgent["Core User App Behavior"]
-  BackendPolicy --> PaymentApp["VIP Payment App\nVIP only"]
+  BackendPolicy --> DPS["DeviceProtectionService\nEnforcement Layer"]
+  BackendPolicy --> CustomerPush["EMI Locker Customer App\nPremium push only"]
 ```
+
+## Risk Engine (Stream C — 2026-05-19)
+
+Lock rule: `overdue_emi && risk_score >= 6 && dealer_notification_window_expired (2h)`.
+Single signal never auto-locks. Every evaluation written to `auto_lock_decisions`.
+
+- `backend/src/modules/risk/riskService.js` — `recordSignal()`, `removeSignal()`, `evaluateLockDecision()`
+- `backend/src/modules/risk/riskScheduler.js` — every 3 min rescore SIM-missing; every 5 min evaluate overdue devices
+- Replaced `fraudScheduler.runSimMissingCheck()` — SIM absence now a time-escalating risk signal, not a direct lock trigger
+- Signal weights: sim_missing (4→6→8 over time), heartbeat_missing (4→6→8), emi_locker_admin_revoked (3), gmail_mismatch (2), boot_after_shutdown (1)
 
 ## Known Architecture Risks
 
