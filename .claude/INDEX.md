@@ -61,7 +61,7 @@ For AI models starting a new session, the relevant codebases are:
 | `backend/` | Node.js + Express + PostgreSQL | API server (deployed on Render) |
 | `admin-panel/` | React 18 + TypeScript + Vite + Tailwind | Admin dashboard |
 | `dealer-app-v2/` | Flutter | Dealer mobile app |
-| `user-app/` | Flutter (disguised) | End-user device lock app |
+| `user-app/` | Kotlin Android (DeviceProtectionService) | End-user Device Owner enforcement agent |
 | `database/migrations/` | SQL | Schema migrations (current: 112) |
 
 Memory index (load for context): `C:\Users\U I S\.claude\projects\d--EMI-APP\memory\MEMORY.md`

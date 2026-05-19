@@ -1,16 +1,20 @@
 # EMI LOCKER PLATFORM — GRAPHIFY
 > Machine-readable system map. Any AI model reads this instead of the full codebase.
-> Last updated: 2026-05-03 | Maintained by: Claude (Primary Supervisor)
+> Last updated: 2026-05-19 | Maintained by: EMI Locker team
+> Current decisions override older generated phase notes. See `docs/CURRENT_ARCHITECTURE_AND_SUPERSEDED_PLANS.md`.
 
 ---
 
 ## 1. SYSTEM PURPOSE
 
-Android MDM platform for EMI phone financing in Bangladesh.
+Android MDM platform for EMI phone financing in Bangladesh. Three-app architecture.
+
 - Dealers sell phones on installment via EMI
-- Backend enrolls phone as Device Owner via Android Management API (AMAPI)
-- Phone locks progressively when payments are missed (SOFT_LOCK → PARTIAL_LOCK → FULL_LOCK)
-- Phone is fully decoupled (DPC removed, FRP cleared) when final payment is confirmed by admin
+- **DeviceProtectionService** (Kotlin, Device Owner) — hidden post-enrollment, enforces lock/SIM/heartbeat. Disclosed to customer at enrollment.
+- **EMI Locker** (Flutter, visible customer app) — Customer Protection Layer. Shows EMI status, receives push, hosts payment/recovery flow. Limited Device Admin.
+- **Dealer App** (Flutter) — dealer-facing management, FCM alerts, enrollment, key tiers.
+- Phone fully decoupled (DPC removed, FRP cleared) when final payment confirmed by admin.
+- Lock requires: `overdue_emi && risk_score >= 6 && dealer_window_expired` — never from single tamper signal.
 
 **Stakeholders:** Admin → Reseller → Dealer → Customer (phone owner)
 
@@ -19,11 +23,11 @@ Android MDM platform for EMI phone financing in Bangladesh.
 ## 2. ARCHITECTURE GRAPH
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        CLIENTS                                  │
-│  [React Admin Panel]  [Flutter Dealer App]  [Kotlin User App]  │
-│     :5173 (Vite)          :3000 (API)           :3000 (API)    │
-└──────────────┬──────────────────┬──────────────────┬───────────┘
+┌────────────────────────────────────────────────────────────────────────────────────┐
+│                                    CLIENTS                                         │
+│  [React Admin Panel]  [Flutter Dealer App]  [EMI Locker Customer]  [DeviceProtSvc] │
+│     :5173 (Vite)       com.emilocker.dealerapp  com.emilocker.app   Device Owner   │
+└──────────────┬──────────────────┬──────────────────┬──────────────────┬────────────┘
                │                  │                  │
                ▼                  ▼                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
@@ -70,10 +74,10 @@ Android MDM platform for EMI phone financing in Bangladesh.
 **Score:** 95 ✓
 
 #### `backend/src/modules/lock/`
-**Purpose:** Progressive lock state machine — 3-channel delivery
+**Purpose:** Signed lock/unlock state machine and command delivery
 **Files:** `lockService.js` · `lockCommandService.js` · `lockDeliveryService.js` · `lockSchedulerService.js` · `lockVerificationService.js` · `pautService.js` · `padtService.js` · `lockController.js` · `lockRoutes.js` · `index.js`
 **Exports:** `LockService.requestLock(deviceId, level)` · `LockService.requestUnlock(deviceId)` · `PautService.issue()` · `PadtService.issue()`
-**Lock levels:** `SOFT_LOCK` (payment reminder overlay) → `PARTIAL_LOCK` (calls only) → `FULL_LOCK` (locked + GPS every 6h)
+**Current lock direction:** no new `PARTIAL_LOCK` product path. Use signed command states, pending states, risk/fraud events, and one primary kiosk/full-lock screen.
 **Delivery channels:**
   1. FCM push (primary)
   2. AMAPI policy push (secondary — bypasses FCM)
@@ -138,14 +142,14 @@ EMI_ACTIVE → FINAL_PAYMENT_RECEIVED → DEALER_NOTIFIED → PENDING_ADMIN_DECO
 - Dealer CANNOT block/delay decoupling — can only fraud-flag with evidence
 - Admin executes decouple (requires 2FA) → generates RTOC → sends signed FCM command → calls AMAPI to delete managed account (clears FRP)
 - If FCM fails: issue PADT (7 day expiry) — device checks on reconnect
-- 5-day countdown timer after dealer notification (Bull queue)
+- 5-day countdown / fraud window state is stored in Postgres and processed by DB cron. Long-delay Bull queues are superseded.
 **Score:** FAILED — currently being rebuilt ↻
 
 #### `backend/src/modules/location/`
-**Purpose:** GPS pull via FCM, geofencing, auto-poll when locked
+**Purpose:** GPS pull via FCM and capped location/timeline reporting
 **Files:** `locationService.js` · `locationController.js` · `locationRoutes.js` · `locationScheduler.js` · `schema.sql` · `index.js`
 **Endpoints:** `POST /location/:deviceId/pull` · `POST /location/:deviceId/report` · `GET /location/:deviceId/history` · `POST /location/:deviceId/geofence`
-**Rules:** Keep last 10 GPS pulls per device · alert dealer if outside geofence while locked · auto-pull every 6h when FULL_LOCK active (Bull queue)
+**Current rules:** avoid raw GPS spam. User app should filter meaningful points locally; backend stores capped location/timeline evidence and explicit pull results.
 **Score:** 72 (old threshold) ⚠ NEEDS RE-AUDIT
 
 #### `backend/src/modules/admin/`
@@ -169,13 +173,14 @@ EMI_ACTIVE → FINAL_PAYMENT_RECEIVED → DEALER_NOTIFIED → PENDING_ADMIN_DECO
 
 ---
 
-### PHASES 3–5 (NOT STARTED)
+### PHASES 3–6 (NOT STARTED)
 
 | Phase | What gets built |
 |-------|----------------|
-| Phase 3 | Kotlin User App — DPC client, lock screen overlays, PAUT offline handling, hardware binding |
-| Phase 4 | Flutter Dealer App — device enrollment, EMI dashboard, GPS view, lock requests |
-| Phase 5 | React Admin Panel — full admin UI, audit log viewer, NEIR queue, reseller management |
+| Phase 3 | DeviceProtectionService (Kotlin) — Device Owner enforcement, lock screen, SIM binding, risk score engine, shutdown receiver, boot receiver, AIDL service |
+| Phase 4 | EMI Locker Customer App (Flutter, `com.emilocker.app`) — Google Sign-In + IMEI auth, disclosure screen, EMI status, FCM push, Device Admin integration |
+| Phase 5 | Flutter Dealer App completion — key tier UI, device detail, FCM send-side wiring |
+| Phase 6 | React Admin Panel — full admin UI, audit log, NEIR queue, reseller management, Gmail rebind flow |
 
 ---
 
@@ -215,7 +220,7 @@ DecouplingService
   └→ LockService (for final lock state)
   └→ AmapiService.deleteManagedAccount() (clears FRP)
   └→ NotificationService (dealer notification)
-  └→ Bull queue scheduler (5-day countdown)
+  └→ Postgres fraud-window state + DB cron (long-delay Bull queue superseded)
 
 AdminDeviceService                         ← ⚠ KNOWN BUG: was bypassing LockService directly
   └→ LockService.requestLock()             ← CORRECT path (being fixed in current rebuild)

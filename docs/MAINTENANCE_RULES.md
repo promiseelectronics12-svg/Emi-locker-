@@ -2,6 +2,8 @@
 
 These rules exist to stop invisible failures, infinite spinners, and route mismatch bugs from recurring.
 
+Current architecture decisions and superseded plans are documented in `docs/CURRENT_ARCHITECTURE_AND_SUPERSEDED_PLANS.md`.
+
 ## Non-Negotiable Runtime Rules
 
 1. No dealer action can spin forever.
@@ -36,12 +38,12 @@ These rules exist to stop invisible failures, infinite spinners, and route misma
 
 | Rule | Reason |
 | --- | --- |
-| Heartbeat must report permission health | Dealer must know when app is degraded |
+| Adaptive heartbeat must report permission/SIM/lock health | Dealer must know when app is degraded without draining battery/server |
 | Permission health changes must be reported immediately at the next app lifecycle/FCM/service touchpoint | Prevents silent permission tampering |
 | Offline unlock must sync when device returns online | Dealer status must reflect real device state |
-| Lock overlay must relaunch or defend against dismissal where Android allows | Prevents easy bypass |
+| Kiosk lock screen must relaunch or defend against dismissal where Android allows | Prevents easy bypass |
 | SMS/offline OTP support must detect permission missing | Prevents silent OTP failure |
-| Local EMI reminders must come from finite schedule rows | Prevents reminders after term ends |
+| Local EMI notices must come from finite schedule rows | Prevents stale due/payment messages after term ends |
 
 ## Release Checklist
 

@@ -1,5 +1,5 @@
 # EMI Locker Platform — Unified Implementation Plan
-**For Codex implementation. All architectural decisions are pre-made. Do not deviate.**
+**SUPERSEDED 2026-05-19.** This document predates the 3-app architecture decision and uses old "fake SIM Toolkit UI" / deceptive framing — now replaced by honest `DeviceProtectionService` + `EMI Locker` Customer Protection Layer model. Current architecture: `docs/CURRENT_ARCHITECTURE_AND_SUPERSEDED_PLANS.md`. Do NOT implement from this file.
 
 ---
 
