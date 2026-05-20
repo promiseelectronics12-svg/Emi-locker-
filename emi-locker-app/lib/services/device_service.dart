@@ -5,6 +5,19 @@ import 'auth_service.dart';
 
 const String _kBaseUrl = 'https://emi-locker-erkt.onrender.com';
 
+enum FetchStatus { ok, unauthorized, noData, networkError }
+
+class FetchResult<T> {
+  final FetchStatus status;
+  final T? data;
+  final String? errorCode;
+
+  const FetchResult({required this.status, this.data, this.errorCode});
+
+  bool get isOk => status == FetchStatus.ok;
+  bool get isUnauthorized => status == FetchStatus.unauthorized;
+}
+
 class DeviceInfo {
   final String id;
   final String imei;
@@ -97,41 +110,77 @@ class DeviceService {
   DeviceService._();
   static final DeviceService instance = DeviceService._();
 
-  Map<String, String> get _authHeaders => {
+  Map<String, String> _authHeaders() => {
         'Content-Type': 'application/json',
         if (AuthService.instance.appToken != null)
           'Authorization': 'Bearer ${AuthService.instance.appToken}',
       };
 
-  Future<DeviceInfo?> fetchDevice(String imei) async {
+  /// Execute [call] with automatic one-time token refresh on 401.
+  /// Returns null on network error; FetchResult.unauthorized if refresh also fails.
+  Future<FetchResult<T>> _withTokenRefresh<T>(
+    Future<http.Response> Function(Map<String, String> headers) call,
+    T Function(Map<String, dynamic>) parse,
+  ) async {
     try {
-      final uri = Uri.parse('$_kBaseUrl/api/v1/customer/devices/$imei');
-      final response = await http.get(uri, headers: _authHeaders);
+      var response = await call(_authHeaders());
+
+      if (response.statusCode == 401) {
+        debugPrint('[DeviceService] 401 — attempting token refresh');
+        final refreshed = await AuthService.instance.refreshTokens();
+        if (!refreshed) {
+          return FetchResult(status: FetchStatus.unauthorized, errorCode: 'TOKEN_EXPIRED');
+        }
+        response = await call(_authHeaders());
+      }
+
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body) as Map<String, dynamic>;
-        return DeviceInfo.fromJson(body['device'] as Map<String, dynamic>);
+        return FetchResult(status: FetchStatus.ok, data: parse(body));
       }
-      debugPrint('[DeviceService] fetchDevice ${response.statusCode}: ${response.body}');
-      return null;
+
+      final body = _tryParseBody(response.body);
+      final code = body?['code'] as String? ?? 'UNKNOWN';
+      debugPrint('[DeviceService] ${response.statusCode} $code');
+
+      if (response.statusCode == 401) {
+        return FetchResult(status: FetchStatus.unauthorized, errorCode: code);
+      }
+      return FetchResult(status: FetchStatus.noData, errorCode: code);
+    } on http.ClientException catch (e) {
+      debugPrint('[DeviceService] Network error: $e');
+      return FetchResult(status: FetchStatus.networkError, errorCode: 'NETWORK_ERROR');
     } catch (e) {
-      debugPrint('[DeviceService] fetchDevice error: $e');
+      debugPrint('[DeviceService] Unexpected error: $e');
+      return FetchResult(status: FetchStatus.networkError, errorCode: 'NETWORK_ERROR');
+    }
+  }
+
+  Map<String, dynamic>? _tryParseBody(String body) {
+    try {
+      return jsonDecode(body) as Map<String, dynamic>;
+    } catch (_) {
       return null;
     }
   }
 
-  Future<ScheduleSummary?> fetchSchedule() async {
-    try {
-      final uri = Uri.parse('$_kBaseUrl/api/v1/customer/schedule');
-      final response = await http.get(uri, headers: _authHeaders);
-      if (response.statusCode == 200) {
-        final body = jsonDecode(response.body) as Map<String, dynamic>;
-        return ScheduleSummary.fromJson(body['schedule'] as Map<String, dynamic>);
-      }
-      debugPrint('[DeviceService] fetchSchedule ${response.statusCode}: ${response.body}');
-      return null;
-    } catch (e) {
-      debugPrint('[DeviceService] fetchSchedule error: $e');
-      return null;
-    }
+  Future<FetchResult<DeviceInfo>> fetchDevice(String imei) {
+    return _withTokenRefresh(
+      (headers) => http.get(
+        Uri.parse('$_kBaseUrl/api/v1/customer/devices/$imei'),
+        headers: headers,
+      ),
+      (body) => DeviceInfo.fromJson(body['device'] as Map<String, dynamic>),
+    );
+  }
+
+  Future<FetchResult<ScheduleSummary>> fetchSchedule() {
+    return _withTokenRefresh(
+      (headers) => http.get(
+        Uri.parse('$_kBaseUrl/api/v1/customer/schedule'),
+        headers: headers,
+      ),
+      (body) => ScheduleSummary.fromJson(body['schedule'] as Map<String, dynamic>),
+    );
   }
 }

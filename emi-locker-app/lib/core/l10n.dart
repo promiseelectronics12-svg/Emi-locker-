@@ -59,11 +59,72 @@ class AppStrings {
   String get loginLoading => isBangla ? 'লগ ইন হচ্ছে…' : 'Signing in…';
   String get loginError => isBangla ? 'সাইন ইন ব্যর্থ হয়েছে।' : 'Sign-in failed.';
 
+  // ── IMEI dialog ───────────────────────────────────────────────────────────────
+  String get imeiDialogTitle => isBangla ? 'ডিভাইস IMEI দিন' : 'Enter Device IMEI';
+
+  String get imeiDialogInstruction =>
+      isBangla
+          ? 'প্রথমবার সাইন ইনে আপনার ডিভাইস নিশ্চিত করতে IMEI দরকার।\n\n*#06# ডায়াল করে আপনার IMEI খুঁজুন।'
+          : 'First sign-in requires your device IMEI to verify enrollment.\n\nDial *#06# to find your IMEI.';
+
+  String get imeiDialogHint => isBangla ? '১৫ সংখ্যার IMEI' : '15-digit IMEI';
+  String get imeiDialogCancel => isBangla ? 'বাতিল' : 'Cancel';
+  String get imeiDialogContinue => isBangla ? 'চালিয়ে যান' : 'Continue';
+
+  String get imeiInvalidError =>
+      isBangla
+          ? 'IMEI অবশ্যই ১৫টি সংখ্যা হতে হবে।'
+          : 'IMEI must be exactly 15 digits.';
+
+  // ── Backend error codes → user-friendly messages ──────────────────────────────
+  String errorForCode(String code) {
+    switch (code) {
+      case 'DEVICE_NOT_ENROLLED':
+        return isBangla
+            ? 'ডিভাইস নিবন্ধিত নয়। আপনার ডিলারের সাথে যোগাযোগ করুন।'
+            : 'Device not enrolled. Contact your dealer.';
+      case 'ACCOUNT_NOT_FOUND':
+        return isBangla
+            ? 'অ্যাকাউন্ট পাওয়া যায়নি। প্রথমবার সাইন ইনে IMEI দিন।'
+            : 'Account not found. Provide your IMEI on first sign-in.';
+      case 'INVALID_GOOGLE_TOKEN':
+        return isBangla
+            ? 'Google সাইন ইন ব্যর্থ। আবার চেষ্টা করুন।'
+            : 'Google sign-in failed. Please try again.';
+      case 'GOOGLE_AUTH_NOT_CONFIGURED':
+        return isBangla
+            ? 'Google সাইন ইন এখন উপলব্ধ নয়।'
+            : 'Google sign-in is not available right now.';
+      case 'TOKEN_EXPIRED':
+      case 'ACCESS_TOKEN_REQUIRED':
+      case 'INVALID_SESSION':
+        return isBangla
+            ? 'সেশন মেয়াদ শেষ। আবার সাইন ইন করুন।'
+            : 'Session expired. Please sign in again.';
+      case 'NO_DEVICE':
+        return isBangla
+            ? 'কোনো ডিভাইস নিবন্ধিত নেই। আপনার ডিলারের সাথে যোগাযোগ করুন।'
+            : 'No device registered. Contact your dealer.';
+      case 'NO_SCHEDULE':
+        return isBangla
+            ? 'কোনো কিস্তির সময়সূচি পাওয়া যায়নি।'
+            : 'No EMI schedule found.';
+      case 'NETWORK_ERROR':
+        return isBangla
+            ? 'নেটওয়ার্ক সমস্যা। আপনার সংযোগ পরীক্ষা করুন।'
+            : 'Network error. Check your connection.';
+      default:
+        return isBangla ? 'একটি সমস্যা হয়েছে। আবার চেষ্টা করুন।' : 'Something went wrong. Please try again.';
+    }
+  }
+
   // ── Home screen ──────────────────────────────────────────────────────────────
   String get homeTitle => isBangla ? 'ইএমআই স্ট্যাটাস' : 'EMI Status';
   String get homeNotAvailable =>
       isBangla ? 'তথ্য পাওয়া যায়নি।' : 'No data available.';
   String get homeSignOut => isBangla ? 'সাইন আউট' : 'Sign Out';
+  String get homeSessionExpired =>
+      isBangla ? 'সেশন মেয়াদ শেষ হয়েছে।' : 'Your session has expired.';
 
   // ── Language toggle ──────────────────────────────────────────────────────────
   String get langToggleLabel =>

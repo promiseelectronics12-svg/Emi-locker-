@@ -6,6 +6,7 @@ const {
   generateRefreshToken,
   storeRefreshToken
 } = require('../auth/jwt');
+const { storeSession } = require('../auth');
 
 const googleClient = new OAuth2Client();
 
@@ -129,7 +130,8 @@ async function googleAuth(req, res) {
     }
 
     const { token: accessToken } = generateAccessToken(user);
-    const { token: refreshToken } = generateRefreshToken(user);
+    const { token: refreshToken, jti: refreshJti } = generateRefreshToken(user);
+    await storeSession(user.id, refreshJti);
     await storeRefreshToken(user.id, refreshToken);
 
     return res.json({

@@ -23,7 +23,9 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   ScheduleSummary? _schedule;
   bool _loading = true;
-  String? _error;
+  String? _errorCode;
+
+  AppStrings get _s => AppStrings.of(widget.language);
 
   @override
   void initState() {
@@ -33,13 +35,26 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
-    final schedule = await DeviceService.instance.fetchSchedule();
-    if (!mounted) return;
     setState(() {
-      _schedule = schedule;
+      _loading = true;
+      _errorCode = null;
+    });
+
+    final result = await DeviceService.instance.fetchSchedule();
+
+    if (!mounted) return;
+
+    if (result.isUnauthorized) {
+      // Token refresh failed inside DeviceService — session fully expired
+      await AuthService.instance.signOut();
+      widget.onSignedOut();
+      return;
+    }
+
+    setState(() {
+      _schedule = result.data;
+      _errorCode = result.isOk ? null : (result.errorCode ?? 'UNKNOWN');
       _loading = false;
-      if (schedule == null) _error = 'Could not load EMI schedule.';
     });
   }
 
@@ -57,7 +72,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final s = AppStrings.of(widget.language);
+    final s = _s;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A1A),
@@ -93,41 +108,45 @@ class _HomeScreenState extends State<HomeScreen> {
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(16),
-                child: _error != null && _schedule == null
-                    ? _buildError(s)
-                    : _buildContent(s),
+                child: _errorCode != null && _schedule == null
+                    ? _buildError()
+                    : _buildContent(),
               ),
             ),
     );
   }
 
-  Widget _buildError(AppStrings s) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, color: Color(0xFFFF6B6B), size: 48),
-            const SizedBox(height: 16),
-            Text(
-              s.homeNotAvailable,
-              style: const TextStyle(color: Color(0xFF888888), fontSize: 14),
-              textAlign: TextAlign.center,
-            ),
-          ],
+  Widget _buildError() {
+    final s = _s;
+    return SizedBox(
+      height: 400,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline, color: Color(0xFFFF6B6B), size: 48),
+              const SizedBox(height: 16),
+              Text(
+                s.errorForCode(_errorCode ?? 'UNKNOWN'),
+                style: const TextStyle(color: Color(0xFF888888), fontSize: 14),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildContent(AppStrings s) {
+  Widget _buildContent() {
+    final s = _s;
     final schedule = _schedule;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Header
         Row(
           children: [
             const Icon(Icons.shield_outlined, color: Color(0xFF1565C0), size: 28),
@@ -149,12 +168,12 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           )
         else ...[
-          // Device + lock status
           _buildCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _row(Icons.phone_android, '${schedule.deviceBrand ?? ''} ${schedule.deviceModel ?? ''}'.trim()),
+                _row(Icons.phone_android,
+                    '${schedule.deviceBrand ?? ''} ${schedule.deviceModel ?? ''}'.trim()),
                 if (schedule.lockLevel != null)
                   _row(Icons.lock, schedule.lockLevel!, color: const Color(0xFFFF6B6B)),
               ],
@@ -162,7 +181,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 12),
 
-          // EMI summary
           _buildCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -193,11 +211,10 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 12),
 
-          // Installments
           if (schedule.installments.isNotEmpty) ...[
             _label('Installments'),
             const SizedBox(height: 8),
-            ...schedule.installments.map((inst) => _buildInstallmentTile(inst)),
+            ...schedule.installments.map(_buildInstallmentTile),
           ],
         ],
         const SizedBox(height: 32),
@@ -210,6 +227,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final dueDate = inst['due_date'] ?? inst['dueDate'] ?? '';
     final amount = inst['amount'] ?? '';
     final paid = inst['payment_status'] == 'completed' || inst['paymentStatus'] == 'completed';
+    final isPaid = paid || inst['payment_id'] != null;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -218,14 +236,14 @@ class _HomeScreenState extends State<HomeScreen> {
         color: const Color(0xFF1A1A2E),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: paid ? const Color(0xFF1B5E20) : const Color(0xFF2A2A4A),
+          color: isPaid ? const Color(0xFF1B5E20) : const Color(0xFF2A2A4A),
         ),
       ),
       child: Row(
         children: [
           Icon(
-            paid ? Icons.check_circle : Icons.radio_button_unchecked,
-            color: paid ? const Color(0xFF4CAF50) : const Color(0xFF888888),
+            isPaid ? Icons.check_circle : Icons.radio_button_unchecked,
+            color: isPaid ? const Color(0xFF4CAF50) : const Color(0xFF888888),
             size: 18,
           ),
           const SizedBox(width: 10),
@@ -238,7 +256,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Text(
             '৳$amount',
             style: TextStyle(
-              color: paid ? const Color(0xFF4CAF50) : Colors.white,
+              color: isPaid ? const Color(0xFF4CAF50) : Colors.white,
               fontSize: 13,
               fontWeight: FontWeight.w600,
             ),

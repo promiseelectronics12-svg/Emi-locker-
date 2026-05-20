@@ -13,13 +13,13 @@ class AuthService {
   final _googleSignIn = GoogleSignIn(scopes: ['email', 'openid']);
 
   String? _appToken;
-  // ignore: unused_field — stored for future token-refresh flow
   String? _refreshToken;
   String? _userId;
   String? _userName;
   String? _userEmail;
 
   String? get appToken => _appToken;
+  String? get refreshToken => _refreshToken;
   String? get userId => _userId;
   String? get userName => _userName;
   String? get userEmail => _userEmail;
@@ -36,8 +36,7 @@ class AuthService {
 
   /// Sign in with Google, then exchange ID token for app JWT.
   /// POST /api/v1/customer/auth/google
-  /// Body: { "idToken": "google_id_token", "imei"?: "device_imei" }
-  /// Response: { "token": "app_jwt", "refreshToken": "...", "userId": "uuid", "name": "...", "email": "..." }
+  /// Body: { "idToken": "...", "imei"?: "..." }
   Future<AuthResult> signInWithGoogle({String? imei}) async {
     try {
       final account = await _googleSignIn.signIn();
@@ -45,7 +44,7 @@ class AuthService {
 
       final auth = await account.authentication;
       final idToken = auth.idToken;
-      if (idToken == null) return AuthResult.error('Google ID token missing');
+      if (idToken == null) return AuthResult.error('INVALID_GOOGLE_TOKEN');
 
       debugPrint('[Auth] Google sign-in OK: ${account.email}');
 
@@ -62,28 +61,60 @@ class AuthService {
 
       if (response.statusCode == 200 && json['status'] == 'ok') {
         final token = json['token'] as String;
-        final refreshToken = json['refreshToken'] as String? ?? '';
+        final rt = json['refreshToken'] as String? ?? '';
         final userId = json['userId'] as String;
         final name = json['name'] as String? ?? account.displayName ?? '';
         final email = json['email'] as String? ?? account.email;
-        await _persist(token, refreshToken, userId, name, email);
+        await _persist(token, rt, userId, name, email);
         return AuthResult.success(token: token, userId: userId);
       }
 
       final code = json['code'] as String? ?? 'UNKNOWN';
-      final message = json['message'] as String? ?? 'Sign-in failed';
-      debugPrint('[Auth] Backend error $code: $message');
-
-      if (code == 'DEVICE_NOT_ENROLLED') {
-        return AuthResult.error('Device not enrolled. Contact your dealer.');
-      }
-      if (code == 'ACCOUNT_NOT_FOUND') {
-        return AuthResult.error('Account not found. Provide your device IMEI on first sign-in.');
-      }
-      return AuthResult.error(message);
+      debugPrint('[Auth] Backend error $code: ${json['message']}');
+      return AuthResult.error(code);
+    } on http.ClientException catch (e) {
+      debugPrint('[Auth] Network error: $e');
+      return AuthResult.error('NETWORK_ERROR');
     } catch (e) {
       debugPrint('[Auth] signInWithGoogle error: $e');
-      return AuthResult.error(e.toString());
+      return AuthResult.error('UNKNOWN');
+    }
+  }
+
+  /// Attempt to refresh tokens using stored refresh token.
+  /// Returns true if new tokens were persisted, false otherwise.
+  Future<bool> refreshTokens() async {
+    final rt = _refreshToken;
+    if (rt == null || rt.isEmpty) return false;
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_kBaseUrl/api/v1/auth/refresh'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'refreshToken': rt}),
+      );
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        final newAccess = json['accessToken'] as String?;
+        final newRefresh = json['refreshToken'] as String?;
+        if (newAccess != null && _userId != null) {
+          await _persist(
+            newAccess,
+            newRefresh ?? rt,
+            _userId!,
+            _userName ?? '',
+            _userEmail ?? '',
+          );
+          debugPrint('[Auth] Tokens refreshed');
+          return true;
+        }
+      }
+      debugPrint('[Auth] Token refresh failed: ${response.statusCode}');
+      return false;
+    } catch (e) {
+      debugPrint('[Auth] refreshTokens error: $e');
+      return false;
     }
   }
 
@@ -128,14 +159,15 @@ class AuthResult {
   final bool cancelled;
   final String? token;
   final String? userId;
-  final String? error;
+  /// Backend error code, e.g. ACCOUNT_NOT_FOUND, DEVICE_NOT_ENROLLED.
+  final String? errorCode;
 
   const AuthResult._({
     required this.success,
     required this.cancelled,
     this.token,
     this.userId,
-    this.error,
+    this.errorCode,
   });
 
   factory AuthResult.success({required String token, required String userId}) =>
@@ -144,6 +176,9 @@ class AuthResult {
   factory AuthResult.cancelled() =>
       AuthResult._(success: false, cancelled: true);
 
-  factory AuthResult.error(String message) =>
-      AuthResult._(success: false, cancelled: false, error: message);
+  factory AuthResult.error(String code) =>
+      AuthResult._(success: false, cancelled: false, errorCode: code);
+
+  bool get needsImei =>
+      errorCode == 'ACCOUNT_NOT_FOUND' || errorCode == 'DEVICE_NOT_ENROLLED';
 }

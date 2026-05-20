@@ -20,12 +20,14 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   bool _loading = false;
-  String? _errorMsg;
+  String? _errorCode;
+
+  AppStrings get _s => AppStrings.of(widget.language);
 
   Future<void> _signIn({String? imei}) async {
     setState(() {
       _loading = true;
-      _errorMsg = null;
+      _errorCode = null;
     });
 
     final result = await AuthService.instance.signInWithGoogle(imei: imei);
@@ -42,92 +44,128 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    // Fix 2: ACCOUNT_NOT_FOUND → prompt user for IMEI to bind device on first sign-in.
-    // (Normal Android apps cannot reliably read IMEI; AIDL bridge comes in Stream D.)
-    if (result.error?.contains('IMEI') == true ||
-        result.error?.contains('not found') == true ||
-        result.error?.contains('not enrolled') == true) {
+    // ACCOUNT_NOT_FOUND or DEVICE_NOT_ENROLLED → show IMEI dialog
+    if (result.needsImei) {
       setState(() => _loading = false);
       await _showImeiDialog();
       return;
     }
 
     setState(() {
-      _errorMsg = result.error;
+      _errorCode = result.errorCode;
       _loading = false;
     });
   }
 
+  /// Validates that [imei] is exactly 15 digits.
+  static bool _isValidImei(String imei) {
+    final trimmed = imei.trim();
+    return trimmed.length == 15 && RegExp(r'^\d{15}$').hasMatch(trimmed);
+  }
+
   Future<void> _showImeiDialog() async {
+    final s = _s;
     final controller = TextEditingController();
+    String? fieldError;
 
     final confirmed = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1A1A2E),
-          title: const Text(
-            'Enter Device IMEI',
-            style: TextStyle(color: Colors.white, fontSize: 16),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'First sign-in requires your device IMEI to verify enrollment.\n\nDial *#06# to find your IMEI.',
-                style: TextStyle(color: Color(0xFF888888), fontSize: 13),
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1A1A2E),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              title: Text(
+                s.imeiDialogTitle,
+                style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
               ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: controller,
-                keyboardType: TextInputType.number,
-                maxLength: 17,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: '15-digit IMEI',
-                  hintStyle: const TextStyle(color: Color(0xFF555555)),
-                  counterStyle: const TextStyle(color: Color(0xFF555555)),
-                  enabledBorder: OutlineInputBorder(
-                    borderSide: const BorderSide(color: Color(0xFF2A2A4A)),
-                    borderRadius: BorderRadius.circular(8),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    s.imeiDialogInstruction,
+                    style: const TextStyle(color: Color(0xFF888888), fontSize: 13, height: 1.5),
                   ),
-                  focusedBorder: OutlineInputBorder(
-                    borderSide: const BorderSide(color: Color(0xFF1565C0)),
-                    borderRadius: BorderRadius.circular(8),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: controller,
+                    keyboardType: TextInputType.number,
+                    maxLength: 15,
+                    style: const TextStyle(color: Colors.white, fontSize: 15, letterSpacing: 1.5),
+                    onChanged: (_) {
+                      if (fieldError != null) setDialogState(() => fieldError = null);
+                    },
+                    decoration: InputDecoration(
+                      hintText: s.imeiDialogHint,
+                      hintStyle: const TextStyle(color: Color(0xFF444455), letterSpacing: 0),
+                      counterStyle: const TextStyle(color: Color(0xFF555566), fontSize: 11),
+                      errorText: fieldError,
+                      errorStyle: const TextStyle(color: Color(0xFFFF6B6B), fontSize: 12),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: const BorderSide(color: Color(0xFF2A2A4A)),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: const BorderSide(color: Color(0xFF1565C0)),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      errorBorder: OutlineInputBorder(
+                        borderSide: const BorderSide(color: Color(0xFFFF6B6B)),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      focusedErrorBorder: OutlineInputBorder(
+                        borderSide: const BorderSide(color: Color(0xFFFF6B6B)),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      filled: true,
+                      fillColor: const Color(0xFF0A0A1A),
+                    ),
                   ),
-                  filled: true,
-                  fillColor: const Color(0xFF0A0A1A),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: Text(s.imeiDialogCancel, style: const TextStyle(color: Color(0xFF888888))),
                 ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancel', style: TextStyle(color: Color(0xFF888888))),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1565C0)),
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Continue', style: TextStyle(color: Colors.white)),
-            ),
-          ],
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1565C0),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () {
+                    final v = controller.text.trim();
+                    if (!_isValidImei(v)) {
+                      setDialogState(() => fieldError = s.imeiInvalidError);
+                      return;
+                    }
+                    Navigator.of(ctx).pop(true);
+                  },
+                  child: Text(s.imeiDialogContinue, style: const TextStyle(color: Colors.white)),
+                ),
+              ],
+            );
+          },
         );
       },
     );
 
     if (!mounted) return;
 
-    if (confirmed == true && controller.text.trim().isNotEmpty) {
-      await _signIn(imei: controller.text.trim());
+    if (confirmed == true) {
+      final imei = controller.text.trim();
+      if (_isValidImei(imei)) {
+        await _signIn(imei: imei);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final s = AppStrings.of(widget.language);
+    final s = _s;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A1A),
@@ -184,7 +222,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const Spacer(flex: 3),
 
-              if (_errorMsg != null) ...[
+              if (_errorCode != null) ...[
                 Container(
                   padding: const EdgeInsets.all(12),
                   margin: const EdgeInsets.only(bottom: 16),
@@ -193,7 +231,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
-                    _errorMsg!,
+                    s.errorForCode(_errorCode!),
                     style: const TextStyle(color: Color(0xFFFF6B6B), fontSize: 13),
                     textAlign: TextAlign.center,
                   ),
@@ -209,10 +247,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ? const SizedBox(
                           width: 20,
                           height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                         )
                       : const Icon(Icons.login, color: Colors.white),
                   label: Text(
@@ -226,9 +261,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF1A73E8),
                     disabledBackgroundColor: const Color(0xFF1A3A5C),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
                 ),
               ),
