@@ -29,5 +29,6 @@ router.use('/risk', require('../modules/risk/riskRoutes'));
 router.use('/evidence', require('./evidence'));
 router.use('/credit', require('../modules/credit/creditRoutes'));
 router.use('/events', require('../modules/sse/sseRoutes'));
+router.use('/customer', require('../modules/customer/customerRoutes'));
 
 module.exports = router;

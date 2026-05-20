@@ -22,23 +22,107 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _loading = false;
   String? _errorMsg;
 
-  Future<void> _signIn() async {
+  Future<void> _signIn({String? imei}) async {
     setState(() {
       _loading = true;
       _errorMsg = null;
     });
 
-    final result = await AuthService.instance.signInWithGoogle();
+    final result = await AuthService.instance.signInWithGoogle(imei: imei);
 
     if (!mounted) return;
 
     if (result.success) {
       widget.onAuthenticated();
-    } else if (!result.cancelled) {
-      setState(() => _errorMsg = result.error);
+      return;
     }
 
-    if (mounted) setState(() => _loading = false);
+    if (result.cancelled) {
+      setState(() => _loading = false);
+      return;
+    }
+
+    // Fix 2: ACCOUNT_NOT_FOUND → prompt user for IMEI to bind device on first sign-in.
+    // (Normal Android apps cannot reliably read IMEI; AIDL bridge comes in Stream D.)
+    if (result.error?.contains('IMEI') == true ||
+        result.error?.contains('not found') == true ||
+        result.error?.contains('not enrolled') == true) {
+      setState(() => _loading = false);
+      await _showImeiDialog();
+      return;
+    }
+
+    setState(() {
+      _errorMsg = result.error;
+      _loading = false;
+    });
+  }
+
+  Future<void> _showImeiDialog() async {
+    final controller = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1A1A2E),
+          title: const Text(
+            'Enter Device IMEI',
+            style: TextStyle(color: Colors.white, fontSize: 16),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'First sign-in requires your device IMEI to verify enrollment.\n\nDial *#06# to find your IMEI.',
+                style: TextStyle(color: Color(0xFF888888), fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: controller,
+                keyboardType: TextInputType.number,
+                maxLength: 17,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: '15-digit IMEI',
+                  hintStyle: const TextStyle(color: Color(0xFF555555)),
+                  counterStyle: const TextStyle(color: Color(0xFF555555)),
+                  enabledBorder: OutlineInputBorder(
+                    borderSide: const BorderSide(color: Color(0xFF2A2A4A)),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: const BorderSide(color: Color(0xFF1565C0)),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  filled: true,
+                  fillColor: const Color(0xFF0A0A1A),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel', style: TextStyle(color: Color(0xFF888888))),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1565C0)),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Continue', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted) return;
+
+    if (confirmed == true && controller.text.trim().isNotEmpty) {
+      await _signIn(imei: controller.text.trim());
+    }
   }
 
   @override
@@ -120,7 +204,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 width: double.infinity,
                 height: 56,
                 child: ElevatedButton.icon(
-                  onPressed: _loading ? null : _signIn,
+                  onPressed: _loading ? null : () => _signIn(),
                   icon: _loading
                       ? const SizedBox(
                           width: 20,

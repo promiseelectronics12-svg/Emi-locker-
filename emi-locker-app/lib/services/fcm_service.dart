@@ -1,11 +1,12 @@
+import 'dart:convert';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 
-// Top-level handler required by FCM for background messages.
+const String _kBaseUrl = 'https://emi-locker-erkt.onrender.com';
+
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // Background messages handled here.
-  // Firebase.initializeApp() is called in main() before this runs.
   debugPrint('[FCM] Background message: ${message.messageId}');
 }
 
@@ -19,7 +20,6 @@ class FcmService {
   Future<void> init() async {
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-    // Request permission (Android 13+)
     final settings = await FirebaseMessaging.instance.requestPermission(
       alert: true,
       badge: false,
@@ -27,31 +27,37 @@ class FcmService {
     );
     debugPrint('[FCM] Permission: ${settings.authorizationStatus}');
 
-    // Fetch token
     _token = await FirebaseMessaging.instance.getToken();
     debugPrint('[FCM] Token: $_token');
 
-    // Listen for token refresh
     FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
       _token = newToken;
       debugPrint('[FCM] Token refreshed: $newToken');
-      // TODO: POST new token to backend /api/v1/customer/fcm-token
+      // Caller responsible for re-registering after token refresh
     });
 
-    // Foreground message handler
     FirebaseMessaging.onMessage.listen((message) {
       debugPrint('[FCM] Foreground message: ${message.notification?.title}');
       // TODO: show in-app notification banner
     });
   }
 
-  /// POST token to backend. Call after user authenticates.
-  /// Endpoint: POST /api/v1/customer/fcm-token
-  /// Body: { "token": "fcm_token" }
-  /// Status: BACKEND ENDPOINT NOT YET IMPLEMENTED
+  /// POST /api/v1/customer/fcm-token
+  /// Call after user authenticates successfully.
   Future<void> registerTokenWithBackend(String authToken) async {
     if (_token == null) return;
-    // TODO: implement when backend endpoint is ready
-    debugPrint('[FCM] registerTokenWithBackend: stub — endpoint not implemented');
+    try {
+      final response = await http.post(
+        Uri.parse('$_kBaseUrl/api/v1/customer/fcm-token'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $authToken',
+        },
+        body: jsonEncode({'token': _token}),
+      );
+      debugPrint('[FCM] registerTokenWithBackend: ${response.statusCode}');
+    } catch (e) {
+      debugPrint('[FCM] registerTokenWithBackend error: $e');
+    }
   }
 }
