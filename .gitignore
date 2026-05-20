@@ -42,6 +42,32 @@ review_request.json
 review_result.json
 build_log.md
 admin-panel/build_error.txt
+build_output.txt
+*_prompt_*.txt
+_prompt_tmp.txt
+gemini_fix_*.txt
+gemini_fix_*.md
+backend-lock-engine-audit.json
+autonomous_builder.py
+codex_cli.py
+
+# Local debug / device investigation artifacts
+captures/
+*.logcat.txt
+*logcat*.txt
+*tempemi_logcat.txt
+docs/*debug*.md
+docs/*debug*.drawio
+docs/emi-locker-simple-system-flow.drawio
+docs/xiaomi debug.md
+SYSTEM_CATALOG.md
+docs/CHANGE_TRACKER.md
+docs/catalog/
+docs/figma-handoff/
+figma_*.png
+
+# Local migration helpers / one-off scripts
+backend/migrate_*.js
 
 # Graphify
 graphify-out/
@@ -55,4 +81,10 @@ vulnerability.md
 
 # RSA key pair — never commit private key
 backend/src/keys/*.pem
+backend/keys/*.pem
+backend/scripts/src/keys/*.pem
 *.pem
+
+# Local signing backups
+user-app/keystore_backup/
+**/keystore_backup/
