@@ -13,7 +13,6 @@ import { Device } from '@/types';
 
 const lockBadgeVariant = (state?: string) => {
   if (state === 'FULL_LOCK') return 'destructive';
-  if (state === 'PARTIAL_LOCK') return 'warning';
   if (state === 'UNLOCKED' || state === 'NONE') return 'success';
   return 'outline';
 };

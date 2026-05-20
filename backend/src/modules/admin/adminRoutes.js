@@ -285,7 +285,7 @@ router.get(
 router.get(
   '/keys/inventory',
   [
-    query('tier').optional().isIn(['standard', 'premium', 'vip']),
+    query('tier').optional().isIn(['standard', 'premium']),
     query('resellerId').optional().isUUID()
   ],
   validateRequest,

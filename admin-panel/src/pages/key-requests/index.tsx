@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { CheckCircle, Clock, Diamond, Key, Star, XCircle } from 'lucide-react';
+import { CheckCircle, Clock, Key, Star, XCircle } from 'lucide-react';
 import { BentoPanel, EmptyState, ErrorState, LoadingState, PageHeader, normalizeList } from '@/components/admin/Bento';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import { KeyRequest } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { useAdminSSE } from '@/contexts/AdminSSEContext';
 
-type Tier = 'standard' | 'premium' | 'vip';
+type Tier = 'standard' | 'premium';
 
 interface PendingApproval {
   id: string;
@@ -23,7 +23,6 @@ interface PendingApproval {
 const TIER_META: Record<Tier, { label: string; gradient: string; text: string; icon: React.ReactNode }> = {
   standard: { label: 'Standard', gradient: 'from-[#8E8E93] to-[#AEAEB2]', text: 'text-[#8E8E93]', icon: <Key className="h-4 w-4 text-white" /> },
   premium:  { label: 'Premium',  gradient: 'from-[#0A84FF] to-[#30B0C7]', text: 'text-[#0A84FF]', icon: <Star className="h-4 w-4 text-white" /> },
-  vip:      { label: 'VIP',      gradient: 'from-[#BF5AF2] to-[#D97706]', text: 'text-[#BF5AF2]', icon: <Diamond className="h-4 w-4 text-white" /> },
 };
 
 function TierBadge({ tier }: { tier: Tier }) {
@@ -74,7 +73,7 @@ const KeyRequests: React.FC = () => {
 
   function openApprovalDialog(request: KeyRequest) {
     const raw = request as any;
-    const tier = (['standard', 'premium', 'vip'].includes(raw.tier) ? raw.tier : 'standard') as Tier;
+    const tier = (['standard', 'premium'].includes(raw.tier) ? raw.tier : 'standard') as Tier;
     setPendingApproval({
       id: raw.id || request.id,
       quantity: raw.quantity || request.quantity,
@@ -117,7 +116,7 @@ const KeyRequests: React.FC = () => {
                 {requests.map(request => {
                   const raw = request as any;
                   const pending = raw.status === 'PENDING' || raw.status === 'pending';
-                  const tier = (['standard', 'premium', 'vip'].includes(raw.tier) ? raw.tier : 'standard') as Tier;
+                  const tier = (['standard', 'premium'].includes(raw.tier) ? raw.tier : 'standard') as Tier;
                   return (
                     <TableRow key={request.id}>
                       <TableCell className="font-medium">{(request as any).reseller_name || (request as any).resellerId || '—'}</TableCell>
@@ -149,7 +148,7 @@ const KeyRequests: React.FC = () => {
           <div className="grid gap-3 md:hidden">
             {requests.map(request => {
               const raw2 = request as any;
-              const tier = (['standard', 'premium', 'vip'].includes(raw2.tier) ? raw2.tier : 'standard') as Tier;
+              const tier = (['standard', 'premium'].includes(raw2.tier) ? raw2.tier : 'standard') as Tier;
               return (
                 <BentoPanel key={request.id}>
                   <div className="flex items-center justify-between gap-3">

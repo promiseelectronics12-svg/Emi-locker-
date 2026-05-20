@@ -2,7 +2,7 @@ export interface Device {
   id: string;
   imei: string;
   model: string;
-  lockState: 'UNLOCKED' | 'PARTIAL_LOCK' | 'FULL_LOCK' | 'DECOUPLED';
+  lockState: 'UNLOCKED' | 'FULL_LOCK' | 'DECOUPLED';
   dealerId: string;
   resellerId: string;
   emiScheduleId: string;

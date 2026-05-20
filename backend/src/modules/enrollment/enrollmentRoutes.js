@@ -56,7 +56,7 @@ router.post(
       return !imei1 || imei2 !== imei1;
     })
     .withMessage('IMEI 2 must be valid and different from IMEI 1.'),
-  body('tier').optional().isIn(['standard', 'premium', 'vip']),
+  body('tier').optional().isIn(['standard', 'premium']),
   body('totalAmount').optional({ nullable: true }).isFloat({ min: 0.01 }),
   body('downPayment').optional({ nullable: true }).isFloat({ min: 0 }),
   body('emiAmount').optional({ nullable: true }).isFloat({ min: 0.01 }),

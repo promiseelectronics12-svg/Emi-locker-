@@ -249,7 +249,7 @@ async function startEnrollment({
     throw err;
   }
 
-  const keyTier = ['standard', 'premium', 'vip'].includes(tier) ? tier : 'standard';
+  const keyTier = ['standard', 'premium'].includes(tier) ? tier : 'standard';
   const emiTerms = hasCompleteEmiTerms({ totalAmount, emiAmount, duration, startDate })
     ? normalizeEmiTerms({
         totalAmount,

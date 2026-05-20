@@ -22,8 +22,7 @@ router.get('/stats', asyncHandler(async (req, res) => {
   const [quotaRes, keyRes] = await Promise.all([
     db.query(
       `SELECT COALESCE(quota_standard, 0) AS standard_available,
-              COALESCE(quota_premium,  0) AS premium_available,
-              COALESCE(quota_vip,      0) AS vip_available
+              COALESCE(quota_premium,  0) AS premium_available
        FROM resellers WHERE id = $1`,
       [resellerId]
     ),
@@ -33,8 +32,7 @@ router.get('/stats', asyncHandler(async (req, res) => {
          COUNT(*) FILTER (WHERE status = 'assigned')::int                          AS assigned_keys,
          COUNT(*) FILTER (WHERE status = 'activated')::int                         AS activated_keys,
          COUNT(*) FILTER (WHERE status = 'assigned' AND tier = 'standard')::int    AS standard_assigned,
-         COUNT(*) FILTER (WHERE status = 'assigned' AND tier = 'premium')::int     AS premium_assigned,
-         COUNT(*) FILTER (WHERE status = 'assigned' AND tier = 'vip')::int         AS vip_assigned
+         COUNT(*) FILTER (WHERE status = 'assigned' AND tier = 'premium')::int     AS premium_assigned
        FROM activation_keys
        WHERE reseller_id = $1`,
       [resellerId]
@@ -44,8 +42,7 @@ router.get('/stats', asyncHandler(async (req, res) => {
   // available_keys = sum of per-tier quota
   keys.rows[0].available_keys =
     (keys.rows[0].standard_available || 0) +
-    (keys.rows[0].premium_available  || 0) +
-    (keys.rows[0].vip_available      || 0);
+    (keys.rows[0].premium_available  || 0);
   const requests = await db.query(
     `SELECT COUNT(*) FILTER (WHERE status = 'pending')::int as pending_requests
      FROM key_requests
@@ -299,8 +296,7 @@ router.get('/quota', asyncHandler(async (req, res) => {
     `SELECT COALESCE(monthly_key_quota, monthly_quota, 100) AS monthly_quota,
             COALESCE(used_keys, 0)     AS used_keys,
             COALESCE(quota_standard, 0) AS quota_standard,
-            COALESCE(quota_premium,  0) AS quota_premium,
-            COALESCE(quota_vip,      0) AS quota_vip
+            COALESCE(quota_premium,  0) AS quota_premium
      FROM resellers
      WHERE id = $1`,
     [req.user.id]

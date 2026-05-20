@@ -776,7 +776,7 @@ class AdminDeviceService {
 
       const request = requestResult.rows[0];
       // Tier comes from the reseller's request — admin cannot override it
-      const tier = ['standard', 'premium', 'vip'].includes(request.tier)
+      const tier = ['standard', 'premium'].includes(request.tier)
         ? request.tier
         : 'standard';
 

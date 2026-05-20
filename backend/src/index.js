@@ -36,7 +36,7 @@ const { initLocationModule } = require('./modules/location');
 const { initDecouplingModule, decouplingScheduler } = require('./modules/decoupling');
 const { initKeyCronJobs } = require('./modules/keys/keyScheduler');
 const { initFraudCronJobs } = require('./modules/fraud');
-const { initRiskScheduler } = require('./modules/risk');
+const { initRiskScheduler, isRiskSchedulerActive } = require('./modules/risk');
 
 // Load environment config after imports but before opening network resources.
 validateEnvironment();
@@ -113,7 +113,8 @@ app.get('/health', async (req, res) => {
 
   const schedulers = {
     decouplingCron: decouplingScheduler.isCronActive(),
-    lockScheduler: lockSchedulerService.started === true
+    lockScheduler: lockSchedulerService.started === true,
+    riskScheduler: isRiskSchedulerActive()
   };
 
   const isHealthy = dbStatus === 'connected' && redisStatus === 'connected';

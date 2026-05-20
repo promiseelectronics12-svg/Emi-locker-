@@ -36,6 +36,10 @@ function stopRiskScheduler() {
   logger.info('[RiskEngine] Risk scheduler stopped');
 }
 
+function isActive() {
+  return simScoringTask !== null && lockEvalTask !== null;
+}
+
 // ── SIM missing: update time-escalating weight ───────────────────────────────
 // This replaces the old runSimMissingCheck() which directly locked on SIM missing > 5 min.
 // Now SIM missing is a risk signal only — lock requires compound rule.
@@ -109,6 +113,7 @@ async function _runLockEvaluation() {
 module.exports = {
   initRiskScheduler,
   stopRiskScheduler,
+  isActive,
   _runSignalRescoring,
   _runLockEvaluation,
 };

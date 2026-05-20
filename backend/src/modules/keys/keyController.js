@@ -31,7 +31,7 @@ async function requestKeys(req, res) {
   try {
     const quantity = normalizeQuantity(req.body.quantity);
     const { justification } = req.body;
-    const tier = ['standard', 'premium', 'vip'].includes(req.body.tier)
+    const tier = ['standard', 'premium'].includes(req.body.tier)
       ? req.body.tier
       : 'standard';
     const resellerId = req.user.id;
@@ -260,7 +260,7 @@ async function assignKeys(req, res) {
     const quantity = normalizeQuantity(req.body.quantity);
     const dealerId = req.body.dealerId || req.body.dealer_id;
     const resellerId = req.user.id;
-    const tier = ['standard', 'premium', 'vip'].includes(req.body.tier)
+    const tier = ['standard', 'premium'].includes(req.body.tier)
       ? req.body.tier
       : 'standard';
 
@@ -581,7 +581,7 @@ async function getDealerInventory(req, res) {
 
     // Get dealer quotas
     const dealerResult = await db.query(
-      `SELECT quota_standard, quota_premium, quota_vip
+      `SELECT quota_standard, quota_premium
        FROM dealers WHERE user_id = $1`,
       [dealerId]
     );
@@ -589,9 +589,8 @@ async function getDealerInventory(req, res) {
     const quotas = dealerResult.rows[0] || {
       quota_standard: 500,
       quota_premium: 200,
-      quota_vip: 50
     };
-    const byTier = { standard: {}, premium: {}, vip: {} };
+    const byTier = { standard: {}, premium: {} };
 
     for (const row of keysResult.rows) {
       byTier[row.tier] = {
@@ -616,7 +615,6 @@ async function getDealerInventory(req, res) {
         quota: quotas.quota_premium,
         ...byTier.premium
       },
-      vip: { assigned: 0, activated: 0, revoked: 0, quota: quotas.quota_vip, ...byTier.vip }
     });
   } catch (error) {
     console.error('Get dealer inventory error:', error);

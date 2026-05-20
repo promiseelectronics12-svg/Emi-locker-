@@ -39,7 +39,7 @@ function buildNotification(event: string, data: Record<string, unknown>): AdminN
   const at = new Date().toISOString();
   if (event === 'key_requested') {
     const tier = String(data.tier || 'standard');
-    const tierLabel = tier === 'vip' ? 'VIP' : tier.charAt(0).toUpperCase() + tier.slice(1);
+    const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
     return { id, type: event, at, read: false, data,
       title: 'Key Request', body: `${data.resellerName} requested ${data.quantity} ${tierLabel} keys` };
   }
